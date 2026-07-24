@@ -1,0 +1,93 @@
+package net.vulkanmod112;
+
+/**
+ * Boundary between the game (LWJGL 2 world) and the Vulkan renderer
+ * (LWJGL 3 world, loaded in an isolated classloader). Implementations live in
+ * net.vulkanmod112.vkimpl and must only be instantiated via VulkanLoader.
+ *
+ * No org.lwjgl types may ever appear in these signatures: the two sides see
+ * different, incompatible org.lwjgl.* classes.
+ */
+public interface VulkanBridge {
+
+    /** Initializes the Vulkan instance, device and graphics queue. */
+    void init();
+
+    /** Releases all Vulkan resources. Safe to call more than once. */
+    void destroy();
+
+    boolean isInitialized();
+
+    /** Human-readable summary of the selected GPU, for logs and the F3 screen. */
+    String gpuSummary();
+
+    /**
+     * Renders the demo scene offscreen on the GPU via Vulkan and returns the
+     * frame as tightly packed RGBA8 pixels ({@code width * height * 4} bytes,
+     * top row first). Direct java.nio buffers are safe to pass across the
+     * classloader boundary.
+     */
+    java.nio.ByteBuffer renderDemo(int width, int height);
+
+    /**
+     * Sets up the zero-copy Vulkan→OpenGL image sharing (VRAM image visible
+     * to both APIs, GPU-side semaphore sync). Must be called on the client
+     * thread with the game's GL context current. Returns false when the
+     * drivers lack the required extensions — callers should fall back to
+     * {@link #renderDemo}.
+     */
+    boolean initInterop(int width, int height);
+
+    /** GL texture id of the shared image, or -1 before {@link #initInterop}. */
+    int interopTextureId();
+
+    /**
+     * Renders the next frame into the shared image on the Vulkan queue and
+     * enqueues the GL-side wait; after this call the game may draw the
+     * texture. Client thread only.
+     */
+    void renderInteropFrame(float timeSeconds);
+
+    /** Signals Vulkan that the frame was displayed; call after drawing. */
+    void interopFrameDisplayed();
+
+    /**
+     * Mirrors a game VBO upload into a Vulkan vertex buffer. {@code data} is
+     * a duplicate positioned at the payload; keyed by the GL buffer id.
+     * Client thread only.
+     */
+    void mirrorChunkBuffer(int glBufferId, java.nio.ByteBuffer data);
+
+    /** Frees the Vulkan mirror of a deleted game VBO. */
+    void releaseChunkBuffer(int glBufferId);
+
+    /** One-line mirror statistics for the F3 screen. */
+    String chunkMirrorStats();
+
+    /**
+     * Copies the game's block atlas (a GL texture) into a Vulkan image.
+     * Call on the client thread after texture stitching / resource reloads.
+     */
+    void updateAtlas(int atlasGlTextureId);
+
+    /** Tells the Vulkan side which GL texture holds the 16x16 lightmap. */
+    void setLightmap(int lightmapGlTextureId);
+
+    /**
+     * Hands over the game's CPU-side lightmap colors (256 ARGB ints). Avoids
+     * a per-frame glGetTexImage pipeline stall; the array is read once per
+     * frame at terrain render time.
+     */
+    void updateLightmapData(int[] argb);
+
+    /**
+     * Draws one terrain layer with Vulkan. Layer ordinals follow
+     * BlockRenderLayer: 0 SOLID, 1 CUTOUT_MIPPED, 2 CUTOUT, 3 TRANSLUCENT.
+     * SOLID begins the frame, CUTOUT submits it and composites color+depth
+     * into the game's framebuffer. {@code chunks} packs [glBufferId, x, y, z]
+     * per chunk. Returns true when Vulkan took the layer (GL must skip it).
+     */
+    boolean renderTerrainLayer(int layerOrdinal, int[] chunks, int chunkCount, float[] mvp,
+                               double viewX, double viewY, double viewZ, int fbWidth, int fbHeight);
+
+}
