@@ -31,7 +31,6 @@ public final class VulkanDemoOverlay {
      * The demo triangle proved stages 2–3.1; now it just costs a submit and
      * two semaphore hops per frame. Off unless -Dvulkanmod112.overlay=true.
      */
-    private static final boolean SHOW = Boolean.getBoolean("vulkanmod112.overlay");
 
     private final VulkanBridge bridge;
     private int textureId = -1;
@@ -73,7 +72,7 @@ public final class VulkanDemoOverlay {
     }
 
     private void draw(ScaledResolution resolution) {
-        if (failed || !SHOW) {
+        if (failed || !showOverlay()) {
             return;
         }
         if (interop == null) {
@@ -117,6 +116,10 @@ public final class VulkanDemoOverlay {
                 LOGGER.error("Interop frame handoff failed, overlay disabled", t);
             }
         }
+    }
+
+    private static boolean showOverlay() {
+        return Boolean.getBoolean("vulkanmod112.overlay") || VulkanConfig.isOverlayEnabled();
     }
 
     private void decideRenderPath() {

@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.0] - 2026-07-24
+
+### Added
+
+- OptiFine-style **VulkanMod112 Settings...** entry in Video Settings.
+- Config file at `config/vulkanmod112.cfg`, with live terrain and diagnostic-overlay switches.
+- Render-distance slider from 2 to 64 chunks. The vanilla render-distance limit is raised to 64 on startup.
+
+### Changed
+
+- Documented Prism Launcher installation, MixinBooter runtime dependency, hybrid-GPU requirement and high-distance caveats.
+
 ## [0.1.0] - 2026-07-24
 
 ### Fixed
