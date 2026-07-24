@@ -34,7 +34,6 @@ public final class TerrainHooks {
 
     private static final Logger LOGGER = LogManager.getLogger("VulkanMod112/Terrain");
 
-    private static final boolean ENABLED = !"false".equals(System.getProperty("vulkanmod112.terrain"));
     /** Renderer replacements own the same 1.12 classes as these mixins. */
     private static final String[] INCOMPATIBLE_RENDERER_CLASSES = {
             "optifine.OptiFineForgeTweaker",
@@ -79,7 +78,7 @@ public final class TerrainHooks {
     }
 
     public static String stats() {
-        if (!ENABLED) {
+        if (!terrainEnabled()) {
             return "terrain: off";
         }
         if (broken) {
@@ -93,7 +92,7 @@ public final class TerrainHooks {
 
     /** Returns true when the Vulkan side took the layer and GL must skip it. */
     public static boolean renderChunkLayer(BlockRenderLayer layer, List<RenderChunk> chunks) {
-        if (!ENABLED || broken) {
+        if (!terrainEnabled() || broken) {
             return false;
         }
         if (!checkRendererCompatibility()) {
@@ -126,6 +125,11 @@ public final class TerrainHooks {
             LOGGER.error("Vulkan terrain rendering failed — falling back to vanilla GL permanently", t);
             return false;
         }
+    }
+
+    private static boolean terrainEnabled() {
+        return !"false".equals(System.getProperty("vulkanmod112.terrain"))
+                && VulkanConfig.isTerrainEnabled();
     }
 
     private static boolean checkRendererCompatibility() {

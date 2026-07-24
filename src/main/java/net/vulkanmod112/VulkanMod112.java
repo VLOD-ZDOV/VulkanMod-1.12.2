@@ -19,6 +19,11 @@ public class VulkanMod112 {
     @Mod.EventHandler
     public void preInit(FMLPreInitializationEvent event) {
         LOGGER.info("{} {} starting up", Tags.MOD_NAME, Tags.VERSION);
+        net.vulkanmod112.client.VulkanConfig.load(event.getModConfigurationDirectory());
+        // Vanilla exposes 32 chunks on a sufficiently large 64-bit heap. The
+        // renderer and ViewFrustum themselves support higher values; expose
+        // the 64-chunk option in our video-settings page.
+        net.minecraft.client.settings.GameSettings.Options.RENDER_DISTANCE.setValueMax(64.0F);
         try {
             VulkanBridge vulkan = VulkanLoader.bridge();
             vulkan.init();
