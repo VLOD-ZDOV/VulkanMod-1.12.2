@@ -18,7 +18,7 @@ This is not yet a complete replacement for the modern VulkanMod renderer.
 - Forge 14.23.5.2857 (or compatible 1.12.2 Forge) / Minecraft 1.12.2.
 - MixinBooter 10.7 in the instance `mods` directory when installing the released JAR manually. It is a required runtime dependency; Prism Launcher does not download Gradle dependencies automatically.
 - A 64-bit Windows or Linux Vulkan driver.
-- `GL_EXT_memory_object_fd`, `GL_EXT_semaphore_fd` and matching Vulkan external-memory/semaphore extensions for the terrain path. Without them the mod loads safely but leaves terrain in OpenGL.
+- Matching OpenGL and Vulkan external-memory/semaphore extensions for the terrain path: `GL_EXT_memory_object_fd` / `GL_EXT_semaphore_fd` with `VK_KHR_external_memory_fd` / `VK_KHR_external_semaphore_fd` on Linux, and the `_win32` variants of the same four on Windows. The mod selects the pair for the host platform automatically. Without them it loads safely but leaves terrain in OpenGL.
 
 ## Run and build
 
@@ -37,6 +37,7 @@ Useful JVM properties:
 - `-Dvulkanmod112.debugLoader=true` — print LWJGL loader diagnostics.
 - `-Dvulkanmod112.cull=false` — disable Vulkan terrain backface culling for visual debugging.
 - `-Dvulkanmod112.overlay=true` — show the legacy Vulkan demo overlay.
+- `-Dvulkanmod112.depthBlit=false` — composite depth through the fragment shader instead of `glBlitFramebuffer`; use if depth looks wrong after the change.
 - `-Dvulkanmod112.allowIncompatibleRenderer=true` — test with OptiFine/shader-mod renderer replacements; unsupported and off by default.
 
 ## In-game settings
