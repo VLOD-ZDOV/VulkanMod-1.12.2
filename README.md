@@ -14,9 +14,11 @@ Experimental Vulkan terrain renderer for Minecraft Forge 1.12.2. Minecraft still
 
 This is not yet a complete replacement for the modern VulkanMod renderer.
 
-## Roadmap
+## Current limits
 
-Remaining work, known limits and their priority: [ROADMAP.md](ROADMAP.md).
+- The world's geometry exists twice while this is enabled: once in the game's own OpenGL buffers and once in the Vulkan mirror. On a card with little memory to spare that is what caps the usable render distance, and it depends on how much geometry is actually in view rather than on the distance setting alone. The settings header shows the memory the GPU reports, and the diagnostics log shows what the mirror is using.
+- Chunk building and uploading dominate the frame while the camera moves at high render distances. Every chunk is uploaded twice — once by the game to OpenGL, once here to Vulkan.
+- Translucent terrain, entities, particles, the sky and the GUI are still drawn by vanilla OpenGL.
 
 ## Requirements
 
@@ -71,7 +73,7 @@ every active renderer path, the frame cost breakdown and resource counts.
 
 ## Compatibility and diagnostics
 
-OptiFine and legacy shader mods replace the same renderer classes this mod rewrites. When one of them is installed, the terrain mixins are not registered at all, so the game boots on that renderer while this mod's settings screen and game-side optimisations stay active. Sharing terrain rendering between the two is not possible: the vertex format and pass order differ, and with a shader pack loaded the format changes again. See [ROADMAP.md](ROADMAP.md) section G.
+OptiFine and legacy shader mods replace the same renderer classes this mod rewrites. When one of them is installed, the terrain mixins are not registered at all, so the game boots on that renderer while this mod's settings screen and game-side optimisations stay active. Sharing terrain rendering between the two is not possible: the vertex format and pass order differ, and with a shader pack loaded the format changes again.
 
 Any Forge build for 1.12.2 works; the only hard dependency is MixinBooter 10.7 or newer, which Forge now reports itself if missing.
 

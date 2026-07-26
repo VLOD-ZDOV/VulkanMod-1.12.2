@@ -26,3 +26,6 @@ run
 
 # scratch space, never tracked
 хлам
+
+# internal working docs, not for the repo
+docs
