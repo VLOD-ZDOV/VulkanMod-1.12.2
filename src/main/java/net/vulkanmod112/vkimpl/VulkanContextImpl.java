@@ -360,6 +360,7 @@ public final class VulkanContextImpl implements VulkanBridge {
         if (!Interop.supportedByGL(caps)) {
             throw new IllegalStateException("OpenGL driver lacks " + Interop.glExtensionNames());
         }
+        Interop.requireSameDevice(physicalDevice);
         glCapsReady = true;
     }
 
