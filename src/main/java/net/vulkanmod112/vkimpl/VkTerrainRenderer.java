@@ -201,6 +201,14 @@ final class VkTerrainRenderer {
     /** Hash of the last uploaded lightmap; see beginFrame. */
     private int lightmapHash;
     private boolean lightmapDirty = true;
+    /**
+     * How often the lightmap actually changed, against how many frames were
+     * drawn. The game recomputes it once a tick, so a healthy ratio is about
+     * 20 a second regardless of framerate — which is also why lighting changes
+     * look stepped underwater, where the brightness ramps continuously.
+     */
+    private long lightmapUploads;
+    private long lightmapFrames;
     private int[] lightmapData;
     /**
      * rgb + mode, then start/end/density/unused. Mode 0 means the game has fog
@@ -443,6 +451,12 @@ final class VkTerrainRenderer {
                 .append(" ms, submit+composite ")
                 .append(String.format("%.2f", submitCompositeNanos / (double) Math.max(1, timingSamples()) / 1e6))
                 .append(" ms, GPU ").append(gpuTimeText()).append('\n');
+        sb.append("  lightmap: ").append(lightmapUploads).append(" changes over ")
+                .append(lightmapFrames).append(" frames")
+                .append(lightmapFrames > 0
+                        ? String.format(" (1 per %.1f frames)", lightmapFrames / (double) Math.max(1, lightmapUploads))
+                        : "")
+                .append("; the game recomputes it once a tick, so ~20/s is expected\n");
         sb.append("  index buffer: ").append(quadIndexCapacityQuads).append(" quads")
                 .append(", draw batch ").append(indirectDrawCapacity)
                 .append(", frames in flight ").append(framesInFlight).append('\n');
@@ -552,12 +566,14 @@ final class VkTerrainRenderer {
             // staging and running two layout barriers plus a copy for data
             // the image already holds.
             lightmapDirty = true;
+            lightmapFrames++;
             if (lightmapData != null) {
                 int hash = hashLightmap(lightmapData);
                 if (lightmapImageInitialized && hash == lightmapHash) {
                     lightmapDirty = false;
                 } else {
                     lightmapHash = hash;
+                    lightmapUploads++;
                     writeLightmapStaging(lightmapData);
                 }
             } else {
