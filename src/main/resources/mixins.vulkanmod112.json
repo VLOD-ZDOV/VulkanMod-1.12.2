@@ -12,6 +12,8 @@
     "VertexBufferAccessor",
     "ChunkRenderContainerMixin",
     "VboRenderListMixin",
-    "GuiVideoSettingsMixin"
+    "GuiVideoSettingsMixin",
+    "EntityRenderDistanceMixin",
+    "TileEntityRenderDistanceMixin"
   ]
 }
