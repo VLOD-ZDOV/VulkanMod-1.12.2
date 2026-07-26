@@ -152,6 +152,23 @@ final class VulkanOptions {
                                         mc.gameSettings.saveOptions();
                                     }
                                 })),
+                new VOptionBlock("Textures",
+                        new VSwitchOption("Animated Textures",
+                                "Water, lava, fire, portals and every animated modded block upload a "
+                                        + "new frame every tick, on screen or not. Turning them off is "
+                                        + "a straight win in modpacks; the blocks just stop moving.",
+                                VOption.Impact.MEDIUM, null,
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return VulkanConfig.areAnimationsEnabled();
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        VulkanConfig.setAnimationsEnabled(value);
+                                    }
+                                })),
                 new VOptionBlock("Effects",
                         new VCyclingOption("Particles",
                                 "How many particles the game spawns. Minimal is a large win near "
