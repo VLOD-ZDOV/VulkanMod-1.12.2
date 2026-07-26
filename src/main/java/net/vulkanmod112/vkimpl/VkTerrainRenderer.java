@@ -55,6 +55,8 @@ import org.lwjgl.vulkan.VkPipelineLayoutCreateInfo;
 import org.lwjgl.vulkan.VkPipelineMultisampleStateCreateInfo;
 import org.lwjgl.vulkan.VkPipelineRasterizationStateCreateInfo;
 import org.lwjgl.vulkan.VkPipelineShaderStageCreateInfo;
+import org.lwjgl.vulkan.VkSpecializationInfo;
+import org.lwjgl.vulkan.VkSpecializationMapEntry;
 import org.lwjgl.vulkan.VkPipelineVertexInputStateCreateInfo;
 import org.lwjgl.vulkan.VkPipelineViewportStateCreateInfo;
 import org.lwjgl.vulkan.VkPushConstantRange;
@@ -102,11 +104,16 @@ final class VkTerrainRenderer {
     private static final Logger LOGGER = LogManager.getLogger("VulkanMod112/Terrain");
     private static final int BLOCK_VERTEX_STRIDE = 28;
     private static final int LIGHTMAP_SIZE = 16;
-    private static final int MAX_INDIRECT_DRAWS = 4096;
+    private static final int INITIAL_INDIRECT_DRAWS = 4096;
+    /**
+     * Ceiling on the growth below. 4096 used to be the fixed size, and at
+     * render distance 64 a layer has far more visible chunks than that — the
+     * surplus was dropped, so the world had holes and the GPU was handed less
+     * work than the scene actually contained.
+     */
+    private static final int MAX_INDIRECT_DRAWS = 1 << 18;
     private static final int DRAW_ORIGIN_BYTES = 16;
     private static final int DRAW_COMMAND_BYTES = 20;
-    private static final long DRAW_COMMAND_OFFSET = (long) MAX_INDIRECT_DRAWS * DRAW_ORIGIN_BYTES;
-    private static final long DRAW_BATCH_BYTES = DRAW_COMMAND_OFFSET + (long) MAX_INDIRECT_DRAWS * DRAW_COMMAND_BYTES;
 
     private final VulkanContextImpl ctx;
 
@@ -139,8 +146,22 @@ final class VkTerrainRenderer {
     private final long[] drawBatchMemories = new long[FRAMES_IN_FLIGHT * 3];
     private final long[] drawBatchMapped = new long[FRAMES_IN_FLIGHT * 3];
     private final long[] drawDescriptorSets = new long[FRAMES_IN_FLIGHT * 3];
+    /** Draws each batch buffer can hold; grown to fit the scene, never shrunk. */
+    private int indirectDrawCapacity = INITIAL_INDIRECT_DRAWS;
+    private long drawCommandOffset = (long) INITIAL_INDIRECT_DRAWS * DRAW_ORIGIN_BYTES;
+    private long drawBatchBytes = drawCommandOffset
+            + (long) INITIAL_INDIRECT_DRAWS * DRAW_COMMAND_BYTES;
+    /** Largest layer of the previous frame; the batch is grown to fit it. */
+    private int peakDrawsNeeded;
+    /** Per-layer lookup results, reused across frames. */
+    private VkChunkMirror.Entry[] lookupScratch = new VkChunkMirror.Entry[INITIAL_INDIRECT_DRAWS];
     private long pipelineLayout;
-    private long pipeline;
+    /**
+     * Two specialisations of the same shader modules: index 0 has the alpha
+     * test compiled out for SOLID, index 1 keeps it for the CUTOUT layers.
+     * Index with {@code layerOrdinal == 0 ? 0 : 1}.
+     */
+    private final long[] pipelines = new long[2];
     private long atlasSampler;
     private long lightmapSampler;
 
@@ -322,7 +343,13 @@ final class VkTerrainRenderer {
         ensureBaseResources();
         if (layerOrdinal == 0) {
             ensureTargets(fbWidth, fbHeight);
+            // Sized from the previous frame's largest layer as well, so a growth
+            // step is not spent on SOLID only to be undone by CUTOUT.
+            ensureDrawBatchCapacity(Math.max(chunkCount, peakDrawsNeeded));
+            peakDrawsNeeded = chunkCount;
             beginFrame(mvp, mirror);
+        } else if (chunkCount > peakDrawsNeeded) {
+            peakDrawsNeeded = chunkCount;
         }
         if (!frameOpen) {
             return false; // out-of-order layer call (frame not started): let GL draw it
@@ -385,7 +412,7 @@ final class VkTerrainRenderer {
                 .append(String.format("%.2f", submitCompositeNanos / (double) Math.max(1, timingSamples()) / 1e6))
                 .append(" ms, GPU ").append(gpuTimeText()).append('\n');
         sb.append("  index buffer: ").append(quadIndexCapacityQuads).append(" quads")
-                .append(", draws capped at ").append(MAX_INDIRECT_DRAWS)
+                .append(", draw batch ").append(indirectDrawCapacity)
                 .append(", frames in flight ").append(FRAMES_IN_FLIGHT).append('\n');
         if (glErrorLogged) {
             sb.append("  WARNING: a GL error was reported during composite (see the main log)\n");
@@ -522,7 +549,6 @@ final class VkTerrainRenderer {
                     .pClearValues(clears);
             vkCmdBeginRenderPass(commandBuffer, rpBegin, VK_SUBPASS_CONTENTS_INLINE);
 
-            vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
             vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout,
                     0, stack.longs(descriptorSet), null);
             vkCmdBindIndexBuffer(commandBuffer, quadIndexBuffer, 0, VK_INDEX_TYPE_UINT32);
@@ -554,6 +580,8 @@ final class VkTerrainRenderer {
                             double viewX, double viewY, double viewZ, VkChunkMirror mirror) {
         float cutoff = layerOrdinal == 0 ? 0.0f : (layerOrdinal == 1 ? 0.5f : 0.1f);
         try (MemoryStack stack = stackPush()) {
+            vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                    pipelines[layerOrdinal == 0 ? 0 : 1]);
             // Cutoff changes per layer; per-chunk origins are fetched by the vertex shader.
             ByteBuffer cutoffPush = stack.malloc(4);
             cutoffPush.putFloat(0, cutoff);
@@ -568,9 +596,13 @@ final class VkTerrainRenderer {
             int batchIndex = activeFrameSlot * 3 + layerOrdinal;
             long mapped = drawBatchMapped[batchIndex];
             int drawCount = 0;
+            if (lookupScratch.length < chunkCount) {
+                lookupScratch = new VkChunkMirror.Entry[Integer.highestOneBit(chunkCount) * 2];
+            }
+            // One monitor acquisition for the whole layer, not one per chunk.
+            mirror.findAll(chunks, chunkCount, lookupScratch);
             for (int c = 0; c < chunkCount; c++) {
-                int glId = chunks[c * 4];
-                VkChunkMirror.Entry entry = mirror.find(glId);
+                VkChunkMirror.Entry entry = lookupScratch[c];
                 if (entry == null || entry.size < BLOCK_VERTEX_STRIDE
                         || entry.size % BLOCK_VERTEX_STRIDE != 0) {
                     frameSkipped++;
@@ -581,7 +613,7 @@ final class VkTerrainRenderer {
                     frameSkipped++;
                     continue; // grew mid-frame; drawable next frame
                 }
-                if (drawCount >= MAX_INDIRECT_DRAWS) {
+                if (drawCount >= indirectDrawCapacity) {
                     frameSkipped++;
                     continue;
                 }
@@ -600,7 +632,7 @@ final class VkTerrainRenderer {
                     push.putFloat(8, MemoryUtil.memGetFloat(origin + 8));
                     logDrawInputs(mvp, push, entry);
                 }
-                long command = mapped + DRAW_COMMAND_OFFSET + (long) drawCount * DRAW_COMMAND_BYTES;
+                long command = mapped + drawCommandOffset + (long) drawCount * DRAW_COMMAND_BYTES;
                 MemoryUtil.memPutInt(command, vertexCount / 4 * 6);
                 MemoryUtil.memPutInt(command + 4, 1);
                 MemoryUtil.memPutInt(command + 8, 0);
@@ -610,7 +642,7 @@ final class VkTerrainRenderer {
             if (drawCount != 0) {
                 vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout,
                         0, stack.longs(drawDescriptorSets[batchIndex]), null);
-                vkCmdDrawIndexedIndirect(commandBuffer, drawBatchBuffers[batchIndex], DRAW_COMMAND_OFFSET,
+                vkCmdDrawIndexedIndirect(commandBuffer, drawBatchBuffers[batchIndex], drawCommandOffset,
                         drawCount, DRAW_COMMAND_BYTES);
             }
         }
@@ -1053,7 +1085,7 @@ final class VkTerrainRenderer {
         for (int i = 0; i < drawBatchBuffers.length; i++) {
             VkBufferCreateInfo info = VkBufferCreateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO)
-                    .size(DRAW_BATCH_BYTES)
+                    .size(drawBatchBytes)
                     .usage(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT)
                     .sharingMode(VK_SHARING_MODE_EXCLUSIVE);
             LongBuffer pBuffer = stack.mallocLong(1);
@@ -1072,10 +1104,67 @@ final class VkTerrainRenderer {
             check(vkBindBufferMemory(device(), drawBatchBuffers[i], drawBatchMemories[i], 0),
                     "vkBindBufferMemory(indirect terrain)");
             PointerBuffer mapped = stack.mallocPointer(1);
-            check(vkMapMemory(device(), drawBatchMemories[i], 0, DRAW_BATCH_BYTES, 0, mapped),
+            check(vkMapMemory(device(), drawBatchMemories[i], 0, drawBatchBytes, 0, mapped),
                     "vkMapMemory(indirect terrain)");
             drawBatchMapped[i] = mapped.get(0);
         }
+    }
+
+    private void destroyDrawBatches() {
+        for (int i = 0; i < drawBatchBuffers.length; i++) {
+            if (drawBatchMemories[i] != 0) {
+                vkUnmapMemory(device(), drawBatchMemories[i]);
+                vkDestroyBuffer(device(), drawBatchBuffers[i], null);
+                vkFreeMemory(device(), drawBatchMemories[i], null);
+                drawBatchBuffers[i] = 0;
+                drawBatchMemories[i] = 0;
+                drawBatchMapped[i] = 0;
+            }
+        }
+    }
+
+    /**
+     * Grows the indirect batch so a layer of {@code draws} chunks fits.
+     *
+     * Called before the frame's command buffer is opened, because the old
+     * buffers may still be read by a frame in flight and the descriptor sets
+     * that point at them have to be rewritten.
+     */
+    private void ensureDrawBatchCapacity(int draws) {
+        if (draws <= indirectDrawCapacity || indirectDrawCapacity >= MAX_INDIRECT_DRAWS) {
+            return;
+        }
+        // Headroom, because the visible-chunk count moves with every step.
+        int target = Math.min(MAX_INDIRECT_DRAWS, Integer.highestOneBit(draws) * 2);
+        if (target <= indirectDrawCapacity) {
+            return;
+        }
+        vkDeviceWaitIdle(device());
+        destroyDrawBatches();
+        indirectDrawCapacity = target;
+        drawCommandOffset = (long) target * DRAW_ORIGIN_BYTES;
+        drawBatchBytes = drawCommandOffset + (long) target * DRAW_COMMAND_BYTES;
+        try (MemoryStack stack = stackPush()) {
+            createDrawBatches(stack);
+            // Only binding 2 moved. Rewriting it directly also keeps this
+            // independent of whether the atlas and lightmap are ready, which
+            // updateDescriptors() requires and would otherwise skip — leaving
+            // the sets pointing at buffers that were just destroyed.
+            VkWriteDescriptorSet.Buffer writes =
+                    VkWriteDescriptorSet.calloc(drawDescriptorSets.length, stack);
+            for (int i = 0; i < drawDescriptorSets.length; i++) {
+                VkDescriptorBufferInfo.Buffer bufferInfo = VkDescriptorBufferInfo.calloc(1, stack);
+                bufferInfo.get(0).buffer(drawBatchBuffers[i]).offset(0).range(drawCommandOffset);
+                writes.get(i)
+                        .sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET)
+                        .dstSet(drawDescriptorSets[i]).dstBinding(2).descriptorCount(1)
+                        .descriptorType(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER).pBufferInfo(bufferInfo);
+            }
+            vkUpdateDescriptorSets(device(), writes, null);
+        }
+        LOGGER.info("Indirect draw batches grown to {} draws ({} MiB across {} batches)",
+                target, String.format("%.1f", drawBatchBytes * drawBatchBuffers.length / (1024.0 * 1024.0)),
+                drawBatchBuffers.length);
     }
 
     private void updateDescriptors() {
@@ -1098,7 +1187,7 @@ final class VkTerrainRenderer {
             VkWriteDescriptorSet.Buffer writes = VkWriteDescriptorSet.calloc(drawDescriptorSets.length * 3, stack);
             for (int i = 0; i < drawDescriptorSets.length; i++) {
                 VkDescriptorBufferInfo.Buffer bufferInfo = VkDescriptorBufferInfo.calloc(1, stack);
-                bufferInfo.get(0).buffer(drawBatchBuffers[i]).offset(0).range(DRAW_COMMAND_OFFSET);
+                bufferInfo.get(0).buffer(drawBatchBuffers[i]).offset(0).range(drawCommandOffset);
                 int write = i * 3;
                 writes.get(write)
                         .sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET)
@@ -1164,13 +1253,6 @@ final class VkTerrainRenderer {
         long fragModule = createShaderModule(stack, "vulkanmod112/shaders/terrain.frag.spv");
 
         ByteBuffer entryPoint = stack.UTF8("main");
-        VkPipelineShaderStageCreateInfo.Buffer stages = VkPipelineShaderStageCreateInfo.calloc(2, stack);
-        stages.get(0)
-                .sType(VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO)
-                .stage(VK_SHADER_STAGE_VERTEX_BIT).module(vertModule).pName(entryPoint);
-        stages.get(1)
-                .sType(VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO)
-                .stage(VK_SHADER_STAGE_FRAGMENT_BIT).module(fragModule).pName(entryPoint);
 
         // Vanilla BLOCK vertex format: pos 3f | color 4ub | uv 2f | lightmap 2s = 28 bytes
         VkVertexInputBindingDescription.Buffer binding = VkVertexInputBindingDescription.calloc(1, stack);
@@ -1241,25 +1323,45 @@ final class VkTerrainRenderer {
         check(vkCreatePipelineLayout(device(), layoutInfo, null, pLayout), "vkCreatePipelineLayout(terrain)");
         pipelineLayout = pLayout.get(0);
 
-        VkGraphicsPipelineCreateInfo.Buffer pipelineInfo = VkGraphicsPipelineCreateInfo.calloc(1, stack);
-        pipelineInfo.get(0)
-                .sType(VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO)
-                .pStages(stages)
-                .pVertexInputState(vertexInput)
-                .pInputAssemblyState(inputAssembly)
-                .pViewportState(viewportState)
-                .pRasterizationState(raster)
-                .pMultisampleState(multisample)
-                .pDepthStencilState(depthState)
-                .pColorBlendState(blend)
-                .pDynamicState(dynamic)
-                .layout(pipelineLayout)
-                .renderPass(renderPass)
-                .subpass(0);
-        LongBuffer pPipeline = stack.mallocLong(1);
+        // ALPHA_TEST (constant_id 0) off for SOLID, on for the CUTOUT layers.
+        // Booleans travel as a 32-bit value, like VkBool32.
+        VkSpecializationMapEntry.Buffer specEntry = VkSpecializationMapEntry.calloc(1, stack);
+        specEntry.get(0).constantID(0).offset(0).size(4);
+
+        VkGraphicsPipelineCreateInfo.Buffer pipelineInfo = VkGraphicsPipelineCreateInfo.calloc(2, stack);
+        for (int variant = 0; variant < 2; variant++) {
+            VkSpecializationInfo specInfo = VkSpecializationInfo.calloc(stack)
+                    .pMapEntries(specEntry)
+                    .pData(stack.bytes((byte) variant, (byte) 0, (byte) 0, (byte) 0));
+            VkPipelineShaderStageCreateInfo.Buffer variantStages =
+                    VkPipelineShaderStageCreateInfo.calloc(2, stack);
+            variantStages.get(0)
+                    .sType(VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO)
+                    .stage(VK_SHADER_STAGE_VERTEX_BIT).module(vertModule).pName(entryPoint);
+            variantStages.get(1)
+                    .sType(VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO)
+                    .stage(VK_SHADER_STAGE_FRAGMENT_BIT).module(fragModule).pName(entryPoint)
+                    .pSpecializationInfo(specInfo);
+            pipelineInfo.get(variant)
+                    .sType(VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO)
+                    .pStages(variantStages)
+                    .pVertexInputState(vertexInput)
+                    .pInputAssemblyState(inputAssembly)
+                    .pViewportState(viewportState)
+                    .pRasterizationState(raster)
+                    .pMultisampleState(multisample)
+                    .pDepthStencilState(depthState)
+                    .pColorBlendState(blend)
+                    .pDynamicState(dynamic)
+                    .layout(pipelineLayout)
+                    .renderPass(renderPass)
+                    .subpass(0);
+        }
+        LongBuffer pPipeline = stack.mallocLong(2);
         check(vkCreateGraphicsPipelines(device(), VK_NULL_HANDLE, pipelineInfo, null, pPipeline),
                 "vkCreateGraphicsPipelines(terrain)");
-        pipeline = pPipeline.get(0);
+        pipelines[0] = pPipeline.get(0);
+        pipelines[1] = pPipeline.get(1);
 
         vkDestroyShaderModule(device(), vertModule, null);
         vkDestroyShaderModule(device(), fragModule, null);
@@ -1901,17 +2003,13 @@ final class VkTerrainRenderer {
             quadIndexBuffer = 0;
             quadIndexCapacityQuads = 0;
         }
-        for (int i = 0; i < drawBatchBuffers.length; i++) {
-            if (drawBatchMemories[i] != 0) {
-                vkUnmapMemory(device(), drawBatchMemories[i]);
-                vkDestroyBuffer(device(), drawBatchBuffers[i], null);
-                vkFreeMemory(device(), drawBatchMemories[i], null);
-                drawBatchBuffers[i] = 0;
-                drawBatchMemories[i] = 0;
-                drawBatchMapped[i] = 0;
+        destroyDrawBatches();
+        for (int i = 0; i < pipelines.length; i++) {
+            if (pipelines[i] != 0) {
+                vkDestroyPipeline(device(), pipelines[i], null);
+                pipelines[i] = 0;
             }
         }
-        vkDestroyPipeline(device(), pipeline, null);
         vkDestroyPipelineLayout(device(), pipelineLayout, null);
         vkDestroyRenderPass(device(), renderPass, null);
         vkDestroyDescriptorPool(device(), descriptorPool, null);

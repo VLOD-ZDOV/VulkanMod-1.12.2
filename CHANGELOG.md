@@ -1,6 +1,18 @@
 # Changelog
 
-## [Unreleased]
+## [0.4.0] - unreleased
+
+### Fixed
+
+- Terrain layers no longer stop at 4096 chunks. The indirect batch was a fixed size and everything past it was silently dropped, so at high render distances the world had holes and the GPU was handed less geometry than the scene contained. The batch now grows to fit the largest layer.
+
+### Performance
+
+- The alpha test is compiled out of the SOLID pipeline through a specialisation constant. Its cutoff is 0.0, so the test never fired, but a `discard` anywhere in the shader makes the hardware disable early depth testing for the whole pass — and SOLID is both the bulk of the terrain and the layer with the most overdraw. The CUTOUT layers keep the test, from the same shader modules.
+- Chunk lookups are resolved once per layer instead of once per chunk, and the mirror's index no longer boxes an `Integer` for every one of them. At render distance 64 that was tens of thousands of locked, boxed lookups per frame on the thread that has to finish the frame.
+- The largest mirrored chunk is tracked as it is uploaded instead of being recomputed by scanning every mirrored chunk once a frame.
+
+## [0.3.0] - 2026-07-26
 
 ### Added
 
@@ -16,9 +28,7 @@
 
 - The Video Settings entry point no longer lands on top of the options list; it sits in the free strip above it.
 
-## [0.3.0] - 2026-07-26
-
-### Added
+### Also in 0.3.0
 
 - Windows support for the zero-copy path: external memory and semaphores are exported as Win32 handles there and as file descriptors on Linux, chosen at runtime by a single platform layer. Linux behaviour is unchanged.
 - Block atlas mip levels. The levels Minecraft already builds per sprite are copied into the Vulkan image, and the atlas sampler filters between them, which removes distant-chunk shimmer and cuts texture-cache misses.
@@ -41,7 +51,7 @@
 
 ### Changed
 
-- Documented Prism Launcher installation, MixinBooter runtime dependency, hybrid-GPU requirement and high-distance caveats.
+- Documented manual installation, the MixinBooter runtime dependency, the same-GPU requirement and high-distance caveats.
 
 ## [0.1.0] - 2026-07-24
 
