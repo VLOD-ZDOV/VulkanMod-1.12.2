@@ -344,6 +344,13 @@ public final class VulkanContextImpl implements VulkanBridge {
     public synchronized String diagnosticsReport() {
         StringBuilder sb = new StringBuilder();
         sb.append("  gpu: ").append(gpuSummary).append('\n');
+        try (MemoryStack stack = stackPush()) {
+            VkPhysicalDeviceProperties props = VkPhysicalDeviceProperties.malloc(stack);
+            vkGetPhysicalDeviceProperties(physicalDevice, props);
+            sb.append("  limits: maxMemoryAllocationCount ")
+                    .append(props.limits().maxMemoryAllocationCount() & 0xFFFFFFFFL)
+                    .append(" (the spec only guarantees 4096; the mirror uses one per chunk buffer)\n");
+        }
         sb.append("  interop: ").append(interopCapable ? "external memory/semaphores enabled" : "UNAVAILABLE")
                 .append(", handles: ").append(Interop.WINDOWS ? "win32" : "fd").append('\n');
         sb.append("  mirror: ").append(chunkMirror != null ? chunkMirror.stats() : "not created").append('\n');
