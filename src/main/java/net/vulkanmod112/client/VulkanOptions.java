@@ -244,6 +244,32 @@ final class VulkanOptions {
                                         mc.gameSettings.saveOptions();
                                     }
                                 })),
+                new VOptionBlock("Chunks",
+                        new VSwitchOption("Preload Offscreen Chunks",
+                                "Let chunks behind you be built too. Vanilla only ever schedules "
+                                        + "chunks that are on screen right now, so at high render "
+                                        + "distances the world fills in along whatever you look at, "
+                                        + "and turning around means waiting again. This tops the "
+                                        + "build queue up from the rest of the grid once the visible "
+                                        + "chunks are handled, so they never lose their place in "
+                                        + "line. Costs idle CPU time on the chunk builder threads. "
+                                        + "Be aware of what it means at very high render distances: "
+                                        + "a world that actually finishes loading is a world whose "
+                                        + "geometry is all resident, so video memory will reach what "
+                                        + "the distance really implies instead of only what you have "
+                                        + "looked at.",
+                                Cost.of(Level.MEDIUM, Level.NONE, Level.LOW), null,
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return VulkanConfig.isChunkPreloadEnabled();
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        VulkanConfig.setChunkPreloadEnabled(value);
+                                    }
+                                })),
                 new VOptionBlock("Window",
                         new VRangeOption("Background FPS Limit",
                                 "Framerate while the window is minimised or in the background. With "

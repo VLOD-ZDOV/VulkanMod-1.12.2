@@ -2,6 +2,10 @@
 
 ## [0.5.0] - unreleased
 
+### Added
+
+- Offscreen chunk preloading, on by default. Vanilla flood-fills outward from the player's chunk and ANDs a frustum test into every expansion step, so a chunk that needs rebuilding but is not on screen is never even considered — it is discovered from scratch when the camera turns. At render distance 64 the result is a world that fills in along whatever you look at, and narrowing the field of view makes distant chunks appear because it shrinks the competition. The build queue is now topped up from the rest of the grid, but only once the visible chunks are handled, and by scanning a bounded slice per frame rather than sweeping 266 000 entries. Only the build queue is touched; what gets drawn is still decided by the frustum.
+
 ### Performance
 
 - Chunk uploads go through one shared staging ring instead of a persistently mapped staging buffer per chunk. Every mirrored chunk used to cost a `vkAllocateMemory`, a `vkCreateBuffer` and a `vkMapMemory`, and kept its pinned host copy for as long as the chunk lived — as much pinned system memory as the whole world took in VRAM. At render distance 12 that was already 4321 allocations, past the 4096 the Vulkan spec guarantees; at 64 it was tens of thousands, which is where drivers that hold close to the guarantee simply start failing the allocation.
