@@ -31,7 +31,7 @@ import static org.lwjgl.vulkan.VK10.*;
  * VRAM mirror of the game's world geometry (stage 3.2).
  *
  * Every VBO upload the game performs is copied into a Vulkan vertex buffer
- * keyed by the GL buffer id, so the stage 3.3 terrain renderer can draw the
+ * keyed by a dense mirror slot, so the terrain renderer can draw the
  * exact same geometry without touching OpenGL.
  *
  * All chunks are suballocations of one device-local buffer, and every upload
@@ -61,9 +61,9 @@ final class VkChunkMirror {
         int size;
     }
 
-    /** Lookup for the terrain renderer; null when the game VBO has no mirror. */
-    synchronized Entry find(int glBufferId) {
-        return entries.get(glBufferId);
+    /** Lookup for the terrain renderer; null when that slot has no mirror. */
+    synchronized Entry find(int slot) {
+        return entries.get(slot);
     }
 
     /**
@@ -98,21 +98,23 @@ final class VkChunkMirror {
     }
 
     private final VulkanContextImpl ctx;
-    private final EntryMap entries = new EntryMap();
+    private final EntryTable entries = new EntryTable();
     /** High-water mark behind {@link #maxEntrySize()}. */
     private int largestEntrySize;
 
     /**
-     * Open-addressed int → Entry map.
+     * Dense slot → Entry table.
      *
-     * This replaced a {@code HashMap<Integer, Entry>}: the draw loop resolves
-     * every visible chunk of every layer each frame, and boxing an Integer key
-     * for each of those lookups was showing up as plain waste at high render
-     * distances. GL buffer names are never 0, so 0 doubles as the empty slot.
+     * This replaced an open-addressed hash map keyed by GL buffer name. The
+     * names are handed out by the driver, are not dense, and at render distance
+     * 64 the session accumulates hundreds of thousands of them, so resolving a
+     * visible chunk meant hashing into a table far larger than the live grid
+     * and landing wherever the probe took it. Slots come from
+     * {@code ChunkSlots}, which recycles them, so the table stays about the
+     * size of the chunk grid and a lookup is an array index.
      */
-    private static final class EntryMap {
-        private int[] keys = new int[1024];
-        private Entry[] values = new Entry[1024];
+    private static final class EntryTable {
+        private Entry[] values = new Entry[4096];
         private int size;
 
         int size() {
@@ -123,86 +125,40 @@ final class VkChunkMirror {
             return values;
         }
 
-        private int slotOf(int key) {
-            int mask = keys.length - 1;
-            // Fibonacci hashing: GL buffer names are small consecutive
-            // integers, which the identity hash would cluster badly.
-            int slot = (int) ((key * 0x9E3779B1L) >>> 32) & mask;
-            while (keys[slot] != 0 && keys[slot] != key) {
-                slot = (slot + 1) & mask;
-            }
-            return slot;
+        Entry get(int slot) {
+            Entry[] table = values;
+            return slot >= 0 && slot < table.length ? table[slot] : null;
         }
 
-        Entry get(int key) {
-            if (key == 0) {
-                return null;
+        void put(int slot, Entry value) {
+            if (slot >= values.length) {
+                int length = values.length;
+                while (slot >= length) {
+                    length *= 2;
+                }
+                Entry[] grown = new Entry[length];
+                System.arraycopy(values, 0, grown, 0, values.length);
+                values = grown;
             }
-            return values[slotOf(key)];
-        }
-
-        /** Places a key without considering growth; never reallocates. */
-        private void insert(int key, Entry value) {
-            int slot = slotOf(key);
-            if (keys[slot] == 0) {
-                keys[slot] = key;
+            if (values[slot] == null) {
                 size++;
             }
             values[slot] = value;
         }
 
-        void put(int key, Entry value) {
-            insert(key, value);
-            if (size * 2 >= keys.length) {
-                grow();
-            }
-        }
-
-        Entry remove(int key) {
-            if (key == 0) {
-                return null;
-            }
-            int slot = slotOf(key);
-            if (keys[slot] == 0) {
+        Entry remove(int slot) {
+            if (slot < 0 || slot >= values.length) {
                 return null;
             }
             Entry previous = values[slot];
-            keys[slot] = 0;
-            values[slot] = null;
-            size--;
-            // Backward-shift deletion: anything that probed past this slot has
-            // to be reinserted, or it becomes unreachable. Reinsertion cannot
-            // grow the table (size never rises above what it was), so the
-            // arrays stay put while this loop walks them.
-            int mask = keys.length - 1;
-            int next = (slot + 1) & mask;
-            while (keys[next] != 0) {
-                int movedKey = keys[next];
-                Entry movedValue = values[next];
-                keys[next] = 0;
-                values[next] = null;
+            if (previous != null) {
+                values[slot] = null;
                 size--;
-                insert(movedKey, movedValue);
-                next = (next + 1) & mask;
             }
             return previous;
         }
 
-        private void grow() {
-            int[] oldKeys = keys;
-            Entry[] oldValues = values;
-            keys = new int[oldKeys.length * 2];
-            values = new Entry[oldValues.length * 2];
-            size = 0;
-            for (int i = 0; i < oldKeys.length; i++) {
-                if (oldKeys[i] != 0) {
-                    insert(oldKeys[i], oldValues[i]);
-                }
-            }
-        }
-
         void clear() {
-            java.util.Arrays.fill(keys, 0);
             java.util.Arrays.fill(values, null);
             size = 0;
         }
@@ -381,12 +337,12 @@ final class VkChunkMirror {
         return ctx.getDevice();
     }
 
-    synchronized void upload(int glBufferId, ByteBuffer data) {
+    synchronized void upload(int slot, ByteBuffer data) {
         int size = data.remaining();
-        Entry entry = entries.get(glBufferId);
+        Entry entry = entries.get(slot);
         if (entry != null && entry.capacity < size) {
             retired.add(new Retired(entry, frameStamp));
-            entries.remove(glBufferId);
+            entries.remove(slot);
             entry = null;
         }
         if (entry == null) {
@@ -394,7 +350,7 @@ final class VkChunkMirror {
             // reserve is not divisible by 28; without this alignment the VBO
             // following an empty/small one reads shifted UV/color attributes.
             entry = createEntry(alignVertexCapacity(Math.max(size, 4096)));
-            entries.put(glBufferId, entry);
+            entries.put(slot, entry);
         }
         if (size > 0) {
             ensureStagingRing(size);
@@ -412,12 +368,12 @@ final class VkChunkMirror {
         }
         uploadCount++;
         if (uploadCount <= 3) {
-            LOGGER.info("Mirrored VBO {} into Vulkan buffer ({} bytes)", glBufferId, size);
+            LOGGER.info("Mirrored VBO {} into Vulkan buffer ({} bytes)", slot, size);
         }
     }
 
-    synchronized void release(int glBufferId) {
-        Entry entry = entries.remove(glBufferId);
+    synchronized void release(int slot) {
+        Entry entry = entries.remove(slot);
         if (entry != null) {
             totalBytes -= entry.size;
             retired.add(new Retired(entry, frameStamp));

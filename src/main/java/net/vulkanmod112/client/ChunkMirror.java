@@ -15,7 +15,7 @@ public final class ChunkMirror {
     private ChunkMirror() {
     }
 
-    public static void onBufferData(int glBufferId, ByteBuffer data) {
+    public static void onBufferData(int slot, ByteBuffer data) {
         VulkanBridge bridge = VulkanLoader.bridgeIfReady();
         if (bridge != null && bridge.isInitialized()) {
             // Passed straight through rather than duplicated. This runs for
@@ -25,14 +25,14 @@ public final class ChunkMirror {
             // remaining count and touches neither position nor limit, which
             // the bridge documents as a requirement, so the GL upload that
             // follows still sees exactly what it expects.
-            bridge.mirrorChunkBuffer(glBufferId, data);
+            bridge.mirrorChunkBuffer(slot, data);
         }
     }
 
-    public static void onBufferDelete(int glBufferId) {
+    public static void onBufferDelete(int slot) {
         VulkanBridge bridge = VulkanLoader.bridgeIfReady();
         if (bridge != null && bridge.isInitialized()) {
-            bridge.releaseChunkBuffer(glBufferId);
+            bridge.releaseChunkBuffer(slot);
         }
     }
 

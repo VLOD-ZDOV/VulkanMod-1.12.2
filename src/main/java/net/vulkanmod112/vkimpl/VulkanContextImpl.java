@@ -336,20 +336,20 @@ public final class VulkanContextImpl implements VulkanBridge {
     }
 
     @Override
-    public synchronized void mirrorChunkBuffer(int glBufferId, java.nio.ByteBuffer data) {
+    public synchronized void mirrorChunkBuffer(int slot, java.nio.ByteBuffer data) {
         if (!initialized) {
             return;
         }
         if (chunkMirror == null) {
             chunkMirror = new VkChunkMirror(this);
         }
-        chunkMirror.upload(glBufferId, data);
+        chunkMirror.upload(slot, data);
     }
 
     @Override
-    public synchronized void releaseChunkBuffer(int glBufferId) {
+    public synchronized void releaseChunkBuffer(int slot) {
         if (chunkMirror != null) {
-            chunkMirror.release(glBufferId);
+            chunkMirror.release(slot);
         }
     }
 

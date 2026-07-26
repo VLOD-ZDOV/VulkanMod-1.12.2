@@ -9,7 +9,6 @@
   "server": [],
   "client": [
     "VertexBufferMixin",
-    "VertexBufferAccessor",
     "ChunkRenderContainerMixin",
     "VboRenderListMixin",
     "ChunkPreloadMixin",

@@ -66,10 +66,10 @@ public interface VulkanBridge {
      * the game uploads it to OpenGL immediately afterwards. Implementations
      * must treat it as read-only and must not change its position or limit.
      */
-    void mirrorChunkBuffer(int glBufferId, java.nio.ByteBuffer data);
+    void mirrorChunkBuffer(int slot, java.nio.ByteBuffer data);
 
     /** Frees the Vulkan mirror of a deleted game VBO. */
-    void releaseChunkBuffer(int glBufferId);
+    void releaseChunkBuffer(int slot);
 
     /** One-line mirror statistics for the F3 screen. */
     String chunkMirrorStats();
@@ -112,7 +112,7 @@ public interface VulkanBridge {
      * Draws one terrain layer with Vulkan. Layer ordinals follow
      * BlockRenderLayer: 0 SOLID, 1 CUTOUT_MIPPED, 2 CUTOUT, 3 TRANSLUCENT.
      * SOLID begins the frame, CUTOUT submits it and composites color+depth
-     * into the game's framebuffer. {@code chunks} packs [glBufferId, x, y, z]
+     * into the game's framebuffer. {@code chunks} packs [slot, x, y, z]
      * per chunk. Returns true when Vulkan took the layer (GL must skip it).
      */
     boolean renderTerrainLayer(int layerOrdinal, int[] chunks, int chunkCount, float[] mvp,

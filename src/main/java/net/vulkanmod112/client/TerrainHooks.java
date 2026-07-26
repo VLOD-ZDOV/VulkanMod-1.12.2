@@ -9,7 +9,6 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraftforge.fml.relauncher.ReflectionHelper;
 import net.vulkanmod112.VulkanBridge;
 import net.vulkanmod112.VulkanLoader;
-import net.vulkanmod112.mixin.VertexBufferAccessor;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.lwjgl.BufferUtils;
@@ -60,7 +59,7 @@ public final class TerrainHooks {
     private static final float[] FOG = new float[7];
     private static final FloatBuffer FOG_COLOR = BufferUtils.createFloatBuffer(16);
 
-    /** Packed per chunk: glBufferId, blockX, blockY, blockZ. */
+    /** Packed per chunk: mirror slot, blockX, blockY, blockZ. */
     private static int[] chunkData = new int[1024];
 
     private static long framesDrawn;
@@ -192,7 +191,13 @@ public final class TerrainHooks {
                 continue;
             }
             BlockPos pos = chunk.getPosition();
-            chunkData[i++] = ((VertexBufferAccessor) (Object) vb).vulkanmod112$getGlBufferId();
+            int slot = ((VertexBufferSlot) (Object) vb).vulkanmod112$slot();
+            if (slot == ChunkSlots.UNASSIGNED) {
+                // Built but never uploaded yet: nothing to draw from the
+                // mirror this frame, and the chunk comes back next frame.
+                continue;
+            }
+            chunkData[i++] = slot;
             chunkData[i++] = pos.getX();
             chunkData[i++] = pos.getY();
             chunkData[i++] = pos.getZ();
