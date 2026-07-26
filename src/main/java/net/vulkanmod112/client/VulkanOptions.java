@@ -265,6 +265,27 @@ final class VulkanOptions {
                                     }
                                 })),
                 new VOptionBlock("Chunks",
+                        new VRangeOption("Chunk Build Threads",
+                                "How many threads turn blocks into geometry. Vanilla sizes this pool "
+                                        + "from the heap rather than from the CPU and takes the smaller "
+                                        + "of the two, so a large processor builds chunks with part of "
+                                        + "itself idle. Building — not drawing — is what the frame waits "
+                                        + "for at long render distances. Extra threads share the same "
+                                        + "build buffers, whose count the heap still decides, so past a "
+                                        + "point more of them simply wait. Applies on the next world load.",
+                                Cost.of(Level.HIGH, Level.NONE, Level.LOW), "Next world load",
+                                0, 64, 1, " threads", "Vanilla",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getChunkBuildThreads();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setChunkBuildThreads(value);
+                                    }
+                                }),
                         new VSwitchOption("Preload Offscreen Chunks",
                                 "Let chunks behind you be built too. Vanilla only ever schedules "
                                         + "chunks that are on screen right now, so at high render "

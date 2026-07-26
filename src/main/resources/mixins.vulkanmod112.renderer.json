@@ -12,6 +12,7 @@
     "VertexBufferAccessor",
     "ChunkRenderContainerMixin",
     "VboRenderListMixin",
-    "ChunkPreloadMixin"
+    "ChunkPreloadMixin",
+    "ChunkBuildThreadsMixin"
   ]
 }

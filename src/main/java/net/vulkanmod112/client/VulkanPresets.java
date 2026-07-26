@@ -52,6 +52,11 @@ public final class VulkanPresets {
         // bottleneck, which is what this preset assumes.
         VulkanConfig.setFramesInFlight(3);
         VulkanConfig.setGeometryBudgetMiB(0);
+        // Chunk building is what the frame waits for at long render distances,
+        // and vanilla sizes that thread pool from the heap rather than from the
+        // CPU. A preset named for performance is the right place to take the
+        // core count seriously; the shipped default still leaves it alone.
+        VulkanConfig.setChunkBuildThreads(VulkanConfig.coresForChunkBuilding());
         mc.gameSettings.particleSetting = 2;
         mc.gameSettings.entityShadows = false;
         boolean wasFancy = mc.gameSettings.fancyGraphics;

@@ -36,6 +36,16 @@ public final class VulkanConfig {
      * that is not a price to charge anyone who did not ask for it.
      */
     static final boolean DEF_CHUNK_PRELOAD = false;
+    /**
+     * 0 = leave vanilla's own count alone.
+     *
+     * Vanilla derives the number of chunk-building threads from the heap
+     * rather than from the CPU, and takes whichever is smaller. On a 4 GiB
+     * heap that ceiling lands at 24 threads no matter how many cores the
+     * machine has, so a large CPU sits partly idle while chunk building is
+     * measurably what the frame is waiting for.
+     */
+    static final int DEF_CHUNK_BUILD_THREADS = 0;
     static final boolean DEF_FOG = true;
     static final boolean DEF_ZOOM = true;
     /** Stored as an integer so it fits the config and the slider; 4 = quarter FOV. */
@@ -57,6 +67,7 @@ public final class VulkanConfig {
     private static int geometryBudgetMiB = DEF_GEOMETRY_BUDGET;
     private static int framesInFlight = DEF_FRAMES_IN_FLIGHT;
     private static boolean chunkPreloadEnabled = DEF_CHUNK_PRELOAD;
+    private static int chunkBuildThreads = DEF_CHUNK_BUILD_THREADS;
     private static boolean fogEnabled = DEF_FOG;
     private static boolean zoomEnabled = DEF_ZOOM;
     private static int zoomFactor = DEF_ZOOM_FACTOR;
@@ -98,6 +109,11 @@ public final class VulkanConfig {
                 "Let chunks outside the view be rebuilt. Vanilla only ever schedules chunks that are "
                         + "currently on screen, so at high render distances the world fills in along "
                         + "whatever you are looking at.");
+        chunkBuildThreads = config.getInt("chunkBuildThreads", CATEGORY_OPTIMIZATION,
+                DEF_CHUNK_BUILD_THREADS, 0, 64,
+                "How many threads build chunk geometry. 0 keeps vanilla's count, which it derives from "
+                        + "the heap rather than the CPU and so caps well below a large core count. "
+                        + "Takes effect on the next world load.");
         fogEnabled = config.getBoolean("fog", CATEGORY_GENERAL, DEF_FOG,
                 "Fade Vulkan terrain into the distance the way the rest of the scene already does. "
                         + "Off leaves the world ending in a hard edge, which is a little faster.");
@@ -128,6 +144,7 @@ public final class VulkanConfig {
         setGeometryBudgetMiB(DEF_GEOMETRY_BUDGET);
         setFramesInFlight(DEF_FRAMES_IN_FLIGHT);
         setChunkPreloadEnabled(DEF_CHUNK_PRELOAD);
+        setChunkBuildThreads(DEF_CHUNK_BUILD_THREADS);
         setFogEnabled(DEF_FOG);
         setZoomEnabled(DEF_ZOOM);
         setZoomFactor(DEF_ZOOM_FACTOR);
@@ -140,6 +157,26 @@ public final class VulkanConfig {
     public static void setChunkPreloadEnabled(boolean value) {
         chunkPreloadEnabled = value;
         store(CATEGORY_OPTIMIZATION, "chunkPreload", value);
+    }
+
+    /** Configured thread count, or 0 to leave vanilla's own choice alone. */
+    public static int getChunkBuildThreads() {
+        return chunkBuildThreads;
+    }
+
+    public static void setChunkBuildThreads(int value) {
+        chunkBuildThreads = value;
+        store(CATEGORY_OPTIMIZATION, "chunkBuildThreads", value);
+    }
+
+    /**
+     * What the presets store instead of an "auto" sentinel: one thread per
+     * core. Vanilla already treats the core count as its own upper bound and
+     * only ever lands below it, so this can never be a downgrade — and a
+     * concrete number is what the slider then shows.
+     */
+    public static int coresForChunkBuilding() {
+        return Math.max(1, Runtime.getRuntime().availableProcessors());
     }
 
     public static boolean isFogEnabled() {
