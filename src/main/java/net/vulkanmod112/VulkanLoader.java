@@ -36,8 +36,34 @@ public final class VulkanLoader {
         return bridge;
     }
 
+    /**
+     * Highest Java feature release the bundled LWJGL 3.3 understands.
+     *
+     * LWJGL installs its GL function tables by patching the JVM's JNI function
+     * table, and it recognises the layout only for JVMs it knows. On a newer
+     * one it warns and carries on with a corrupted table: OpenGL calls then
+     * return nonsense — the device UUID query answers with its own arguments —
+     * and the JVM segfaults soon after, in our observation inside a JIT
+     * compiler thread, far from anything this mod wrote. Vulkan is unaffected,
+     * because its entry points hang off the instance and device objects rather
+     * than that table, so the failure looks like a driver problem rather than
+     * what it is.
+     *
+     * Minecraft 1.12.2 runs on Java 8, so this only ever triggers on a
+     * modernised platform such as Cleanroom, where we decline cleanly and the
+     * game keeps its own renderer.
+     */
+    private static final int MAX_SUPPORTED_JAVA = 21;
+
     public static synchronized VulkanBridge bridge() {
         if (bridge == null) {
+            int java = javaFeatureVersion();
+            if (java > MAX_SUPPORTED_JAVA) {
+                throw new IllegalStateException("Java " + java + " is newer than the bundled LWJGL 3.3 supports"
+                        + " (up to " + MAX_SUPPORTED_JAVA + "). Loading it here would corrupt the JVM's JNI"
+                        + " function table and crash the process, so the Vulkan renderer stays off and the"
+                        + " game renders on OpenGL.");
+            }
             try {
                 URLClassLoader loader = new IsolatingLoader(collectUrls(), VulkanLoader.class.getClassLoader());
                 Class<?> impl = Class.forName(IMPL_CLASS, true, loader);
@@ -51,6 +77,20 @@ public final class VulkanLoader {
             }
         }
         return bridge;
+    }
+
+    /**
+     * The Java feature release, read without Runtime.version(), which does not
+     * exist on the Java 8 this mod normally runs on.
+     */
+    private static int javaFeatureVersion() {
+        String spec = System.getProperty("java.specification.version", "1.8");
+        try {
+            // "1.8" on Java 8, plain "21" and up afterwards
+            return spec.startsWith("1.") ? Integer.parseInt(spec.substring(2)) : Integer.parseInt(spec);
+        } catch (NumberFormatException e) {
+            return 8;
+        }
     }
 
     private static URL[] collectUrls() {
