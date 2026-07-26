@@ -112,6 +112,15 @@ public final class Zoom {
                 progress = Math.min(target, progress + perSecond);
             } else if (progress > target) {
                 progress = Math.max(target, progress - perSecond);
+                // Widening the view has to invalidate the visible-chunk list.
+                // RenderGlobal rebuilds it only when the player moves or turns
+                // — the field of view is not in that condition at all — so
+                // zooming in, letting it rebuild against the narrow frustum,
+                // then zooming out left the world drawn as the narrow cone it
+                // was during the zoom until something else made the player
+                // turn. Narrowing needs no such call: the existing list is
+                // then a superset of what is visible.
+                mc.renderGlobal.setDisplayListEntitiesDirty();
             }
 
             if (progress <= 0.0f) {
