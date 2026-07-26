@@ -13,6 +13,10 @@ Experimental Vulkan terrain renderer for Minecraft Forge 1.12.2. Minecraft still
 
 This is not yet a complete replacement for the modern VulkanMod renderer.
 
+## Roadmap
+
+Remaining work, known limits and their priority: [ROADMAP.md](ROADMAP.md).
+
 ## Requirements
 
 - Forge 14.23.5.2857 (or compatible 1.12.2 Forge) / Minecraft 1.12.2.

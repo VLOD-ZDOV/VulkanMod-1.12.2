@@ -1,5 +1,7 @@
 package net.vulkanmod112.vkimpl;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.lwjgl.PointerBuffer;
 import org.lwjgl.opengl.EXTMemoryObject;
 import org.lwjgl.opengl.EXTMemoryObjectFD;
@@ -9,7 +11,9 @@ import org.lwjgl.opengl.EXTSemaphoreFD;
 import org.lwjgl.opengl.EXTSemaphoreWin32;
 import org.lwjgl.opengl.GL11C;
 import org.lwjgl.opengl.GLCapabilities;
+import org.lwjgl.system.JNI;
 import org.lwjgl.system.MemoryStack;
+import org.lwjgl.system.windows.Kernel32;
 import org.lwjgl.vulkan.KHRExternalMemoryFd;
 import org.lwjgl.vulkan.KHRExternalMemoryWin32;
 import org.lwjgl.vulkan.KHRExternalSemaphoreFd;
@@ -39,6 +43,8 @@ import static org.lwjgl.vulkan.VK11.VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN
  */
 final class Interop {
 
+    private static final Logger LOGGER = LogManager.getLogger("VulkanMod112/Interop");
+
     static final boolean WINDOWS =
             System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
 
@@ -60,6 +66,10 @@ final class Interop {
             "VK_KHR_external_memory_win32",
             "VK_KHR_external_semaphore_win32"
     };
+
+    private static final long CLOSE_HANDLE = WINDOWS
+            ? Kernel32.getLibrary().getFunctionAddress("CloseHandle")
+            : 0L;
 
     private Interop() {
     }
@@ -111,6 +121,7 @@ final class Interop {
                     "vkGetMemoryWin32HandleKHR");
             EXTMemoryObjectWin32.glImportMemoryWin32HandleEXT(memObj, size,
                     EXTMemoryObjectWin32.GL_HANDLE_TYPE_OPAQUE_WIN32_EXT, pHandle.get(0));
+            closeHandle(pHandle.get(0));
         } else {
             VkMemoryGetFdInfoKHR info = VkMemoryGetFdInfoKHR.calloc(stack)
                     .sType(KHRExternalMemoryFd.VK_STRUCTURE_TYPE_MEMORY_GET_FD_INFO_KHR)
@@ -140,6 +151,7 @@ final class Interop {
                     "vkGetSemaphoreWin32HandleKHR");
             EXTSemaphoreWin32.glImportSemaphoreWin32HandleEXT(glSem,
                     EXTSemaphoreWin32.GL_HANDLE_TYPE_OPAQUE_WIN32_EXT, pHandle.get(0));
+            closeHandle(pHandle.get(0));
         } else {
             VkSemaphoreGetFdInfoKHR info = VkSemaphoreGetFdInfoKHR.calloc(stack)
                     .sType(KHRExternalSemaphoreFd.VK_STRUCTURE_TYPE_SEMAPHORE_GET_FD_INFO_KHR)
@@ -152,6 +164,27 @@ final class Interop {
                     EXTSemaphoreFD.GL_HANDLE_TYPE_OPAQUE_FD_EXT, pFd.get(0));
         }
         return glSem;
+    }
+
+    /**
+     * Releases an exported Win32 handle once it has been imported.
+     *
+     * Unlike a file descriptor on Linux, which GL takes ownership of, a Win32
+     * handle stays ours after the import: every one we forget to close leaks
+     * for the lifetime of the process. LWJGL has no CloseHandle binding, so it
+     * is called through the kernel32 the loader already holds.
+     */
+    private static void closeHandle(long handle) {
+        if (handle == 0L) {
+            return;
+        }
+        if (CLOSE_HANDLE == 0L) {
+            LOGGER.warn("CloseHandle unavailable; exported handle {} leaked", handle);
+            return;
+        }
+        if (JNI.callPI(handle, CLOSE_HANDLE) == 0) {
+            LOGGER.warn("CloseHandle failed for exported handle {}", handle);
+        }
     }
 
     private static void check(int result, String what) {
