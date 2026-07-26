@@ -10,6 +10,15 @@ package net.vulkanmod112.client;
  */
 public interface VertexBufferSlot {
 
-    /** The mirror slot, or {@link ChunkSlots#UNASSIGNED} if never uploaded. */
+    /** The mirror slot, or {@link ChunkSlots#UNASSIGNED} if none yet. */
     int vulkanmod112$slot();
+
+    /**
+     * The mirror slot, assigning one if this buffer has none.
+     *
+     * Callable from the render thread and from the chunk builder threads, so
+     * it has to be atomic: a plain check-then-assign would let two threads
+     * take a slot each for the same buffer and leak one of them.
+     */
+    int vulkanmod112$slotOrAssign();
 }

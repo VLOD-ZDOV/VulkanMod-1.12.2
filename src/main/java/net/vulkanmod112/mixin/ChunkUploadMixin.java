@@ -8,7 +8,6 @@ import net.minecraft.client.renderer.chunk.RenderChunk;
 import net.minecraft.client.renderer.vertex.VertexBuffer;
 import net.minecraft.util.BlockRenderLayer;
 import net.vulkanmod112.client.ChunkMirror;
-import net.vulkanmod112.client.ChunkSlots;
 import net.vulkanmod112.client.VertexBufferSlot;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -37,10 +36,11 @@ import com.google.common.util.concurrent.ListenableFuture;
  * - the mirror refuses whenever its fast path is unavailable, and then the
  *   render thread does exactly what it did before, so nothing depends on this
  *   succeeding;
- * - a buffer with no slot yet is left alone. Slots are handed out on the render
- *   thread during the first upload, and a chunk's VertexBuffer outlives its
- *   rebuilds, so this costs one missed copy per buffer ever rather than one per
- *   rebuild.
+ * - a buffer with no slot yet gets one here. Leaving that to the render thread
+ *   looked harmless, since a chunk's VertexBuffer outlives its rebuilds — but
+ *   flying into unexplored terrain is precisely the case where almost every
+ *   upload is a buffer's first, and it took the copies that actually mattered
+ *   back onto the render thread. Measured at 0.3% of uploads mirrored off it.
  */
 @Mixin(ChunkRenderDispatcher.class)
 public abstract class ChunkUploadMixin {
@@ -59,10 +59,8 @@ public abstract class ChunkUploadMixin {
         if (vertexBuffer == null) {
             return;
         }
-        int slot = ((VertexBufferSlot) (Object) vertexBuffer).vulkanmod112$slot();
-        if (slot == ChunkSlots.UNASSIGNED) {
-            return;
-        }
-        ChunkMirror.onWorkerBuild(slot, builder.getByteBuffer());
+        ChunkMirror.onWorkerBuild(
+                ((VertexBufferSlot) (Object) vertexBuffer).vulkanmod112$slotOrAssign(),
+                builder.getByteBuffer());
     }
 }

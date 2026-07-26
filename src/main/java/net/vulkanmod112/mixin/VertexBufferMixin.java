@@ -39,20 +39,32 @@ public abstract class VertexBufferMixin implements VertexBufferSlot {
         return vulkanmod112$slot;
     }
 
-    @Inject(method = "bufferData", at = @At("HEAD"))
-    private void vulkanmod112$mirrorUpload(ByteBuffer data, CallbackInfo ci) {
+    @Override
+    public synchronized int vulkanmod112$slotOrAssign() {
         if (vulkanmod112$slot == ChunkSlots.UNASSIGNED) {
             vulkanmod112$slot = ChunkSlots.allocate();
         }
-        ChunkMirror.onBufferData(vulkanmod112$slot, data);
+        return vulkanmod112$slot;
+    }
+
+    @Inject(method = "bufferData", at = @At("HEAD"))
+    private void vulkanmod112$mirrorUpload(ByteBuffer data, CallbackInfo ci) {
+        ChunkMirror.onBufferData(vulkanmod112$slotOrAssign(), data);
     }
 
     @Inject(method = "deleteGlBuffers", at = @At("HEAD"))
     private void vulkanmod112$mirrorDelete(CallbackInfo ci) {
-        if (vulkanmod112$slot != ChunkSlots.UNASSIGNED) {
-            ChunkMirror.onBufferDelete(vulkanmod112$slot);
-            ChunkSlots.release(vulkanmod112$slot);
+        int slot;
+        synchronized (this) {
+            slot = vulkanmod112$slot;
             vulkanmod112$slot = ChunkSlots.UNASSIGNED;
+        }
+        if (slot != ChunkSlots.UNASSIGNED) {
+            // Order matters: the mirror drops any copy a builder staged for
+            // this slot and bumps its epoch, so a builder still copying cannot
+            // publish into it, and only then does the slot go back for reuse.
+            ChunkMirror.onBufferDelete(slot);
+            ChunkSlots.release(slot);
         }
     }
 
