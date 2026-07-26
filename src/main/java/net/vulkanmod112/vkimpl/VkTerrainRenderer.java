@@ -4,16 +4,13 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.lwjgl.PointerBuffer;
 import org.lwjgl.opengl.EXTMemoryObject;
-import org.lwjgl.opengl.EXTMemoryObjectFD;
 import org.lwjgl.opengl.EXTSemaphore;
-import org.lwjgl.opengl.EXTSemaphoreFD;
 import org.lwjgl.opengl.GL11C;
 import org.lwjgl.opengl.GL13C;
 import org.lwjgl.opengl.GL20C;
+import org.lwjgl.opengl.GL30C;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
-import org.lwjgl.vulkan.KHRExternalMemoryFd;
-import org.lwjgl.vulkan.KHRExternalSemaphoreFd;
 import org.lwjgl.vulkan.VkAttachmentDescription;
 import org.lwjgl.vulkan.VkAttachmentReference;
 import org.lwjgl.vulkan.VkBufferCreateInfo;
@@ -36,6 +33,7 @@ import org.lwjgl.vulkan.VkExportSemaphoreCreateInfo;
 import org.lwjgl.vulkan.VkExtent2D;
 import org.lwjgl.vulkan.VkExternalMemoryImageCreateInfo;
 import org.lwjgl.vulkan.VkFenceCreateInfo;
+import org.lwjgl.vulkan.VkFormatProperties;
 import org.lwjgl.vulkan.VkFramebufferCreateInfo;
 import org.lwjgl.vulkan.VkGraphicsPipelineCreateInfo;
 import org.lwjgl.vulkan.VkImageCreateInfo;
@@ -43,9 +41,11 @@ import org.lwjgl.vulkan.VkImageMemoryBarrier;
 import org.lwjgl.vulkan.VkImageViewCreateInfo;
 import org.lwjgl.vulkan.VkMemoryAllocateInfo;
 import org.lwjgl.vulkan.VkMemoryDedicatedAllocateInfo;
-import org.lwjgl.vulkan.VkMemoryGetFdInfoKHR;
 import org.lwjgl.vulkan.VkMemoryRequirements;
 import org.lwjgl.vulkan.VkPhysicalDeviceMemoryProperties;
+import org.lwjgl.vulkan.VkPhysicalDeviceProperties;
+import org.lwjgl.vulkan.VkQueryPoolCreateInfo;
+import org.lwjgl.vulkan.VkQueueFamilyProperties;
 import org.lwjgl.vulkan.VkPipelineColorBlendAttachmentState;
 import org.lwjgl.vulkan.VkPipelineColorBlendStateCreateInfo;
 import org.lwjgl.vulkan.VkPipelineDepthStencilStateCreateInfo;
@@ -63,7 +63,6 @@ import org.lwjgl.vulkan.VkRenderPassBeginInfo;
 import org.lwjgl.vulkan.VkRenderPassCreateInfo;
 import org.lwjgl.vulkan.VkSamplerCreateInfo;
 import org.lwjgl.vulkan.VkSemaphoreCreateInfo;
-import org.lwjgl.vulkan.VkSemaphoreGetFdInfoKHR;
 import org.lwjgl.vulkan.VkShaderModuleCreateInfo;
 import org.lwjgl.vulkan.VkSubmitInfo;
 import org.lwjgl.vulkan.VkSubpassDescription;
@@ -80,8 +79,6 @@ import java.nio.LongBuffer;
 
 import static org.lwjgl.system.MemoryStack.stackPush;
 import static org.lwjgl.vulkan.VK10.*;
-import static org.lwjgl.vulkan.VK11.VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
-import static org.lwjgl.vulkan.VK11.VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT;
 import static org.lwjgl.vulkan.VK11.VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO;
 import static org.lwjgl.vulkan.VK11.VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO;
 import static org.lwjgl.vulkan.VK11.VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO;
@@ -153,6 +150,7 @@ final class VkTerrainRenderer {
     private long atlasView;
     private int atlasWidth;
     private int atlasHeight;
+    private int atlasLevels = 1;
     private int lightmapGlId = -1;
     private long lightmapImage;
     private long lightmapMemory;
@@ -179,9 +177,21 @@ final class VkTerrainRenderer {
     private int glColorMemoryObject;
     private int glDepthMemoryObject;
 
-    // Composite GL program
-    private int compositeProgram;
-    private int compositeInvSizeUniform = -1;
+    // Composite GL programs: [0] writes gl_FragDepth, [1] colour only (depth
+    // came from the hardware blit). Index with depthBlit ? 1 : 0.
+    private final int[] compositePrograms = new int[2];
+    private final int[] compositeInvSizeUniforms = {-1, -1};
+    /**
+     * Copying depth with glBlitFramebuffer instead of writing gl_FragDepth
+     * lets the composite quad keep early-Z and skips a per-pixel depth export.
+     * Requires our depth target to match the game's depth format, so it is
+     * only attempted when the D24 target was created, and switched off for
+     * good if the driver rejects the blit.
+     */
+    private boolean depthBlit;
+    private int glDepthBlitFbo = -1;
+    /** 0 until the first format query; see depthFormat(MemoryStack). */
+    private int depthFormat;
 
     // Shared quad→triangle index buffer (pattern 0,1,2 / 0,2,3 per quad):
     // vanilla chunk VBOs hold GL_QUADS, Vulkan only rasterizes triangles
@@ -205,6 +215,13 @@ final class VkTerrainRenderer {
     private long recordNanos;
     private long submitCompositeNanos;
     private long timingWindowStartNanos;
+    // GPU-side cost of the terrain pass, read back from timestamp queries one
+    // frame late (the fence for a slot guarantees its queries have landed)
+    private long queryPool;
+    private float timestampPeriod;
+    private boolean timestampsSupported;
+    private long gpuNanos;
+    private int gpuSamples;
     // VK-side readback of a horizontal strip of the color target: tells apart
     // "Vulkan drew nothing" from "GL cannot see what Vulkan drew"
     private static final int READBACK_ROWS = 8;
@@ -233,21 +250,48 @@ final class VkTerrainRenderer {
             GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, atlasGlId);
             atlasWidth = GL11C.glGetTexLevelParameteri(GL11C.GL_TEXTURE_2D, 0, GL11C.GL_TEXTURE_WIDTH);
             atlasHeight = GL11C.glGetTexLevelParameteri(GL11C.GL_TEXTURE_2D, 0, GL11C.GL_TEXTURE_HEIGHT);
-            ByteBuffer pixels = MemoryUtil.memAlloc(atlasWidth * atlasHeight * 4);
-            GL11C.glGetTexImage(GL11C.GL_TEXTURE_2D, 0, GL11C.GL_RGBA, GL11C.GL_UNSIGNED_BYTE, pixels);
+            // Minecraft builds the atlas mip chain per sprite, so colours never
+            // bleed between neighbouring textures. Copying those levels is both
+            // cheaper and more correct than generating our own with vkCmdBlitImage.
+            ByteBuffer[] levels = readAtlasLevels();
             GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, previous);
             try {
                 long[] imageOut = new long[3];
-                createSampledImage(stack, atlasWidth, atlasHeight, pixels, imageOut);
+                createSampledImage(stack, atlasWidth, atlasHeight, levels, imageOut);
                 atlasImage = imageOut[0];
                 atlasMemory = imageOut[1];
                 atlasView = imageOut[2];
             } finally {
-                MemoryUtil.memFree(pixels);
+                for (ByteBuffer level : levels) {
+                    MemoryUtil.memFree(level);
+                }
             }
         }
         updateDescriptors();
-        LOGGER.info("Block atlas copied to Vulkan: {}x{}", atlasWidth, atlasHeight);
+        LOGGER.info("Block atlas copied to Vulkan: {}x{}, {} mip level(s)",
+                atlasWidth, atlasHeight, atlasLevels);
+    }
+
+    /** Reads level 0 plus every mip level the bound GL atlas actually has. */
+    private ByteBuffer[] readAtlasLevels() {
+        java.util.List<ByteBuffer> levels = new java.util.ArrayList<ByteBuffer>();
+        int w = atlasWidth;
+        int h = atlasHeight;
+        int level = 0;
+        while (w >= 1 && h >= 1) {
+            if (level > 0
+                    && GL11C.glGetTexLevelParameteri(GL11C.GL_TEXTURE_2D, level, GL11C.GL_TEXTURE_WIDTH) != w) {
+                break; // mipmaps turned off in video settings, or the chain ends here
+            }
+            ByteBuffer pixels = MemoryUtil.memAlloc(w * h * 4);
+            GL11C.glGetTexImage(GL11C.GL_TEXTURE_2D, level, GL11C.GL_RGBA, GL11C.GL_UNSIGNED_BYTE, pixels);
+            levels.add(pixels);
+            w /= 2;
+            h /= 2;
+            level++;
+        }
+        atlasLevels = levels.size();
+        return levels.toArray(new ByteBuffer[0]);
     }
 
     synchronized void setLightmap(int glTextureId) {
@@ -306,17 +350,114 @@ final class VkTerrainRenderer {
         if (timingWindowStartNanos != 0) {
             double frames = TIMING_WINDOW;
             LOGGER.info("Terrain timings over {} frames: fence wait {} ms, record {} ms, "
-                            + "submit+composite {} ms per frame; {} fps overall",
+                            + "submit+composite {} ms, GPU {} per frame; {} fps overall",
                     TIMING_WINDOW,
                     String.format("%.2f", fenceWaitNanos / frames / 1e6),
                     String.format("%.2f", recordNanos / frames / 1e6),
                     String.format("%.2f", submitCompositeNanos / frames / 1e6),
+                    gpuTimeText(),
                     String.format("%.0f", frames * 1e9 / (now - timingWindowStartNanos)));
         }
         timingWindowStartNanos = now;
         fenceWaitNanos = 0;
         recordNanos = 0;
         submitCompositeNanos = 0;
+        gpuNanos = 0;
+        gpuSamples = 0;
+    }
+
+    /** Everything the ultra log wants to know about this renderer. */
+    synchronized void appendDiagnostics(StringBuilder sb) {
+        sb.append("  terrain: frame ").append(frameCounter)
+                .append(", ").append(frameChunks).append(" chunks, ")
+                .append(frameVertices).append(" vertices, ")
+                .append(frameSkipped).append(" skipped\n");
+        sb.append("  targets: ").append(width).append('x').append(height)
+                .append(", depth ").append(depthFormat == VK_FORMAT_X8_D24_UNORM_PACK32 ? "D24" : "D32F")
+                .append(", depth blit ").append(depthBlit ? "on" : "off")
+                .append(", atlas ").append(atlasWidth).append('x').append(atlasHeight)
+                .append(" (").append(atlasLevels).append(" mips)\n");
+        sb.append("  frame cost: fence wait ")
+                .append(String.format("%.2f", fenceWaitNanos / (double) Math.max(1, timingSamples()) / 1e6))
+                .append(" ms, record ")
+                .append(String.format("%.2f", recordNanos / (double) Math.max(1, timingSamples()) / 1e6))
+                .append(" ms, submit+composite ")
+                .append(String.format("%.2f", submitCompositeNanos / (double) Math.max(1, timingSamples()) / 1e6))
+                .append(" ms, GPU ").append(gpuTimeText()).append('\n');
+        sb.append("  index buffer: ").append(quadIndexCapacityQuads).append(" quads")
+                .append(", draws capped at ").append(MAX_INDIRECT_DRAWS)
+                .append(", frames in flight ").append(FRAMES_IN_FLIGHT).append('\n');
+        if (glErrorLogged) {
+            sb.append("  WARNING: a GL error was reported during composite (see the main log)\n");
+        }
+        if (frameSkipped > 0) {
+            sb.append("  WARNING: ").append(frameSkipped)
+                    .append(" chunks were skipped last frame — no mirror, or past the draw cap\n");
+        }
+    }
+
+    /** Frames accumulated into the current timing window. */
+    private int timingSamples() {
+        return (int) (frameCounter % TIMING_WINDOW == 0 ? TIMING_WINDOW : frameCounter % TIMING_WINDOW);
+    }
+
+    /** Average GPU time over the window, or "n/a" where the queue has no timestamps. */
+    private String gpuTimeText() {
+        if (!timestampsSupported) {
+            return "n/a";
+        }
+        if (gpuSamples == 0) {
+            return "pending";
+        }
+        return String.format("%.2f ms", gpuNanos / (double) gpuSamples / 1e6);
+    }
+
+    /**
+     * The graphics queue writes a timestamp before and after the terrain pass.
+     * Reading them costs nothing here because the slot's fence has already been
+     * waited on, so the results are guaranteed to be available.
+     */
+    private void createQueryPool(MemoryStack stack) {
+        VkPhysicalDeviceProperties props = VkPhysicalDeviceProperties.malloc(stack);
+        vkGetPhysicalDeviceProperties(ctx.getPhysicalDevice(), props);
+        timestampPeriod = props.limits().timestampPeriod();
+
+        IntBuffer familyCount = stack.mallocInt(1);
+        vkGetPhysicalDeviceQueueFamilyProperties(ctx.getPhysicalDevice(), familyCount, null);
+        VkQueueFamilyProperties.Buffer families =
+                VkQueueFamilyProperties.malloc(familyCount.get(0), stack);
+        vkGetPhysicalDeviceQueueFamilyProperties(ctx.getPhysicalDevice(), familyCount, families);
+        int validBits = families.get(ctx.getGraphicsQueueFamily()).timestampValidBits();
+
+        timestampsSupported = timestampPeriod > 0.0f && validBits > 0;
+        if (!timestampsSupported) {
+            LOGGER.info("Graphics queue has no timestamp support; GPU timings unavailable");
+            return;
+        }
+        VkQueryPoolCreateInfo info = VkQueryPoolCreateInfo.calloc(stack)
+                .sType(VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO)
+                .queryType(VK_QUERY_TYPE_TIMESTAMP)
+                .queryCount(FRAMES_IN_FLIGHT * 2);
+        LongBuffer pPool = stack.mallocLong(1);
+        check(vkCreateQueryPool(device(), info, null, pPool), "vkCreateQueryPool(terrain)");
+        queryPool = pPool.get(0);
+    }
+
+    private void readGpuTimestamps(MemoryStack stack, int slot) {
+        if (!timestampsSupported || frameCounter < FRAMES_IN_FLIGHT) {
+            return; // this slot has not run yet
+        }
+        LongBuffer results = stack.mallocLong(2);
+        int result = vkGetQueryPoolResults(device(), queryPool, slot * 2, 2, results, 8,
+                VK_QUERY_RESULT_64_BIT);
+        if (result != VK_SUCCESS) {
+            return; // VK_NOT_READY: skip this sample rather than stall the frame
+        }
+        long delta = results.get(1) - results.get(0);
+        if (delta > 0) {
+            gpuNanos += (long) (delta * timestampPeriod);
+            gpuSamples++;
+        }
     }
 
     // ------------------------------------------------------------------
@@ -337,6 +478,7 @@ final class VkTerrainRenderer {
             check(vkWaitForFences(device(), fence, true, 1_000_000_000L), "vkWaitForFences");
             fenceWaitNanos += System.nanoTime() - t0;
             vkResetFences(device(), fence);
+            readGpuTimestamps(stack, slot);
             // This slot's fence covers frame N-2; everything up to it is done
             mirror.setFrameStamp(frameCounter);
             mirror.flushRetired(frameCounter - FRAMES_IN_FLIGHT);
@@ -356,6 +498,13 @@ final class VkTerrainRenderer {
                     .sType(VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO)
                     .flags(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
             check(vkBeginCommandBuffer(commandBuffer, begin), "vkBeginCommandBuffer");
+
+            if (timestampsSupported) {
+                // Must be outside a render pass, so it goes first.
+                vkCmdResetQueryPool(commandBuffer, queryPool, slot * 2, 2);
+                vkCmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                        queryPool, slot * 2);
+            }
 
             recordLightmapUpload(stack);
 
@@ -494,6 +643,10 @@ final class VkTerrainRenderer {
             if (frameCounter == 0 || frameCounter == 119) {
                 recordColorReadback(stack);
             }
+            if (timestampsSupported) {
+                vkCmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                        queryPool, activeFrameSlot * 2 + 1);
+            }
             check(vkEndCommandBuffer(commandBuffer), "vkEndCommandBuffer");
 
             VkSubmitInfo submit = VkSubmitInfo.calloc(stack)
@@ -529,18 +682,30 @@ final class VkTerrainRenderer {
                     | org.lwjgl.opengl.GL11.GL_CURRENT_BIT
                     | org.lwjgl.opengl.GL11.GL_POLYGON_BIT);
 
-            GL20C.glUseProgram(compositeProgram);
+            GL11C.glDisable(org.lwjgl.opengl.GL11.GL_ALPHA_TEST);
+            GL11C.glDisable(GL11C.GL_BLEND);
+            GL11C.glDisable(GL11C.GL_CULL_FACE);
+            GL11C.glDisable(GL11C.GL_SCISSOR_TEST);
+            GL11C.glDepthMask(true);
+
+            if (depthBlit) {
+                blitDepth();
+            }
+
+            GL20C.glUseProgram(compositePrograms[depthBlit ? 1 : 0]);
             GL13C.glActiveTexture(GL13C.GL_TEXTURE0);
             GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, glColorTexture);
             GL13C.glActiveTexture(GL13C.GL_TEXTURE1);
             GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, glDepthTexture);
 
-            GL11C.glDisable(org.lwjgl.opengl.GL11.GL_ALPHA_TEST);
-            GL11C.glDisable(GL11C.GL_BLEND);
-            GL11C.glDisable(GL11C.GL_CULL_FACE);
-            GL11C.glEnable(GL11C.GL_DEPTH_TEST);
-            GL11C.glDepthFunc(GL11C.GL_LEQUAL);
-            GL11C.glDepthMask(true);
+            if (depthBlit) {
+                // Depth already carries the terrain; the quad only paints colour.
+                GL11C.glDisable(GL11C.GL_DEPTH_TEST);
+                GL11C.glDepthMask(false);
+            } else {
+                GL11C.glEnable(GL11C.GL_DEPTH_TEST);
+                GL11C.glDepthFunc(GL11C.GL_LEQUAL);
+            }
 
             org.lwjgl.opengl.GL11.glBegin(org.lwjgl.opengl.GL11.GL_QUADS);
             org.lwjgl.opengl.GL11.glVertex2f(-1.0f, -1.0f);
@@ -564,6 +729,27 @@ final class VkTerrainRenderer {
                             Integer.toHexString(error), frameCounter);
                 }
             }
+        }
+    }
+
+    /**
+     * Hardware copy of the Vulkan depth buffer into the game's, replacing a
+     * gl_FragDepth write in the composite shader. Any driver complaint retires
+     * the path for the rest of the session — the shader fallback is correct,
+     * just slower.
+     */
+    private void blitDepth() {
+        GL11C.glGetError();
+        int prevRead = GL11C.glGetInteger(GL30C.GL_READ_FRAMEBUFFER_BINDING);
+        GL30C.glBindFramebuffer(GL30C.GL_READ_FRAMEBUFFER, glDepthBlitFbo);
+        GL30C.glBlitFramebuffer(0, 0, width, height, 0, 0, width, height,
+                GL11C.GL_DEPTH_BUFFER_BIT, GL11C.GL_NEAREST);
+        GL30C.glBindFramebuffer(GL30C.GL_READ_FRAMEBUFFER, prevRead);
+        int error = GL11C.glGetError();
+        if (error != 0) {
+            depthBlit = false;
+            LOGGER.warn("glBlitFramebuffer(depth) rejected with 0x{} — using the gl_FragDepth composite",
+                    Integer.toHexString(error));
         }
     }
 
@@ -747,6 +933,7 @@ final class VkTerrainRenderer {
             LongBuffer pPool = stack.mallocLong(1);
             check(vkCreateCommandPool(device(), poolInfo, null, pPool), "vkCreateCommandPool(terrain)");
             commandPool = pPool.get(0);
+            createQueryPool(stack);
 
             VkCommandBufferAllocateInfo allocInfo = VkCommandBufferAllocateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO)
@@ -771,7 +958,7 @@ final class VkTerrainRenderer {
 
             VkExportSemaphoreCreateInfo export = VkExportSemaphoreCreateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO)
-                    .handleTypes(VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT);
+                    .handleTypes(Interop.SEMAPHORE_HANDLE_TYPE);
             VkSemaphoreCreateInfo semInfo = VkSemaphoreCreateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO)
                     .pNext(export.address());
@@ -799,6 +986,11 @@ final class VkTerrainRenderer {
                 .sType(VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO)
                 .magFilter(VK_FILTER_NEAREST)
                 .minFilter(VK_FILTER_NEAREST)
+                // Nearest inside a level keeps the pixel-art look; linear
+                // between levels kills the shimmer on distant chunks. maxLod
+                // is clamped by the image's actual level count.
+                .mipmapMode(VK_SAMPLER_MIPMAP_MODE_LINEAR)
+                .maxLod(VK_LOD_CLAMP_NONE)
                 .addressModeU(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
                 .addressModeV(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
                 .addressModeW(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
@@ -806,7 +998,8 @@ final class VkTerrainRenderer {
         check(vkCreateSampler(device(), samplerInfo, null, pSampler), "vkCreateSampler(atlas)");
         atlasSampler = pSampler.get(0);
 
-        samplerInfo.magFilter(VK_FILTER_LINEAR).minFilter(VK_FILTER_LINEAR);
+        samplerInfo.magFilter(VK_FILTER_LINEAR).minFilter(VK_FILTER_LINEAR)
+                .mipmapMode(VK_SAMPLER_MIPMAP_MODE_NEAREST).maxLod(0.0f);
         check(vkCreateSampler(device(), samplerInfo, null, pSampler), "vkCreateSampler(lightmap)");
         lightmapSampler = pSampler.get(0);
 
@@ -936,7 +1129,7 @@ final class VkTerrainRenderer {
                 .initialLayout(VK_IMAGE_LAYOUT_UNDEFINED)
                 .finalLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         attachments.get(1)
-                .format(VK_FORMAT_D32_SFLOAT)
+                .format(depthFormat(stack))
                 .samples(VK_SAMPLE_COUNT_1_BIT)
                 .loadOp(VK_ATTACHMENT_LOAD_OP_CLEAR)
                 .storeOp(VK_ATTACHMENT_STORE_OP_STORE)
@@ -1073,6 +1266,15 @@ final class VkTerrainRenderer {
     }
 
     private void createCompositeProgram() {
+        compositePrograms[0] = buildCompositeProgram(true);
+        compositePrograms[1] = buildCompositeProgram(false);
+    }
+
+    /**
+     * @param writeDepth export the Vulkan depth per fragment; false when the
+     *                   depth buffer is filled by glBlitFramebuffer instead
+     */
+    private int buildCompositeProgram(boolean writeDepth) {
         String vertSrc = "#version 120\n"
                 + "void main() { gl_Position = vec4(gl_Vertex.xy, 0.0, 1.0); }\n";
         String fragSrc = "#version 120\n"
@@ -1083,28 +1285,30 @@ final class VkTerrainRenderer {
                 + "    vec2 uv = gl_FragCoord.xy * uInvSize;\n"
                 + "    vec4 c = texture2D(uColor, uv);\n"
                 + "    if (c.a < 0.004) discard;\n"
-                + "    gl_FragDepth = texture2D(uDepth, uv).r;\n"
+                + (writeDepth ? "    gl_FragDepth = texture2D(uDepth, uv).r;\n" : "")
                 + "    gl_FragColor = vec4(c.rgb, 1.0);\n"
                 + "}\n";
         int vert = compileGlShader(GL20C.GL_VERTEX_SHADER, vertSrc);
         int frag = compileGlShader(GL20C.GL_FRAGMENT_SHADER, fragSrc);
-        compositeProgram = GL20C.glCreateProgram();
-        GL20C.glAttachShader(compositeProgram, vert);
-        GL20C.glAttachShader(compositeProgram, frag);
-        GL20C.glLinkProgram(compositeProgram);
-        if (GL20C.glGetProgrami(compositeProgram, GL20C.GL_LINK_STATUS) == 0) {
+        int program = GL20C.glCreateProgram();
+        GL20C.glAttachShader(program, vert);
+        GL20C.glAttachShader(program, frag);
+        GL20C.glLinkProgram(program);
+        if (GL20C.glGetProgrami(program, GL20C.GL_LINK_STATUS) == 0) {
             throw new IllegalStateException("Composite program link failed: "
-                    + GL20C.glGetProgramInfoLog(compositeProgram));
+                    + GL20C.glGetProgramInfoLog(program));
         }
         GL20C.glDeleteShader(vert);
         GL20C.glDeleteShader(frag);
 
         int prev = GL11C.glGetInteger(GL20C.GL_CURRENT_PROGRAM);
-        GL20C.glUseProgram(compositeProgram);
-        GL20C.glUniform1i(GL20C.glGetUniformLocation(compositeProgram, "uColor"), 0);
-        GL20C.glUniform1i(GL20C.glGetUniformLocation(compositeProgram, "uDepth"), 1);
-        compositeInvSizeUniform = GL20C.glGetUniformLocation(compositeProgram, "uInvSize");
+        GL20C.glUseProgram(program);
+        GL20C.glUniform1i(GL20C.glGetUniformLocation(program, "uColor"), 0);
+        GL20C.glUniform1i(GL20C.glGetUniformLocation(program, "uDepth"), 1);
+        compositeInvSizeUniforms[writeDepth ? 0 : 1] =
+                GL20C.glGetUniformLocation(program, "uInvSize");
         GL20C.glUseProgram(prev);
+        return program;
     }
 
     private static int compileGlShader(int type, String source) {
@@ -1138,14 +1342,24 @@ final class VkTerrainRenderer {
             glColorTexture = createGlTexture(glColorMemoryObject, org.lwjgl.opengl.GL11.GL_RGBA8);
 
             long[] depthOut = new long[4];
-            createExportedTarget(stack, VK_FORMAT_D32_SFLOAT,
+            createExportedTarget(stack, depthFormat(stack),
                     VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
                     VK_IMAGE_ASPECT_DEPTH_BIT, depthOut);
             depthImage = depthOut[0];
             depthMemory = depthOut[1];
             depthView = depthOut[2];
             glDepthMemoryObject = importMemoryToGL(stack, depthMemory, depthOut[3]);
-            glDepthTexture = createGlTexture(glDepthMemoryObject, org.lwjgl.opengl.GL30.GL_DEPTH_COMPONENT32F);
+            boolean depth24 = depthFormat(stack) == VK_FORMAT_X8_D24_UNORM_PACK32;
+            glDepthTexture = createGlTexture(glDepthMemoryObject, depth24
+                    ? org.lwjgl.opengl.GL14.GL_DEPTH_COMPONENT24
+                    : org.lwjgl.opengl.GL30.GL_DEPTH_COMPONENT32F);
+            // glBlitFramebuffer only copies depth between matching formats,
+            // and the game's framebuffer is 24-bit.
+            depthBlit = depth24 && depthBlitAllowed();
+            if (depthBlit) {
+                glDepthBlitFbo = createDepthReadFbo();
+                depthBlit = glDepthBlitFbo != -1;
+            }
 
             VkFramebufferCreateInfo fbInfo = VkFramebufferCreateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO)
@@ -1159,8 +1373,10 @@ final class VkTerrainRenderer {
             framebuffer = pFb.get(0);
 
             int prev = GL11C.glGetInteger(GL20C.GL_CURRENT_PROGRAM);
-            GL20C.glUseProgram(compositeProgram);
-            GL20C.glUniform2f(compositeInvSizeUniform, 1.0f / width, 1.0f / height);
+            for (int i = 0; i < compositePrograms.length; i++) {
+                GL20C.glUseProgram(compositePrograms[i]);
+                GL20C.glUniform2f(compositeInvSizeUniforms[i], 1.0f / width, 1.0f / height);
+            }
             GL20C.glUseProgram(prev);
 
             // Diagnostic readback strip (host-visible, persistently mapped)
@@ -1193,11 +1409,55 @@ final class VkTerrainRenderer {
                 width, height, glColorTexture, glDepthTexture);
     }
 
+    private static boolean depthBlitAllowed() {
+        return !"false".equals(System.getProperty("vulkanmod112.depthBlit"));
+    }
+
+    /**
+     * Prefers 24-bit depth so the result can be blitted straight into the
+     * game's depth buffer; falls back to D32_SFLOAT where the driver has no
+     * sampleable D24 (common on AMD).
+     */
+    private int depthFormat(MemoryStack stack) {
+        if (depthFormat != 0) {
+            return depthFormat;
+        }
+        if (!depthBlitAllowed()) {
+            return depthFormat = VK_FORMAT_D32_SFLOAT;
+        }
+        VkFormatProperties props = VkFormatProperties.malloc(stack);
+        vkGetPhysicalDeviceFormatProperties(ctx.getPhysicalDevice(),
+                VK_FORMAT_X8_D24_UNORM_PACK32, props);
+        int needed = VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT
+                | VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
+        return depthFormat = (props.optimalTilingFeatures() & needed) == needed
+                ? VK_FORMAT_X8_D24_UNORM_PACK32
+                : VK_FORMAT_D32_SFLOAT;
+    }
+
+    /** Read-only FBO wrapping the shared depth texture; -1 if incomplete. */
+    private int createDepthReadFbo() {
+        int prevRead = GL11C.glGetInteger(GL30C.GL_READ_FRAMEBUFFER_BINDING);
+        int fbo = GL30C.glGenFramebuffers();
+        GL30C.glBindFramebuffer(GL30C.GL_READ_FRAMEBUFFER, fbo);
+        GL30C.glFramebufferTexture2D(GL30C.GL_READ_FRAMEBUFFER, GL30C.GL_DEPTH_ATTACHMENT,
+                GL11C.GL_TEXTURE_2D, glDepthTexture, 0);
+        int status = GL30C.glCheckFramebufferStatus(GL30C.GL_READ_FRAMEBUFFER);
+        GL30C.glBindFramebuffer(GL30C.GL_READ_FRAMEBUFFER, prevRead);
+        if (status != GL30C.GL_FRAMEBUFFER_COMPLETE) {
+            LOGGER.warn("Depth blit FBO incomplete (0x{}), falling back to gl_FragDepth composite",
+                    Integer.toHexString(status));
+            GL30C.glDeleteFramebuffers(fbo);
+            return -1;
+        }
+        return fbo;
+    }
+
     /** out: image, memory, view, allocationSize */
     private void createExportedTarget(MemoryStack stack, int format, int usage, int aspect, long[] out) {
         VkExternalMemoryImageCreateInfo external = VkExternalMemoryImageCreateInfo.calloc(stack)
                 .sType(VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO)
-                .handleTypes(VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT);
+                .handleTypes(Interop.MEMORY_HANDLE_TYPE);
         VkImageCreateInfo imageInfo = VkImageCreateInfo.calloc(stack)
                 .sType(VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO)
                 .pNext(external.address())
@@ -1223,7 +1483,7 @@ final class VkTerrainRenderer {
         VkExportMemoryAllocateInfo export = VkExportMemoryAllocateInfo.calloc(stack)
                 .sType(VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO)
                 .pNext(dedicated.address())
-                .handleTypes(VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT);
+                .handleTypes(Interop.MEMORY_HANDLE_TYPE);
         VkMemoryAllocateInfo alloc = VkMemoryAllocateInfo.calloc(stack)
                 .sType(VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO)
                 .pNext(export.address())
@@ -1252,22 +1512,11 @@ final class VkTerrainRenderer {
     }
 
     private int importMemoryToGL(MemoryStack stack, long memory, long size) {
-        VkMemoryGetFdInfoKHR fdInfo = VkMemoryGetFdInfoKHR.calloc(stack)
-                .sType(KHRExternalMemoryFd.VK_STRUCTURE_TYPE_MEMORY_GET_FD_INFO_KHR)
-                .memory(memory)
-                .handleType(VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT);
-        IntBuffer pFd = stack.mallocInt(1);
-        check(KHRExternalMemoryFd.vkGetMemoryFdKHR(device(), fdInfo, pFd), "vkGetMemoryFdKHR(target)");
-        IntBuffer pMemObj = stack.mallocInt(1);
-        EXTMemoryObject.glCreateMemoryObjectsEXT(pMemObj);
-        // The Vulkan side used VkMemoryDedicatedAllocateInfo; GL must be told
-        // BEFORE the import or it assumes a different memory layout and reads
-        // garbage (small images happen to match, large ones do not)
-        EXTMemoryObject.glMemoryObjectParameterivEXT(pMemObj.get(0),
-                EXTMemoryObject.GL_DEDICATED_MEMORY_OBJECT_EXT, stack.ints(GL11C.GL_TRUE));
-        EXTMemoryObjectFD.glImportMemoryFdEXT(pMemObj.get(0), size,
-                EXTMemoryObjectFD.GL_HANDLE_TYPE_OPAQUE_FD_EXT, pFd.get(0));
-        return pMemObj.get(0);
+        // The targets are allocated with VkMemoryDedicatedAllocateInfo, so GL
+        // must be told so before the import or it assumes a different memory
+        // layout and reads garbage (small images happen to match, large ones
+        // do not) — Interop.importMemoryToGL does that for us.
+        return Interop.importMemoryToGL(stack, device(), memory, size, true);
     }
 
     private int createGlTexture(int memoryObject, int internalFormat) {
@@ -1290,24 +1539,9 @@ final class VkTerrainRenderer {
     }
 
     private int importSemaphore(MemoryStack stack, long vkSemaphore) {
-        VkSemaphoreGetFdInfoKHR fdInfo = VkSemaphoreGetFdInfoKHR.calloc(stack)
-                .sType(KHRExternalSemaphoreFd.VK_STRUCTURE_TYPE_SEMAPHORE_GET_FD_INFO_KHR)
-                .semaphore(vkSemaphore)
-                .handleType(VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT);
-        IntBuffer pFd = stack.mallocInt(1);
-        check(KHRExternalSemaphoreFd.vkGetSemaphoreFdKHR(device(), fdInfo, pFd), "vkGetSemaphoreFdKHR");
-        IntBuffer pSem = stack.mallocInt(1);
-        EXTSemaphore.glGenSemaphoresEXT(pSem);
-        EXTSemaphoreFD.glImportSemaphoreFdEXT(pSem.get(0),
-                EXTSemaphoreFD.GL_HANDLE_TYPE_OPAQUE_FD_EXT, pFd.get(0));
-        return pSem.get(0);
+        return Interop.importSemaphoreToGL(stack, device(), vkSemaphore);
     }
 
-    /**
-     * (Re)creates the quad→triangle index buffer with at least {@code quads}
-     * capacity. Only called right after the frame fence wait, so the previous
-     * buffer is no longer referenced by the GPU and can be freed immediately.
-     */
     private void ensureQuadIndexCapacity(int quads) {
         quads = Math.max(quads, 4096);
         if (quads <= quadIndexCapacityQuads) {
@@ -1432,13 +1666,19 @@ final class VkTerrainRenderer {
     }
 
     /** Uploads pixels into a new device-local sampled image via a one-time submit. */
-    private void createSampledImage(MemoryStack stack, int imgWidth, int imgHeight, ByteBuffer pixels,
+    /**
+     * Creates a device-local sampled image and fills every supplied mip level
+     * (index 0 is full size, each next one half). Uploads through one staging
+     * buffer per level and blocks until done — only ever called on atlas load.
+     */
+    private void createSampledImage(MemoryStack stack, int imgWidth, int imgHeight, ByteBuffer[] levels,
                                     long[] out) {
+        int mipLevels = levels.length;
         VkImageCreateInfo imageInfo = VkImageCreateInfo.calloc(stack)
                 .sType(VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO)
                 .imageType(VK_IMAGE_TYPE_2D)
                 .format(VK_FORMAT_R8G8B8A8_UNORM)
-                .mipLevels(1)
+                .mipLevels(mipLevels)
                 .arrayLayers(1)
                 .samples(VK_SAMPLE_COUNT_1_BIT)
                 .tiling(VK_IMAGE_TILING_OPTIMAL)
@@ -1461,33 +1701,36 @@ final class VkTerrainRenderer {
         long memory = pMemory.get(0);
         check(vkBindImageMemory(device(), image, memory, 0), "vkBindImageMemory(sampled)");
 
-        // Staging upload
-        long stagingBuffer;
-        long stagingMemory;
-        int byteCount = imgWidth * imgHeight * 4;
-        VkBufferCreateInfo bufferInfo = VkBufferCreateInfo.calloc(stack)
-                .sType(VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO)
-                .size(byteCount)
-                .usage(VK_BUFFER_USAGE_TRANSFER_SRC_BIT)
-                .sharingMode(VK_SHARING_MODE_EXCLUSIVE);
+        // Staging upload, one buffer per mip level
+        long[] stagingBuffers = new long[mipLevels];
+        long[] stagingMemories = new long[mipLevels];
         LongBuffer pBuffer = stack.mallocLong(1);
-        check(vkCreateBuffer(device(), bufferInfo, null, pBuffer), "vkCreateBuffer(staging)");
-        stagingBuffer = pBuffer.get(0);
-        VkMemoryRequirements sreq = VkMemoryRequirements.malloc(stack);
-        vkGetBufferMemoryRequirements(device(), stagingBuffer, sreq);
-        VkMemoryAllocateInfo salloc = VkMemoryAllocateInfo.calloc(stack)
-                .sType(VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO)
-                .allocationSize(sreq.size())
-                .memoryTypeIndex(findMemoryType(stack, sreq.memoryTypeBits(),
-                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT));
         LongBuffer pSMemory = stack.mallocLong(1);
-        check(vkAllocateMemory(device(), salloc, null, pSMemory), "vkAllocateMemory(staging)");
-        stagingMemory = pSMemory.get(0);
-        check(vkBindBufferMemory(device(), stagingBuffer, stagingMemory, 0), "vkBindBufferMemory(staging)");
         PointerBuffer ppData = stack.mallocPointer(1);
-        check(vkMapMemory(device(), stagingMemory, 0, byteCount, 0, ppData), "vkMapMemory(staging)");
-        MemoryUtil.memCopy(MemoryUtil.memAddress(pixels), ppData.get(0), byteCount);
-        vkUnmapMemory(device(), stagingMemory);
+        for (int level = 0; level < mipLevels; level++) {
+            int byteCount = levels[level].remaining();
+            VkBufferCreateInfo bufferInfo = VkBufferCreateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO)
+                    .size(byteCount)
+                    .usage(VK_BUFFER_USAGE_TRANSFER_SRC_BIT)
+                    .sharingMode(VK_SHARING_MODE_EXCLUSIVE);
+            check(vkCreateBuffer(device(), bufferInfo, null, pBuffer), "vkCreateBuffer(staging)");
+            stagingBuffers[level] = pBuffer.get(0);
+            VkMemoryRequirements sreq = VkMemoryRequirements.malloc(stack);
+            vkGetBufferMemoryRequirements(device(), stagingBuffers[level], sreq);
+            VkMemoryAllocateInfo salloc = VkMemoryAllocateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO)
+                    .allocationSize(sreq.size())
+                    .memoryTypeIndex(findMemoryType(stack, sreq.memoryTypeBits(),
+                            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT));
+            check(vkAllocateMemory(device(), salloc, null, pSMemory), "vkAllocateMemory(staging)");
+            stagingMemories[level] = pSMemory.get(0);
+            check(vkBindBufferMemory(device(), stagingBuffers[level], stagingMemories[level], 0),
+                    "vkBindBufferMemory(staging)");
+            check(vkMapMemory(device(), stagingMemories[level], 0, byteCount, 0, ppData), "vkMapMemory(staging)");
+            MemoryUtil.memCopy(MemoryUtil.memAddress(levels[level]), ppData.get(0), byteCount);
+            vkUnmapMemory(device(), stagingMemories[level]);
+        }
 
         // One-time command: transition, copy, transition
         ensureBaseResources();
@@ -1511,16 +1754,20 @@ final class VkTerrainRenderer {
                 .image(image);
         barrier.get(0).subresourceRange()
                 .aspectMask(VK_IMAGE_ASPECT_COLOR_BIT)
-                .baseMipLevel(0).levelCount(1).baseArrayLayer(0).layerCount(1);
+                .baseMipLevel(0).levelCount(mipLevels).baseArrayLayer(0).layerCount(1);
         vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                 VK_PIPELINE_STAGE_TRANSFER_BIT, 0, null, null, barrier);
 
         VkBufferImageCopy.Buffer region = VkBufferImageCopy.calloc(1, stack);
-        region.get(0).imageExtent(e -> e.width(imgWidth).height(imgHeight).depth(1));
-        region.get(0).imageSubresource()
-                .aspectMask(VK_IMAGE_ASPECT_COLOR_BIT).mipLevel(0).baseArrayLayer(0).layerCount(1);
-        vkCmdCopyBufferToImage(commandBuffer, stagingBuffer, image,
-                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, region);
+        for (int level = 0; level < mipLevels; level++) {
+            final int levelWidth = Math.max(1, imgWidth >> level);
+            final int levelHeight = Math.max(1, imgHeight >> level);
+            region.get(0).imageExtent(e -> e.width(levelWidth).height(levelHeight).depth(1));
+            region.get(0).imageSubresource()
+                    .aspectMask(VK_IMAGE_ASPECT_COLOR_BIT).mipLevel(level).baseArrayLayer(0).layerCount(1);
+            vkCmdCopyBufferToImage(commandBuffer, stagingBuffers[level], image,
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, region);
+        }
 
         barrier.get(0)
                 .srcAccessMask(VK_ACCESS_TRANSFER_WRITE_BIT)
@@ -1541,8 +1788,10 @@ final class VkTerrainRenderer {
         VkSubmitInfo empty = VkSubmitInfo.calloc(stack).sType(VK_STRUCTURE_TYPE_SUBMIT_INFO);
         check(vkQueueSubmit(ctx.getGraphicsQueue(), empty, fence), "vkQueueSubmit(fence reprime)");
 
-        vkDestroyBuffer(device(), stagingBuffer, null);
-        vkFreeMemory(device(), stagingMemory, null);
+        for (int level = 0; level < mipLevels; level++) {
+            vkDestroyBuffer(device(), stagingBuffers[level], null);
+            vkFreeMemory(device(), stagingMemories[level], null);
+        }
 
         VkImageViewCreateInfo viewInfo = VkImageViewCreateInfo.calloc(stack)
                 .sType(VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO)
@@ -1551,7 +1800,7 @@ final class VkTerrainRenderer {
                 .format(VK_FORMAT_R8G8B8A8_UNORM);
         viewInfo.subresourceRange()
                 .aspectMask(VK_IMAGE_ASPECT_COLOR_BIT)
-                .baseMipLevel(0).levelCount(1).baseArrayLayer(0).layerCount(1);
+                .baseMipLevel(0).levelCount(mipLevels).baseArrayLayer(0).layerCount(1);
         LongBuffer pView = stack.mallocLong(1);
         check(vkCreateImageView(device(), viewInfo, null, pView), "vkCreateImageView(sampled)");
 
@@ -1598,6 +1847,11 @@ final class VkTerrainRenderer {
             EXTMemoryObject.glDeleteMemoryObjectsEXT(glColorMemoryObject);
             EXTMemoryObject.glDeleteMemoryObjectsEXT(glDepthMemoryObject);
         }
+        if (glDepthBlitFbo != -1 && glContextCurrent()) {
+            GL30C.glDeleteFramebuffers(glDepthBlitFbo);
+        }
+        glDepthBlitFbo = -1;
+        depthBlit = false;
         glColorTexture = -1;
         glDepthTexture = -1;
         vkDestroyFramebuffer(device(), framebuffer, null);
@@ -1671,6 +1925,10 @@ final class VkTerrainRenderer {
                 vkDestroyFence(device(), frameFence, null);
             }
             fences = null;
+        }
+        if (queryPool != 0) {
+            vkDestroyQueryPool(device(), queryPool, null);
+            queryPool = 0;
         }
         vkDestroyCommandPool(device(), commandPool, null);
         baseReady = false;

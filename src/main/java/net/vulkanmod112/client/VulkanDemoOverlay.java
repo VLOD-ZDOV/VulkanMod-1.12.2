@@ -55,6 +55,18 @@ public final class VulkanDemoOverlay {
         draw(new ScaledResolution(Minecraft.getMinecraft()));
     }
 
+    /**
+     * Once-a-frame hook that exists even when the Vulkan renderer is not
+     * loaded (OptiFine present), so diagnostics still work there.
+     */
+    @SubscribeEvent
+    public void onRenderTick(net.minecraftforge.fml.common.gameevent.TickEvent.RenderTickEvent event) {
+        if (event.phase == net.minecraftforge.fml.common.gameevent.TickEvent.Phase.END) {
+            Diagnostics.tick();
+            BackgroundThrottle.afterFrame();
+        }
+    }
+
     @SubscribeEvent
     public void onDebugText(RenderGameOverlayEvent.Text event) {
         if (Minecraft.getMinecraft().gameSettings.showDebugInfo) {

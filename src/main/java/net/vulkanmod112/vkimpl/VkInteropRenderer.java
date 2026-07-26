@@ -4,16 +4,12 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.lwjgl.PointerBuffer;
 import org.lwjgl.opengl.EXTMemoryObject;
-import org.lwjgl.opengl.EXTMemoryObjectFD;
 import org.lwjgl.opengl.EXTSemaphore;
-import org.lwjgl.opengl.EXTSemaphoreFD;
 import org.lwjgl.opengl.GL;
 import org.lwjgl.opengl.GL11C;
 import org.lwjgl.opengl.GLCapabilities;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
-import org.lwjgl.vulkan.KHRExternalMemoryFd;
-import org.lwjgl.vulkan.KHRExternalSemaphoreFd;
 import org.lwjgl.vulkan.VkAttachmentDescription;
 import org.lwjgl.vulkan.VkAttachmentReference;
 import org.lwjgl.vulkan.VkClearValue;
@@ -33,7 +29,6 @@ import org.lwjgl.vulkan.VkImageCreateInfo;
 import org.lwjgl.vulkan.VkImageViewCreateInfo;
 import org.lwjgl.vulkan.VkMemoryAllocateInfo;
 import org.lwjgl.vulkan.VkMemoryDedicatedAllocateInfo;
-import org.lwjgl.vulkan.VkMemoryGetFdInfoKHR;
 import org.lwjgl.vulkan.VkMemoryRequirements;
 import org.lwjgl.vulkan.VkPhysicalDeviceMemoryProperties;
 import org.lwjgl.vulkan.VkPipelineColorBlendAttachmentState;
@@ -50,7 +45,6 @@ import org.lwjgl.vulkan.VkRect2D;
 import org.lwjgl.vulkan.VkRenderPassBeginInfo;
 import org.lwjgl.vulkan.VkRenderPassCreateInfo;
 import org.lwjgl.vulkan.VkSemaphoreCreateInfo;
-import org.lwjgl.vulkan.VkSemaphoreGetFdInfoKHR;
 import org.lwjgl.vulkan.VkShaderModuleCreateInfo;
 import org.lwjgl.vulkan.VkSubmitInfo;
 import org.lwjgl.vulkan.VkSubpassDescription;
@@ -65,8 +59,6 @@ import java.nio.LongBuffer;
 
 import static org.lwjgl.system.MemoryStack.stackPush;
 import static org.lwjgl.vulkan.VK10.*;
-import static org.lwjgl.vulkan.VK11.VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
-import static org.lwjgl.vulkan.VK11.VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT;
 import static org.lwjgl.vulkan.VK11.VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO;
 import static org.lwjgl.vulkan.VK11.VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO;
 import static org.lwjgl.vulkan.VK11.VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO;
@@ -198,7 +190,7 @@ final class VkInteropRenderer {
         try (MemoryStack stack = stackPush()) {
             VkExternalMemoryImageCreateInfo external = VkExternalMemoryImageCreateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO)
-                    .handleTypes(VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT);
+                    .handleTypes(Interop.MEMORY_HANDLE_TYPE);
 
             VkImageCreateInfo imageInfo = VkImageCreateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO)
@@ -227,7 +219,7 @@ final class VkInteropRenderer {
             VkExportMemoryAllocateInfo export = VkExportMemoryAllocateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO)
                     .pNext(dedicated.address())
-                    .handleTypes(VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT);
+                    .handleTypes(Interop.MEMORY_HANDLE_TYPE);
 
             VkMemoryAllocateInfo alloc = VkMemoryAllocateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO)
@@ -258,24 +250,9 @@ final class VkInteropRenderer {
 
     private void importImageIntoGL(long size) {
         try (MemoryStack stack = stackPush()) {
-            VkMemoryGetFdInfoKHR fdInfo = VkMemoryGetFdInfoKHR.calloc(stack)
-                    .sType(KHRExternalMemoryFd.VK_STRUCTURE_TYPE_MEMORY_GET_FD_INFO_KHR)
-                    .memory(imageMemory)
-                    .handleType(VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT);
-            IntBuffer pFd = stack.mallocInt(1);
-            check(KHRExternalMemoryFd.vkGetMemoryFdKHR(device(), fdInfo, pFd), "vkGetMemoryFdKHR");
-            int fd = pFd.get(0);
-
-            IntBuffer pMemObj = stack.mallocInt(1);
-            EXTMemoryObject.glCreateMemoryObjectsEXT(pMemObj);
-            glMemoryObject = pMemObj.get(0);
-            // Vulkan allocated with VkMemoryDedicatedAllocateInfo; GL must
-            // know before the import or the memory layouts may disagree
-            EXTMemoryObject.glMemoryObjectParameterivEXT(glMemoryObject,
-                    EXTMemoryObject.GL_DEDICATED_MEMORY_OBJECT_EXT, stack.ints(GL11C.GL_TRUE));
-            // GL takes ownership of the fd on successful import
-            EXTMemoryObjectFD.glImportMemoryFdEXT(glMemoryObject, size,
-                    EXTMemoryObjectFD.GL_HANDLE_TYPE_OPAQUE_FD_EXT, fd);
+            // Vulkan allocated with VkMemoryDedicatedAllocateInfo, so GL is
+            // told so before the import (see Interop).
+            glMemoryObject = Interop.importMemoryToGL(stack, device(), imageMemory, size, true);
 
             int previous = GL11C.glGetInteger(GL11C.GL_TEXTURE_BINDING_2D);
             glTexture = GL11C.glGenTextures();
@@ -300,7 +277,7 @@ final class VkInteropRenderer {
         try (MemoryStack stack = stackPush()) {
             VkExportSemaphoreCreateInfo export = VkExportSemaphoreCreateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO)
-                    .handleTypes(VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT);
+                    .handleTypes(Interop.SEMAPHORE_HANDLE_TYPE);
             VkSemaphoreCreateInfo semInfo = VkSemaphoreCreateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO)
                     .pNext(export.address());
@@ -317,19 +294,7 @@ final class VkInteropRenderer {
     }
 
     private int importSemaphore(MemoryStack stack, long vkSemaphore) {
-        VkSemaphoreGetFdInfoKHR fdInfo = VkSemaphoreGetFdInfoKHR.calloc(stack)
-                .sType(KHRExternalSemaphoreFd.VK_STRUCTURE_TYPE_SEMAPHORE_GET_FD_INFO_KHR)
-                .semaphore(vkSemaphore)
-                .handleType(VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT);
-        IntBuffer pFd = stack.mallocInt(1);
-        check(KHRExternalSemaphoreFd.vkGetSemaphoreFdKHR(device(), fdInfo, pFd), "vkGetSemaphoreFdKHR");
-
-        IntBuffer pSem = stack.mallocInt(1);
-        EXTSemaphore.glGenSemaphoresEXT(pSem);
-        int glSemaphore = pSem.get(0);
-        EXTSemaphoreFD.glImportSemaphoreFdEXT(glSemaphore,
-                EXTSemaphoreFD.GL_HANDLE_TYPE_OPAQUE_FD_EXT, pFd.get(0));
-        return glSemaphore;
+        return Interop.importSemaphoreToGL(stack, device(), vkSemaphore);
     }
 
     private void createRenderPassAndPipeline() {

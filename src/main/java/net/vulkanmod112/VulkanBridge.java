@@ -65,6 +65,13 @@ public interface VulkanBridge {
     String chunkMirrorStats();
 
     /**
+     * Multi-line dump of everything the Vulkan side knows about itself: device,
+     * chosen formats, active code paths, resource counts and the latest frame
+     * timings. Plain text so the bridge stays free of LWJGL types.
+     */
+    String diagnosticsReport();
+
+    /**
      * Copies the game's block atlas (a GL texture) into a Vulkan image.
      * Call on the client thread after texture stitching / resource reloads.
      */

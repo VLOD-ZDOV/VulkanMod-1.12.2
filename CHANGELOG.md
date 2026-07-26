@@ -1,5 +1,36 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- GPU timings. Timestamp queries around the terrain pass are read back a frame late and reported alongside the CPU breakdown, so optimisation work can be measured instead of guessed at.
+- Ultra logging: a full diagnostics report written to `logs/vulkanmod112-diagnostics.log`, covering versions, installed mods, GPU and driver, every active renderer path and a periodic snapshot of frame costs and settings.
+- Animated block textures can be turned off, which vanilla offers no way to do.
+- Background framerate cap. A minimised window with the frame limit on "unlimited" kept the GPU at full load drawing frames nobody could see; it now sleeps to 10 fps by default while the window is not active.
+
+- Settings screen rebuilt in VulkanMod's own shape: page tabs, a scrolling list of grouped options, and a panel describing the option under the cursor together with how much it is worth in frames.
+- Game-side optimisations with their own page. Entity and block-entity draw distances are capped independently of vanilla's per-object limits, and the vanilla settings that matter most for framerate are reachable without leaving the screen.
+
+### Fixed
+
+- The Video Settings entry point no longer lands on top of the options list; it sits in the free strip above it.
+
+## [0.3.0] - 2026-07-26
+
+### Added
+
+- Windows support for the zero-copy path: external memory and semaphores are exported as Win32 handles there and as file descriptors on Linux, chosen at runtime by a single platform layer. Linux behaviour is unchanged.
+- Block atlas mip levels. The levels Minecraft already builds per sprite are copied into the Vulkan image, and the atlas sampler filters between them, which removes distant-chunk shimmer and cuts texture-cache misses.
+
+### Changed
+
+- Terrain depth is composited with `glBlitFramebuffer` instead of a `gl_FragDepth` write, so the fullscreen composite keeps early-Z. The depth target is 24-bit where the driver supports it; otherwise, or if the driver rejects the blit, the previous shader path is used automatically.
+
+### Documentation
+
+- `ROADMAP.md` lists the remaining work found while reviewing the renderer, in the order it should be done, including two limits that currently cap render distance.
+
 ## [0.2.0] - 2026-07-24
 
 ### Added

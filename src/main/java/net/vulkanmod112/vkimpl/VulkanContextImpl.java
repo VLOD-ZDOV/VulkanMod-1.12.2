@@ -204,6 +204,10 @@ public final class VulkanContextImpl implements VulkanBridge {
         return -1;
     }
 
+    VkPhysicalDevice getPhysicalDevice() {
+        return physicalDevice;
+    }
+
     private void logMemoryHeaps(MemoryStack stack) {
         VkPhysicalDeviceMemoryProperties memProps = VkPhysicalDeviceMemoryProperties.malloc(stack);
         vkGetPhysicalDeviceMemoryProperties(physicalDevice, memProps);
@@ -214,11 +218,8 @@ public final class VulkanContextImpl implements VulkanBridge {
         }
     }
 
-    /** Device extensions needed to share images and semaphores with OpenGL. */
-    private static final String[] INTEROP_EXTENSIONS = {
-            "VK_KHR_external_memory_fd",
-            "VK_KHR_external_semaphore_fd"
-    };
+    /** Device extensions needed to share images and semaphores with OpenGL (platform specific). */
+    private static final String[] INTEROP_EXTENSIONS = Interop.deviceExtensions();
 
     private boolean hasInteropExtensions(MemoryStack stack) {
         IntBuffer count = stack.mallocInt(1);
@@ -340,6 +341,28 @@ public final class VulkanContextImpl implements VulkanBridge {
     }
 
     @Override
+    public synchronized String diagnosticsReport() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("  gpu: ").append(gpuSummary).append('\n');
+        try (MemoryStack stack = stackPush()) {
+            VkPhysicalDeviceProperties props = VkPhysicalDeviceProperties.malloc(stack);
+            vkGetPhysicalDeviceProperties(physicalDevice, props);
+            sb.append("  limits: maxMemoryAllocationCount ")
+                    .append(props.limits().maxMemoryAllocationCount() & 0xFFFFFFFFL)
+                    .append(" (the spec only guarantees 4096; the mirror uses one per chunk buffer)\n");
+        }
+        sb.append("  interop: ").append(interopCapable ? "external memory/semaphores enabled" : "UNAVAILABLE")
+                .append(", handles: ").append(Interop.WINDOWS ? "win32" : "fd").append('\n');
+        sb.append("  mirror: ").append(chunkMirror != null ? chunkMirror.stats() : "not created").append('\n');
+        if (terrainRenderer != null) {
+            terrainRenderer.appendDiagnostics(sb);
+        } else {
+            sb.append("  terrain: renderer not created\n");
+        }
+        return sb.toString();
+    }
+
+    @Override
     public synchronized String chunkMirrorStats() {
         return chunkMirror != null ? chunkMirror.stats() : "mirrored VBOs: 0";
     }
@@ -356,10 +379,10 @@ public final class VulkanContextImpl implements VulkanBridge {
             return;
         }
         GLCapabilities caps = GL.createCapabilities();
-        if (!caps.GL_EXT_memory_object || !caps.GL_EXT_memory_object_fd
-                || !caps.GL_EXT_semaphore || !caps.GL_EXT_semaphore_fd) {
-            throw new IllegalStateException("OpenGL driver lacks EXT_memory_object_fd/EXT_semaphore_fd");
+        if (!Interop.supportedByGL(caps)) {
+            throw new IllegalStateException("OpenGL driver lacks " + Interop.glExtensionNames());
         }
+        Interop.requireSameDevice(physicalDevice);
         glCapsReady = true;
     }
 

@@ -13,12 +13,16 @@ Experimental Vulkan terrain renderer for Minecraft Forge 1.12.2. Minecraft still
 
 This is not yet a complete replacement for the modern VulkanMod renderer.
 
+## Roadmap
+
+Remaining work, known limits and their priority: [ROADMAP.md](ROADMAP.md).
+
 ## Requirements
 
 - Forge 14.23.5.2857 (or compatible 1.12.2 Forge) / Minecraft 1.12.2.
 - MixinBooter 10.7 in the instance `mods` directory when installing the released JAR manually. It is a required runtime dependency; Prism Launcher does not download Gradle dependencies automatically.
 - A 64-bit Windows or Linux Vulkan driver.
-- `GL_EXT_memory_object_fd`, `GL_EXT_semaphore_fd` and matching Vulkan external-memory/semaphore extensions for the terrain path. Without them the mod loads safely but leaves terrain in OpenGL.
+- Matching OpenGL and Vulkan external-memory/semaphore extensions for the terrain path: `GL_EXT_memory_object_fd` / `GL_EXT_semaphore_fd` with `VK_KHR_external_memory_fd` / `VK_KHR_external_semaphore_fd` on Linux, and the `_win32` variants of the same four on Windows. The mod selects the pair for the host platform automatically. Without them it loads safely but leaves terrain in OpenGL.
 
 ## Run and build
 
@@ -37,6 +41,9 @@ Useful JVM properties:
 - `-Dvulkanmod112.debugLoader=true` — print LWJGL loader diagnostics.
 - `-Dvulkanmod112.cull=false` — disable Vulkan terrain backface culling for visual debugging.
 - `-Dvulkanmod112.overlay=true` — show the legacy Vulkan demo overlay.
+- `-Dvulkanmod112.ultraLog=true` — write a full diagnostics report to `logs/vulkanmod112-diagnostics.log`; the same switch lives in the settings screen under Advanced.
+- `-Dvulkanmod112.extraRendererMarkers=name` — treat additional mod jars as renderer replacements, so the Vulkan terrain mixins are not loaded beside them.
+- `-Dvulkanmod112.depthBlit=false` — composite depth through the fragment shader instead of `glBlitFramebuffer`; use if depth looks wrong after the change.
 - `-Dvulkanmod112.allowIncompatibleRenderer=true` — test with OptiFine/shader-mod renderer replacements; unsupported and off by default.
 
 ## In-game settings
@@ -47,8 +54,38 @@ The slider permits 2–64 chunks. 64 is an experimental maximum: vanilla 1.12.2 
 
 For Vulkan/OpenGL sharing, both APIs must select the same GPU. On hybrid Linux systems, check F3: both the Vulkan device and OpenGL renderer should report the discrete NVIDIA GPU. Running only Vulkan on NVIDIA while OpenGL is on an iGPU is not supported.
 
+## Troubleshooting
+
+**The game dies the moment the world appears, with no crash report.** The log stops right
+after the block atlas is handed to Vulkan and a `hs_err_pid*.log` points at a driver
+library. This means OpenGL and Vulkan ended up on different GPUs: sharing memory between
+them dereferences a handle the importing driver cannot understand, and the process is gone
+before any Java code can react. Recent versions detect this first and refuse the zero-copy
+path with a message naming both device UUIDs, leaving the game on vanilla rendering.
+
+On a hybrid Linux system the game's OpenGL context goes to the integrated or software
+renderer by default, so force it onto the same discrete card Vulkan picks:
+
+```
+__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia
+```
+
+In Prism Launcher: Edit instance -> Settings -> Custom commands -> Wrapper command:
+
+```
+env __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia
+```
+
+Check the result in F3: the Vulkan device and the OpenGL renderer must name the same GPU.
+
+**Anything else.** Turn on Ultra Logging in the settings screen, reproduce, and attach
+`logs/vulkanmod112-diagnostics.log`. It records versions, installed mods, the GL driver,
+every active renderer path, the frame cost breakdown and resource counts.
+
 ## Compatibility and diagnostics
 
-OptiFine and legacy shader mods alter the same renderer classes as this mod. Their presence disables Vulkan terrain automatically and leaves vanilla rendering active. This is a safety measure, not claimed support.
+OptiFine and legacy shader mods replace the same renderer classes this mod rewrites. When one of them is installed, the terrain mixins are not registered at all, so the game boots on that renderer while this mod's settings screen and game-side optimisations stay active. Sharing terrain rendering between the two is not possible: the vertex format and pass order differ, and with a shader pack loaded the format changes again. See [ROADMAP.md](ROADMAP.md) section G.
 
-The F3 overlay reports GPU selection, VBO mirror statistics, active terrain mode and chunk count. Periodic log entries report fence wait, command recording and submit/composite timings. Start with `validation=true` when debugging a driver or synchronisation issue.
+Any Forge build for 1.12.2 works; the only hard dependency is MixinBooter 10.7 or newer, which Forge now reports itself if missing.
+
+The F3 overlay reports GPU selection, VBO mirror statistics, active terrain mode and chunk count. Periodic log entries report fence wait, command recording, submit/composite and GPU timings. For anything more detailed, turn on Ultra Logging and attach `logs/vulkanmod112-diagnostics.log`. Start with `validation=true` when debugging a driver or synchronisation issue.
