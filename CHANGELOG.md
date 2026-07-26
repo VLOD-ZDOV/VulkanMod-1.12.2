@@ -4,6 +4,7 @@
 
 ### Added
 
+- Hold-to-zoom, bound to **C** by default and rebindable under Controls, like OptiFine's. Mouse sensitivity is scaled to match while the key is held — at a quarter of the field of view an unchanged sensitivity sweeps the view four times as far for the same hand movement — and the original is restored on release, on opening a screen and on losing window focus, so a temporary value can never be saved to options.txt. Works even where the Vulkan renderer falls back to OpenGL.
 - Presets: Stable, Balanced and Performance, on the Rendering page. Stable is what the mod ships with and what a fresh install uses; the other two trade progressively more detail for frames. A preset is a one-shot write rather than a mode, so anything changed afterwards stays changed.
 - Settings now state what they cost on the CPU, the GPU and in VRAM separately, as three bars in the description panel. Which resource is short decides whether a setting will help at all, and a single "impact" rating hid exactly that.
 - Geometry budget, on the Advanced page. It sets how much video memory the world geometry may take before the renderer stops growing its buffer generously — every growth stops the GPU and re-uploads every chunk, so a card with memory to spare can buy those stutters away, and a small one can keep the footprint tight. Automatic uses a quarter of what the GPU reports. Chunks are never dropped to stay inside it; the budget steers growth rather than capping it.

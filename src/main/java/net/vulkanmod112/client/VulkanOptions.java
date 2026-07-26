@@ -138,6 +138,38 @@ final class VulkanOptions {
                                         mc.gameSettings.saveOptions();
                                     }
                                 }),
+                        new VSwitchOption("Zoom",
+                                "Hold the zoom key to narrow the field of view, the way OptiFine "
+                                        + "does it. Mouse sensitivity is scaled to match while it is "
+                                        + "held, otherwise the view would sweep across the screen far "
+                                        + "too fast to aim with. Rebind the key under Controls.",
+                                Cost.FREE, null,
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return VulkanConfig.isZoomEnabled();
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        VulkanConfig.setZoomEnabled(value);
+                                    }
+                                }),
+                        new VRangeOption("Zoom Level",
+                                "How far the zoom key narrows the field of view. 4 means a quarter "
+                                        + "of it, which is what OptiFine uses.",
+                                Cost.FREE, null, 2, 10, 1, "x", null,
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return (int) VulkanConfig.getZoomFactor();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setZoomFactor(value);
+                                    }
+                                }),
                         new VSwitchOption("VSync",
                                 "Lock the framerate to the monitor's refresh rate. Removes tearing, "
                                         + "and caps FPS at your refresh rate.",

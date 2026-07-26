@@ -30,6 +30,9 @@ public final class VulkanConfig {
     static final boolean DEF_CULLING = true;
     static final int DEF_GEOMETRY_BUDGET = 0;
     static final int DEF_FRAMES_IN_FLIGHT = 2;
+    static final boolean DEF_ZOOM = true;
+    /** Stored as an integer so it fits the config and the slider; 4 = quarter FOV. */
+    static final int DEF_ZOOM_FACTOR = 4;
 
     private static Configuration config;
     private static boolean terrainEnabled = DEF_TERRAIN;
@@ -46,6 +49,8 @@ public final class VulkanConfig {
     /** MiB of VRAM the chunk geometry buffer may take; 0 = derive from the GPU. */
     private static int geometryBudgetMiB = DEF_GEOMETRY_BUDGET;
     private static int framesInFlight = DEF_FRAMES_IN_FLIGHT;
+    private static boolean zoomEnabled = DEF_ZOOM;
+    private static int zoomFactor = DEF_ZOOM_FACTOR;
 
     private VulkanConfig() {
     }
@@ -79,6 +84,10 @@ public final class VulkanConfig {
         framesInFlight = config.getInt("framesInFlight", CATEGORY_ADVANCED, DEF_FRAMES_IN_FLIGHT, 1, 3,
                 "How many terrain frames the CPU may run ahead of the GPU. Higher smooths out stalls "
                         + "at the cost of one frame of input latency and more memory.");
+        zoomEnabled = config.getBoolean("zoom", CATEGORY_GENERAL, DEF_ZOOM,
+                "Hold-to-zoom on the key bound in Controls.");
+        zoomFactor = config.getInt("zoomFactor", CATEGORY_GENERAL, DEF_ZOOM_FACTOR, 2, 10,
+                "How far the zoom key narrows the field of view. 4 means a quarter of it.");
         applySystemProperties();
         save();
     }
@@ -101,6 +110,27 @@ public final class VulkanConfig {
         setCullingEnabled(DEF_CULLING);
         setGeometryBudgetMiB(DEF_GEOMETRY_BUDGET);
         setFramesInFlight(DEF_FRAMES_IN_FLIGHT);
+        setZoomEnabled(DEF_ZOOM);
+        setZoomFactor(DEF_ZOOM_FACTOR);
+    }
+
+    public static boolean isZoomEnabled() {
+        return zoomEnabled;
+    }
+
+    public static void setZoomEnabled(boolean value) {
+        zoomEnabled = value;
+        store(CATEGORY_GENERAL, "zoom", value);
+    }
+
+    /** Divisor applied to the field of view while the zoom key is held. */
+    public static float getZoomFactor() {
+        return zoomFactor;
+    }
+
+    public static void setZoomFactor(int value) {
+        zoomFactor = value;
+        store(CATEGORY_GENERAL, "zoomFactor", value);
     }
 
     public static boolean isTerrainEnabled() {

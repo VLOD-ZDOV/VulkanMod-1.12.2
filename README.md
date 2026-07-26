@@ -9,7 +9,8 @@ Experimental Vulkan terrain renderer for Minecraft Forge 1.12.2. Minecraft still
 - Vulkan rendering for `SOLID`, `CUTOUT_MIPPED` and `CUTOUT` terrain layers.
 - Vanilla OpenGL remains responsible for translucent terrain, entities, tile entities, particles, sky and GUI.
 - If Vulkan, required driver extensions, or terrain rendering fail, the game falls back to vanilla OpenGL rather than crashing.
-- Video Settings includes a **VulkanMod112 Settings...** page with a terrain switch, diagnostic-overlay switch and a render-distance slider up to 64 chunks.
+- Video Settings includes a **VulkanMod112 Settings...** page with presets, a geometry budget, per-setting CPU/GPU/VRAM costs and a render-distance slider up to 64 chunks.
+- Hold-to-zoom on **C** (rebindable under Controls), with mouse sensitivity scaled to match.
 
 This is not yet a complete replacement for the modern VulkanMod renderer.
 
