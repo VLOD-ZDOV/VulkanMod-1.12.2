@@ -12,9 +12,9 @@ public final class VCyclingOption extends VOption {
     private final String[] values;
     private final Access access;
 
-    public VCyclingOption(String name, String tooltip, Impact impact, String appliesWhen,
+    public VCyclingOption(String name, String tooltip, Cost cost, String appliesWhen,
                           String[] values, Access access) {
-        super(name, tooltip, impact, appliesWhen);
+        super(name, tooltip, cost, appliesWhen);
         this.values = values;
         this.access = access;
     }

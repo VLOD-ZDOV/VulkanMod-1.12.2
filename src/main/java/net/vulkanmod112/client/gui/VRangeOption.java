@@ -17,9 +17,9 @@ public final class VRangeOption extends VOption {
     private final String minText;
     private final Access access;
 
-    public VRangeOption(String name, String tooltip, Impact impact, String appliesWhen,
+    public VRangeOption(String name, String tooltip, Cost cost, String appliesWhen,
                         int min, int max, int step, String suffix, String minText, Access access) {
-        super(name, tooltip, impact, appliesWhen);
+        super(name, tooltip, cost, appliesWhen);
         this.min = min;
         this.max = max;
         this.step = step;

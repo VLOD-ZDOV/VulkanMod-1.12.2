@@ -51,6 +51,8 @@ public final class VulkanContextImpl implements VulkanBridge {
     private boolean initialized;
 
     private String gpuSummary = "Vulkan not initialized";
+    /** Total device-local memory, filled in when the GPU is selected. */
+    private int vramMegabytes;
     private VkDemoRenderer demoRenderer;
     private VkInteropRenderer interopRenderer;
     private VkChunkMirror chunkMirror;
@@ -211,11 +213,19 @@ public final class VulkanContextImpl implements VulkanBridge {
     private void logMemoryHeaps(MemoryStack stack) {
         VkPhysicalDeviceMemoryProperties memProps = VkPhysicalDeviceMemoryProperties.malloc(stack);
         vkGetPhysicalDeviceMemoryProperties(physicalDevice, memProps);
+        long deviceLocalMiB = 0;
         for (int i = 0; i < memProps.memoryHeapCount(); i++) {
             long sizeMiB = memProps.memoryHeaps(i).size() / (1024 * 1024);
             boolean deviceLocal = (memProps.memoryHeaps(i).flags() & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) != 0;
+            if (deviceLocal) {
+                deviceLocalMiB += sizeMiB;
+            }
             LOGGER.info("Memory heap {}: {} MiB{}", i, sizeMiB, deviceLocal ? " (VRAM)" : "");
         }
+        // On integrated GPUs every heap is device-local and this is really
+        // shared system RAM, which is exactly why the budget defaults to a
+        // fraction of it rather than to a fixed size.
+        this.vramMegabytes = (int) Math.min(Integer.MAX_VALUE, deviceLocalMiB);
     }
 
     /** Device extensions needed to share images and semaphores with OpenGL (platform specific). */
@@ -351,6 +361,10 @@ public final class VulkanContextImpl implements VulkanBridge {
                     .append(props.limits().maxMemoryAllocationCount() & 0xFFFFFFFFL)
                     .append(" (the spec only guarantees 4096; the mirror uses one per chunk buffer)\n");
         }
+        sb.append("  vram: ").append(vramMegabytes).append(" MiB device-local, geometry budget setting ")
+                .append(System.getProperty("vulkanmod112.geometryBudget", "0"))
+                .append(" (0 = auto), frames in flight setting ")
+                .append(System.getProperty("vulkanmod112.framesInFlight", "2")).append('\n');
         sb.append("  interop: ").append(interopCapable ? "external memory/semaphores enabled" : "UNAVAILABLE")
                 .append(", handles: ").append(Interop.WINDOWS ? "win32" : "fd").append('\n');
         sb.append("  mirror: ").append(chunkMirror != null ? chunkMirror.stats() : "not created").append('\n');
@@ -473,6 +487,11 @@ public final class VulkanContextImpl implements VulkanBridge {
     @Override
     public String gpuSummary() {
         return gpuSummary;
+    }
+
+    @Override
+    public int vramMegabytes() {
+        return vramMegabytes;
     }
 
     public VkDevice getDevice() {

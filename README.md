@@ -1,4 +1,4 @@
-# VulkanMod112 0.2.0
+# VulkanMod112 0.4.0
 
 Experimental Vulkan terrain renderer for Minecraft Forge 1.12.2. Minecraft still owns the window and OpenGL context; VulkanMod112 mirrors vanilla chunk VBOs to Vulkan, renders opaque terrain there, then composites colour and depth back into the game's framebuffer through GPU external-memory interop.
 
@@ -9,7 +9,8 @@ Experimental Vulkan terrain renderer for Minecraft Forge 1.12.2. Minecraft still
 - Vulkan rendering for `SOLID`, `CUTOUT_MIPPED` and `CUTOUT` terrain layers.
 - Vanilla OpenGL remains responsible for translucent terrain, entities, tile entities, particles, sky and GUI.
 - If Vulkan, required driver extensions, or terrain rendering fail, the game falls back to vanilla OpenGL rather than crashing.
-- Video Settings includes a **VulkanMod112 Settings...** page with a terrain switch, diagnostic-overlay switch and a render-distance slider up to 64 chunks.
+- Video Settings includes a **VulkanMod112 Settings...** page with presets, a geometry budget, per-setting CPU/GPU/VRAM costs and a render-distance slider up to 64 chunks.
+- Hold-to-zoom on **C** (rebindable under Controls), with mouse sensitivity scaled to match.
 
 This is not yet a complete replacement for the modern VulkanMod renderer.
 
@@ -20,7 +21,7 @@ Remaining work, known limits and their priority: [ROADMAP.md](ROADMAP.md).
 ## Requirements
 
 - Forge 14.23.5.2857 (or compatible 1.12.2 Forge) / Minecraft 1.12.2.
-- MixinBooter 10.7 in the instance `mods` directory when installing the released JAR manually. It is a required runtime dependency; Prism Launcher does not download Gradle dependencies automatically.
+- MixinBooter 10.7 in the instance `mods` directory when installing the released JAR manually. It is a required runtime dependency and no launcher resolves it for you.
 - A 64-bit Windows or Linux Vulkan driver.
 - Matching OpenGL and Vulkan external-memory/semaphore extensions for the terrain path: `GL_EXT_memory_object_fd` / `GL_EXT_semaphore_fd` with `VK_KHR_external_memory_fd` / `VK_KHR_external_semaphore_fd` on Linux, and the `_win32` variants of the same four on Windows. The mod selects the pair for the host platform automatically. Without them it loads safely but leaves terrain in OpenGL.
 
@@ -45,40 +46,26 @@ Useful JVM properties:
 - `-Dvulkanmod112.extraRendererMarkers=name` — treat additional mod jars as renderer replacements, so the Vulkan terrain mixins are not loaded beside them.
 - `-Dvulkanmod112.depthBlit=false` — composite depth through the fragment shader instead of `glBlitFramebuffer`; use if depth looks wrong after the change.
 - `-Dvulkanmod112.allowIncompatibleRenderer=true` — test with OptiFine/shader-mod renderer replacements; unsupported and off by default.
+- `-Dvulkanmod112.geometryBudget=MiB` — geometry budget; 0 derives it from the GPU. Also in the settings screen.
+- `-Dvulkanmod112.framesInFlight=1..3` — how far the CPU may run ahead of the GPU. Also in the settings screen.
 
 ## In-game settings
 
 Open **Options → Video Settings → VulkanMod112 Settings...**. The terrain switch is applied immediately and returns to vanilla OpenGL when disabled. The diagnostic overlay is off by default.
 
+Defaults are the conservative choice throughout: nothing is traded for speed until you ask for it. Three presets on the Rendering page do the asking — **Stable** (the shipped values), **Balanced** (caps the draw distances vanilla leaves wider than anyone can see) and **Performance** (trades visible detail for frames). A preset writes its settings once and then stops existing, so anything you change afterwards stays changed. **Reset** at the bottom restores this mod's settings only; Minecraft's own are left alone.
+
+Every row states what it costs on the CPU, the GPU and in VRAM separately, because which of the three you are short of decides whether a setting will help you at all.
+
+**Geometry Budget** (Advanced) sets how much video memory the world geometry may take before the renderer stops growing its buffer generously. Each growth stops the GPU and re-uploads every chunk, so on a card with memory to spare a larger budget buys those stutters away; on a small one a lower value keeps the footprint tight. Automatic uses a quarter of the device-local memory the GPU reports, shown in the screen header. Chunks are never dropped to stay inside the budget — it steers growth, it is not a cap.
+
 The slider permits 2–64 chunks. 64 is an experimental maximum: vanilla 1.12.2 must allocate a very large render-chunk grid, so it can consume substantial CPU and RAM, and multiplayer servers can impose a smaller view-distance cap. Increase it gradually and restart the world if the chunk grid does not refresh immediately.
 
-For Vulkan/OpenGL sharing, both APIs must select the same GPU. On hybrid Linux systems, check F3: both the Vulkan device and OpenGL renderer should report the discrete NVIDIA GPU. Running only Vulkan on NVIDIA while OpenGL is on an iGPU is not supported.
+Zero-copy sharing requires OpenGL and Vulkan to run on the same GPU. On systems with more than one, the mod compares device UUIDs at startup and stays on vanilla rendering if they differ, naming both devices in the log.
 
 ## Troubleshooting
 
-**The game dies the moment the world appears, with no crash report.** The log stops right
-after the block atlas is handed to Vulkan and a `hs_err_pid*.log` points at a driver
-library. This means OpenGL and Vulkan ended up on different GPUs: sharing memory between
-them dereferences a handle the importing driver cannot understand, and the process is gone
-before any Java code can react. Recent versions detect this first and refuse the zero-copy
-path with a message naming both device UUIDs, leaving the game on vanilla rendering.
-
-On a hybrid Linux system the game's OpenGL context goes to the integrated or software
-renderer by default, so force it onto the same discrete card Vulkan picks:
-
-```
-__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia
-```
-
-In Prism Launcher: Edit instance -> Settings -> Custom commands -> Wrapper command:
-
-```
-env __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia
-```
-
-Check the result in F3: the Vulkan device and the OpenGL renderer must name the same GPU.
-
-**Anything else.** Turn on Ultra Logging in the settings screen, reproduce, and attach
+Turn on Ultra Logging in the settings screen, reproduce, and attach
 `logs/vulkanmod112-diagnostics.log`. It records versions, installed mods, the GL driver,
 every active renderer path, the frame cost breakdown and resource counts.
 

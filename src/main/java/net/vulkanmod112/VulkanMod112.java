@@ -23,6 +23,11 @@ public class VulkanMod112 {
     public void preInit(FMLPreInitializationEvent event) {
         LOGGER.info("{} {} starting up", Tags.MOD_NAME, Tags.VERSION);
         net.vulkanmod112.client.VulkanConfig.load(event.getModConfigurationDirectory());
+        // Independent of Vulkan: the zoom must work even where the renderer
+        // falls back to OpenGL, so it is registered before anything can fail.
+        net.vulkanmod112.client.Zoom.register();
+        net.minecraftforge.common.MinecraftForge.EVENT_BUS.register(
+                new net.vulkanmod112.client.Zoom.Handler());
         // Vanilla exposes 32 chunks on a sufficiently large 64-bit heap. The
         // renderer and ViewFrustum themselves support higher values; expose
         // the 64-chunk option in our video-settings page.

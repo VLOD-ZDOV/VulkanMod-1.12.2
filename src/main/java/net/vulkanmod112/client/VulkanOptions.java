@@ -2,8 +2,13 @@ package net.vulkanmod112.client;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.settings.GameSettings;
+import net.vulkanmod112.VulkanBridge;
+import net.vulkanmod112.VulkanLoader;
+import net.vulkanmod112.client.gui.VActionOption;
 import net.vulkanmod112.client.gui.VCyclingOption;
 import net.vulkanmod112.client.gui.VOption;
+import net.vulkanmod112.client.gui.VOption.Cost;
+import net.vulkanmod112.client.gui.VOption.Level;
 import net.vulkanmod112.client.gui.VOptionBlock;
 import net.vulkanmod112.client.gui.VOptionPage;
 import net.vulkanmod112.client.gui.VRangeOption;
@@ -15,8 +20,17 @@ import net.vulkanmod112.client.gui.VSwitchOption;
  * Vanilla-backed rows go through GameSettings the same way the vanilla video
  * screen does, so anything the game does on change (resource reloads, renderer
  * refreshes) still happens. The rest are this mod's own settings.
+ *
+ * Each row carries what it costs on the CPU, the GPU and in VRAM, because
+ * which of the three is the bottleneck decides whether a setting will help at
+ * all — lowering entity distance does nothing for someone whose GPU is
+ * saturated, and neither does mipmapping for someone whose CPU is.
  */
 final class VulkanOptions {
+
+    /** Order matches the labels below; 0 means "work it out from the GPU". */
+    private static final int[] BUDGET_VALUES = {0, 256, 512, 1024, 2048, 4096};
+    private static final String[] BUDGET_LABELS = {"Auto", "256 MiB", "512 MiB", "1 GiB", "2 GiB", "4 GiB"};
 
     private VulkanOptions() {
     }
@@ -26,17 +40,55 @@ final class VulkanOptions {
                 renderingPage(mc),
                 optimizationsPage(mc),
                 qualityPage(mc),
-                advancedPage()
+                advancedPage(mc)
         };
     }
 
     private static VOptionPage renderingPage(final Minecraft mc) {
         return new VOptionPage("Rendering",
+                new VOptionBlock("Presets",
+                        new VActionOption("Stable",
+                                "Everything back to the values this mod ships with. This is the safe "
+                                        + "starting point: nothing is traded away for speed, and it "
+                                        + "behaves the same on every driver. Minecraft's own settings "
+                                        + "are left alone.",
+                                Cost.FREE, "Apply",
+                                new VActionOption.Action() {
+                                    @Override
+                                    public void run() {
+                                        VulkanPresets.stable();
+                                    }
+                                }),
+                        new VActionOption("Balanced",
+                                "Caps the draw distances vanilla leaves far wider than anyone can "
+                                        + "actually see, and thins out particles. Costs almost nothing "
+                                        + "visually and is the biggest easy win on busy worlds.",
+                                Cost.FREE, "Apply",
+                                new VActionOption.Action() {
+                                    @Override
+                                    public void run() {
+                                        VulkanPresets.balanced(mc);
+                                    }
+                                }),
+                        new VActionOption("Performance",
+                                "Trades looks for frames: short entity distances, no texture "
+                                        + "animation, minimal particles, fast graphics. The world will "
+                                        + "visibly lose detail — this is the one to pick when the "
+                                        + "framerate matters more than the view.",
+                                Cost.FREE, "Apply",
+                                new VActionOption.Action() {
+                                    @Override
+                                    public void run() {
+                                        VulkanPresets.performance(mc);
+                                    }
+                                })),
                 new VOptionBlock("Vulkan",
                         new VSwitchOption("Vulkan Terrain",
                                 "Draw the opaque world through Vulkan instead of OpenGL. "
-                                        + "Turning it off returns to vanilla rendering immediately.",
-                                VOption.Impact.HIGH, null,
+                                        + "Turning it off returns to vanilla rendering immediately. "
+                                        + "The Vulkan path keeps a second copy of the world geometry "
+                                        + "in video memory, which is where the VRAM cost comes from.",
+                                Cost.of(Level.MEDIUM, Level.HIGH, Level.HIGH), null,
                                 new VSwitchOption.Access() {
                                     @Override
                                     public boolean get() {
@@ -51,8 +103,11 @@ final class VulkanOptions {
                 new VOptionBlock("View",
                         new VRangeOption("Render Distance",
                                 "How far chunks are drawn. Beyond 32 the vanilla chunk grid itself "
-                                        + "costs a lot of CPU and RAM, and servers may cap it anyway.",
-                                VOption.Impact.HIGH, null, 2, 64, 1, " chunks", null,
+                                        + "costs a lot of CPU and RAM before this mod sees anything, "
+                                        + "and servers may cap it anyway. The single most expensive "
+                                        + "setting in the game, on all three resources at once.",
+                                Cost.of(Level.HIGH, Level.HIGH, Level.HIGH), null,
+                                2, 64, 1, " chunks", null,
                                 new VRangeOption.Access() {
                                     @Override
                                     public int get() {
@@ -67,8 +122,10 @@ final class VulkanOptions {
                                 }),
                         new VRangeOption("Max Framerate",
                                 "Frame cap. 260 means unlimited. A cap below your display's refresh "
-                                        + "rate lowers GPU load and heat.",
-                                VOption.Impact.MEDIUM, null, 10, 260, 10, " fps", null,
+                                        + "rate lowers load, heat and fan noise without costing you "
+                                        + "anything you could see.",
+                                Cost.of(Level.HIGH, Level.HIGH, Level.NONE), null,
+                                10, 260, 10, " fps", null,
                                 new VRangeOption.Access() {
                                     @Override
                                     public int get() {
@@ -81,10 +138,42 @@ final class VulkanOptions {
                                         mc.gameSettings.saveOptions();
                                     }
                                 }),
+                        new VSwitchOption("Zoom",
+                                "Hold the zoom key to narrow the field of view, the way OptiFine "
+                                        + "does it. Mouse sensitivity is scaled to match while it is "
+                                        + "held, otherwise the view would sweep across the screen far "
+                                        + "too fast to aim with. Rebind the key under Controls.",
+                                Cost.FREE, null,
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return VulkanConfig.isZoomEnabled();
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        VulkanConfig.setZoomEnabled(value);
+                                    }
+                                }),
+                        new VRangeOption("Zoom Level",
+                                "How far the zoom key narrows the field of view. 4 means a quarter "
+                                        + "of it, which is what OptiFine uses.",
+                                Cost.FREE, null, 2, 10, 1, "x", null,
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return (int) VulkanConfig.getZoomFactor();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setZoomFactor(value);
+                                    }
+                                }),
                         new VSwitchOption("VSync",
                                 "Lock the framerate to the monitor's refresh rate. Removes tearing, "
                                         + "and caps FPS at your refresh rate.",
-                                VOption.Impact.HIGH, null,
+                                Cost.of(Level.MEDIUM, Level.MEDIUM, Level.NONE), null,
                                 new VSwitchOption.Access() {
                                     @Override
                                     public boolean get() {
@@ -108,8 +197,10 @@ final class VulkanOptions {
                                 "Stop drawing mobs, items and other entities past this distance. "
                                         + "Vanilla uses a per-entity limit that is often far larger "
                                         + "than you can see. The biggest win in crowded worlds, mob "
-                                        + "farms and busy servers.",
-                                VOption.Impact.HIGH, null, 0, 256, 8, " blocks", "Vanilla",
+                                        + "farms and busy servers — and almost entirely a CPU one, "
+                                        + "since each entity is decided and submitted one at a time.",
+                                Cost.of(Level.HIGH, Level.MEDIUM, Level.NONE), null,
+                                0, 256, 8, " blocks", "Vanilla",
                                 new VRangeOption.Access() {
                                     @Override
                                     public int get() {
@@ -125,7 +216,8 @@ final class VulkanOptions {
                                 "Same limit for chests, signs, banners and other blocks with their "
                                         + "own renderer. These are drawn one by one, so a low limit "
                                         + "helps a lot in storage rooms.",
-                                VOption.Impact.HIGH, null, 0, 128, 8, " blocks", "Vanilla",
+                                Cost.of(Level.HIGH, Level.MEDIUM, Level.NONE), null,
+                                0, 128, 8, " blocks", "Vanilla",
                                 new VRangeOption.Access() {
                                     @Override
                                     public int get() {
@@ -139,7 +231,7 @@ final class VulkanOptions {
                                 }),
                         new VSwitchOption("Entity Shadows",
                                 "The dark blob under every entity. Each one is an extra draw.",
-                                VOption.Impact.LOW, null,
+                                Cost.of(Level.LOW, Level.LOW, Level.NONE), null,
                                 new VSwitchOption.Access() {
                                     @Override
                                     public boolean get() {
@@ -157,7 +249,8 @@ final class VulkanOptions {
                                 "Framerate while the window is minimised or in the background. With "
                                         + "the frame cap on unlimited the game otherwise keeps the GPU "
                                         + "at full load drawing frames nobody sees.",
-                                VOption.Impact.HIGH, null, 0, 60, 5, " fps", "Off",
+                                Cost.of(Level.HIGH, Level.HIGH, Level.NONE), null,
+                                0, 60, 5, " fps", "Off",
                                 new VRangeOption.Access() {
                                     @Override
                                     public int get() {
@@ -174,7 +267,7 @@ final class VulkanOptions {
                                 "Water, lava, fire, portals and every animated modded block upload a "
                                         + "new frame every tick, on screen or not. Turning them off is "
                                         + "a straight win in modpacks; the blocks just stop moving.",
-                                VOption.Impact.MEDIUM, null,
+                                Cost.of(Level.MEDIUM, Level.MEDIUM, Level.NONE), null,
                                 new VSwitchOption.Access() {
                                     @Override
                                     public boolean get() {
@@ -190,7 +283,7 @@ final class VulkanOptions {
                         new VCyclingOption("Particles",
                                 "How many particles the game spawns. Minimal is a large win near "
                                         + "fire, potions and redstone.",
-                                VOption.Impact.MEDIUM, null,
+                                Cost.of(Level.HIGH, Level.MEDIUM, Level.NONE), null,
                                 new String[]{"All", "Decreased", "Minimal"},
                                 new VCyclingOption.Access() {
                                     @Override
@@ -211,8 +304,9 @@ final class VulkanOptions {
                 new VOptionBlock("World",
                         new VCyclingOption("Graphics",
                                 "Fast drops transparent leaves and simplifies water. Mostly a CPU "
-                                        + "and chunk-build win, since it removes geometry.",
-                                VOption.Impact.MEDIUM, null,
+                                        + "and chunk-build win, since it removes geometry — which is "
+                                        + "also why it frees a little video memory.",
+                                Cost.of(Level.MEDIUM, Level.MEDIUM, Level.LOW), null,
                                 new String[]{"Fast", "Fancy"},
                                 new VCyclingOption.Access() {
                                     @Override
@@ -229,8 +323,9 @@ final class VulkanOptions {
                                 }),
                         new VCyclingOption("Smooth Lighting",
                                 "Ambient occlusion baked into chunk geometry. Costs chunk build "
-                                        + "time, not frame time.",
-                                VOption.Impact.LOW, null,
+                                        + "time, not frame time — so it shows up as stutter while the "
+                                        + "world loads, not as a lower framerate standing still.",
+                                Cost.cpu(Level.MEDIUM), null,
                                 new String[]{"Off", "Minimum", "Maximum"},
                                 new VCyclingOption.Access() {
                                     @Override
@@ -248,8 +343,10 @@ final class VulkanOptions {
                         new VRangeOption("Mipmap Levels",
                                 "Smaller copies of the block atlas for distant surfaces. This mod "
                                         + "copies them into Vulkan, so raising this removes shimmer "
-                                        + "far away and is easier on the texture cache.",
-                                VOption.Impact.LOW, "Applies after the texture atlas reloads.",
+                                        + "far away and is easier on the texture cache. Raising it "
+                                        + "usually costs nothing and can even gain a little.",
+                                Cost.of(Level.NONE, Level.MEDIUM, Level.LOW),
+                                "Applies after the texture atlas reloads.",
                                 0, 4, 1, "", "Off",
                                 new VRangeOption.Access() {
                                     @Override
@@ -273,14 +370,65 @@ final class VulkanOptions {
                                 })));
     }
 
-    private static VOptionPage advancedPage() {
+    private static VOptionPage advancedPage(final Minecraft mc) {
         return new VOptionPage("Advanced",
+                new VOptionBlock("Memory",
+                        new VCyclingOption("Geometry Budget",
+                                "How much video memory the world geometry may take before the "
+                                        + "renderer stops growing its buffer generously and starts "
+                                        + "creeping. Growing that buffer stops the GPU and re-uploads "
+                                        + "every chunk, so a larger budget on a card that has the "
+                                        + "memory to spare removes those stutters. On a small card a "
+                                        + "lower value keeps the footprint tight. Auto uses a quarter "
+                                        + "of what the GPU reports. Chunks are never dropped to stay "
+                                        + "inside the budget — it steers growth, it is not a wall.",
+                                Cost.of(Level.LOW, Level.NONE, Level.HIGH),
+                                "Applies after the game restarts.",
+                                BUDGET_LABELS,
+                                new VCyclingOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        int value = VulkanConfig.getGeometryBudgetMiB();
+                                        for (int i = 0; i < BUDGET_VALUES.length; i++) {
+                                            if (BUDGET_VALUES[i] == value) {
+                                                return i;
+                                            }
+                                        }
+                                        return 0;
+                                    }
+
+                                    @Override
+                                    public void set(int index) {
+                                        VulkanConfig.setGeometryBudgetMiB(BUDGET_VALUES[index]);
+                                    }
+                                }),
+                        new VRangeOption("Frames In Flight",
+                                "How many terrain frames the CPU may prepare before waiting for the "
+                                        + "GPU. Higher hides stalls when the CPU is the bottleneck, "
+                                        + "at the cost of one more frame of input delay and another "
+                                        + "copy of the per-frame buffers. 2 is the safe default.",
+                                Cost.of(Level.MEDIUM, Level.LOW, Level.LOW),
+                                "Applies after the game restarts.",
+                                1, 3, 1, " frames", null,
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getFramesInFlight();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setFramesInFlight(value);
+                                    }
+                                })),
                 new VOptionBlock("Compositing",
                         new VSwitchOption("Depth Blit",
                                 "Copy Vulkan's depth buffer into the game's with hardware blit "
                                         + "instead of writing it per pixel in a shader. Faster, but "
-                                        + "needs a driver that can share a 24-bit depth target.",
-                                VOption.Impact.MEDIUM, "Applies after the window is resized or the game restarts.",
+                                        + "needs a driver that can share a 24-bit depth target; the "
+                                        + "renderer falls back on its own if it cannot.",
+                                Cost.gpu(Level.MEDIUM),
+                                "Applies after the window is resized or the game restarts.",
                                 new VSwitchOption.Access() {
                                     @Override
                                     public boolean get() {
@@ -294,8 +442,9 @@ final class VulkanOptions {
                                 }),
                         new VSwitchOption("Backface Culling",
                                 "Skip triangles facing away from the camera. Only turn this off to "
-                                        + "diagnose missing or inside-out geometry.",
-                                VOption.Impact.MEDIUM, "Applies after the game restarts.",
+                                        + "diagnose missing or inside-out geometry — with it off the "
+                                        + "GPU shades roughly twice the triangles for nothing.",
+                                Cost.gpu(Level.HIGH), "Applies after the game restarts.",
                                 new VSwitchOption.Access() {
                                     @Override
                                     public boolean get() {
@@ -312,7 +461,7 @@ final class VulkanOptions {
                                 "Write everything about the renderer, your mods and your settings to "
                                         + "logs/vulkanmod112-diagnostics.log. Turn this on before "
                                         + "reporting a problem — the file answers most questions on its own.",
-                                VOption.Impact.LOW, null,
+                                Cost.cpu(Level.LOW), null,
                                 new VSwitchOption.Access() {
                                     @Override
                                     public boolean get() {
@@ -326,7 +475,7 @@ final class VulkanOptions {
                                 }),
                         new VRangeOption("Log Interval",
                                 "How often a snapshot is appended to the diagnostics file.",
-                                VOption.Impact.NONE, null, 1, 60, 1, " s", null,
+                                Cost.FREE, null, 1, 60, 1, " s", null,
                                 new VRangeOption.Access() {
                                     @Override
                                     public int get() {
@@ -341,7 +490,7 @@ final class VulkanOptions {
                         new VSwitchOption("Diagnostic Overlay",
                                 "Small Vulkan-rendered test image in the corner. Proves the interop "
                                         + "path works; costs a submit and two semaphore waits a frame.",
-                                VOption.Impact.LOW, null,
+                                Cost.of(Level.LOW, Level.LOW, Level.NONE), null,
                                 new VSwitchOption.Access() {
                                     @Override
                                     public boolean get() {
@@ -353,6 +502,19 @@ final class VulkanOptions {
                                         VulkanConfig.setOverlayEnabled(value);
                                     }
                                 })));
+    }
+
+    /** Device-local memory the GPU reports, for the screen header. 0 if unknown. */
+    static int vramMegabytes() {
+        VulkanBridge bridge = VulkanLoader.bridgeIfReady();
+        if (bridge == null) {
+            return 0;
+        }
+        try {
+            return bridge.vramMegabytes();
+        } catch (Throwable ignored) {
+            return 0;
+        }
     }
 
     /** Kept so the class is obviously client-side only. */

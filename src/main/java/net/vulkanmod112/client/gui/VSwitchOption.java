@@ -11,8 +11,8 @@ public final class VSwitchOption extends VOption {
 
     private final Access access;
 
-    public VSwitchOption(String name, String tooltip, Impact impact, String appliesWhen, Access access) {
-        super(name, tooltip, impact, appliesWhen);
+    public VSwitchOption(String name, String tooltip, Cost cost, String appliesWhen, Access access) {
+        super(name, tooltip, cost, appliesWhen);
         this.access = access;
     }
 
