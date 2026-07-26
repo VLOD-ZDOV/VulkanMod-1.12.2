@@ -18,8 +18,14 @@ public final class ChunkMirror {
     public static void onBufferData(int glBufferId, ByteBuffer data) {
         VulkanBridge bridge = VulkanLoader.bridgeIfReady();
         if (bridge != null && bridge.isInitialized()) {
-            // duplicate(): the mirror must not disturb position/limit the GL upload reads
-            bridge.mirrorChunkBuffer(glBufferId, data.duplicate());
+            // Passed straight through rather than duplicated. This runs for
+            // every chunk the game uploads — a burst of them every time the
+            // camera turns — and a defensive copy of the buffer object was an
+            // allocation per upload. The mirror reads the address and the
+            // remaining count and touches neither position nor limit, which
+            // the bridge documents as a requirement, so the GL upload that
+            // follows still sees exactly what it expects.
+            bridge.mirrorChunkBuffer(glBufferId, data);
         }
     }
 

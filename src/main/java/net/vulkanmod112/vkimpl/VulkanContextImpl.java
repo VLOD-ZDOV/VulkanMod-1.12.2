@@ -424,6 +424,14 @@ public final class VulkanContextImpl implements VulkanBridge {
     }
 
     @Override
+    public synchronized void updateFogState(float[] fog) {
+        if (!initialized || !interopCapable) {
+            return;
+        }
+        terrainRenderer().setFogState(fog);
+    }
+
+    @Override
     public synchronized void updateLightmapData(int[] argb) {
         if (!initialized || !interopCapable) {
             return;

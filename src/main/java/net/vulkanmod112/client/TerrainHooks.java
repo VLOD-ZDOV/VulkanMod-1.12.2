@@ -56,6 +56,9 @@ public final class TerrainHooks {
     private static final float[] MV = new float[16];
     private static final float[] PROJ = new float[16];
     private static final float[] MVP = new float[16];
+    /** r, g, b, mode, start, end, density — handed to the renderer each frame. */
+    private static final float[] FOG = new float[7];
+    private static final FloatBuffer FOG_COLOR = BufferUtils.createFloatBuffer(16);
 
     /** Packed per chunk: glBufferId, blockX, blockY, blockZ. */
     private static int[] chunkData = new int[1024];
@@ -92,6 +95,14 @@ public final class TerrainHooks {
 
     /** Returns true when the Vulkan side took the layer and GL must skip it. */
     public static boolean renderChunkLayer(BlockRenderLayer layer, List<RenderChunk> chunks) {
+        // TRANSLUCENT stays on the vanilla path, and the Vulkan side rejects it
+        // outright. Leaving before packChunks matters: water and glass make a
+        // long chunk list at high render distances, and every frame it was
+        // walked, packed and thrown away. It also kept the drawn-chunk counter
+        // reporting chunks nothing ever drew.
+        if (layer == BlockRenderLayer.TRANSLUCENT) {
+            return false;
+        }
         if (!terrainEnabled() || broken) {
             return false;
         }
@@ -110,6 +121,8 @@ public final class TerrainHooks {
             int count = packChunks(layer, chunks);
             if (layer == BlockRenderLayer.SOLID) {
                 captureMatrices();
+                captureFog();
+                bridge.updateFogState(FOG);
                 if (lightmapColors != null) {
                     bridge.updateLightmapData(lightmapColors);
                 }
@@ -128,9 +141,16 @@ public final class TerrainHooks {
         }
     }
 
+    /**
+     * Launch flag, read once. System.getProperty locks the global Properties
+     * table, and this sits on the per-layer path — the flag cannot change
+     * while the game runs, so there is nothing to re-read.
+     */
+    private static final boolean TERRAIN_ALLOWED_BY_PROPERTY =
+            !"false".equals(System.getProperty("vulkanmod112.terrain"));
+
     private static boolean terrainEnabled() {
-        return !"false".equals(System.getProperty("vulkanmod112.terrain"))
-                && VulkanConfig.isTerrainEnabled();
+        return TERRAIN_ALLOWED_BY_PROPERTY && VulkanConfig.isTerrainEnabled();
     }
 
     private static boolean checkRendererCompatibility() {
@@ -183,6 +203,41 @@ public final class TerrainHooks {
             lastChunksDrawn += i / 4;
         }
         return i / 4;
+    }
+
+    /**
+     * Copies the fixed-function fog the game has already configured for this
+     * frame, so the Vulkan terrain fades exactly like everything OpenGL still
+     * draws. Underwater this is the difference between entities turning the
+     * colour of the water and the blocks behind them staying perfectly clear.
+     *
+     * Read from GL rather than recomputed, because the game changes fog for
+     * water, lava, blindness, the void and render distance, and mods add more.
+     */
+    private static void captureFog() {
+        if (!VulkanConfig.isFogEnabled() || !GL11.glIsEnabled(GL11.GL_FOG)) {
+            FOG[3] = 0.0f; // mode 0: the shader skips the blend
+            return;
+        }
+        FOG_COLOR.clear();
+        GL11.glGetFloat(GL11.GL_FOG_COLOR, FOG_COLOR);
+        FOG[0] = FOG_COLOR.get(0);
+        FOG[1] = FOG_COLOR.get(1);
+        FOG[2] = FOG_COLOR.get(2);
+        int mode = GL11.glGetInteger(GL11.GL_FOG_MODE);
+        if (mode == GL11.GL_LINEAR) {
+            FOG[3] = 1.0f;
+        } else if (mode == GL11.GL_EXP) {
+            FOG[3] = 2.0f;
+        } else if (mode == GL11.GL_EXP2) {
+            FOG[3] = 3.0f;
+        } else {
+            FOG[3] = 0.0f;
+            return;
+        }
+        FOG[4] = GL11.glGetFloat(GL11.GL_FOG_START);
+        FOG[5] = GL11.glGetFloat(GL11.GL_FOG_END);
+        FOG[6] = GL11.glGetFloat(GL11.GL_FOG_DENSITY);
     }
 
     /** MVP = depth-range fix (GL [-1,1] → VK [0,1]) * projection * modelview. */

@@ -198,7 +198,23 @@ final class VkTerrainRenderer {
     private final long[] lightmapStagingMapped = new long[framesInFlight];
     private ByteBuffer lightmapReadBuffer;
     private boolean lightmapImageInitialized;
+    /** Hash of the last uploaded lightmap; see beginFrame. */
+    private int lightmapHash;
+    private boolean lightmapDirty = true;
+    /**
+     * How often the lightmap actually changed, against how many frames were
+     * drawn. The game recomputes it once a tick, so a healthy ratio is about
+     * 20 a second regardless of framerate — which is also why lighting changes
+     * look stepped underwater, where the brightness ramps continuously.
+     */
+    private long lightmapUploads;
+    private long lightmapFrames;
     private int[] lightmapData;
+    /**
+     * rgb + mode, then start/end/density/unused. Mode 0 means the game has fog
+     * switched off, and the shader skips the blend entirely.
+     */
+    private final float[] fogState = new float[8];
 
     // Size-dependent shared targets
     private int width;
@@ -341,6 +357,13 @@ final class VkTerrainRenderer {
     }
 
     /** CPU-side lightmap colors (256 ARGB ints); preferred over glGetTexImage. */
+    /** rgb, mode, start, end, density, unused — see {@link #fogState}. */
+    synchronized void setFogState(float[] fog) {
+        if (fog != null && fog.length >= 7) {
+            System.arraycopy(fog, 0, fogState, 0, 7);
+        }
+    }
+
     synchronized void setLightmapData(int[] argb) {
         if (argb != null && argb.length == LIGHTMAP_SIZE * LIGHTMAP_SIZE) {
             this.lightmapData = argb;
@@ -428,6 +451,12 @@ final class VkTerrainRenderer {
                 .append(" ms, submit+composite ")
                 .append(String.format("%.2f", submitCompositeNanos / (double) Math.max(1, timingSamples()) / 1e6))
                 .append(" ms, GPU ").append(gpuTimeText()).append('\n');
+        sb.append("  lightmap: ").append(lightmapUploads).append(" changes over ")
+                .append(lightmapFrames).append(" frames")
+                .append(lightmapFrames > 0
+                        ? String.format(" (1 per %.1f frames)", lightmapFrames / (double) Math.max(1, lightmapUploads))
+                        : "")
+                .append("; the game recomputes it once a tick, so ~20/s is expected\n");
         sb.append("  index buffer: ").append(quadIndexCapacityQuads).append(" quads")
                 .append(", draw batch ").append(indirectDrawCapacity)
                 .append(", frames in flight ").append(framesInFlight).append('\n');
@@ -531,8 +560,22 @@ final class VkTerrainRenderer {
             frameVertices = 0;
             frameSkipped = 0;
 
+            // The lightmap changes when the light level does — dawn, dusk,
+            // walking into a cave — and is identical on the great majority of
+            // frames. Hashing 256 ints is far cheaper than writing 1 KiB of
+            // staging and running two layout barriers plus a copy for data
+            // the image already holds.
+            lightmapDirty = true;
+            lightmapFrames++;
             if (lightmapData != null) {
-                writeLightmapStaging(lightmapData);
+                int hash = hashLightmap(lightmapData);
+                if (lightmapImageInitialized && hash == lightmapHash) {
+                    lightmapDirty = false;
+                } else {
+                    lightmapHash = hash;
+                    lightmapUploads++;
+                    writeLightmapStaging(lightmapData);
+                }
             } else {
                 readLightmapFromGL(); // fallback: stalls the GL pipeline
             }
@@ -550,7 +593,9 @@ final class VkTerrainRenderer {
                         queryPool, slot * 2);
             }
 
-            recordLightmapUpload(stack);
+            if (lightmapDirty) {
+                recordLightmapUpload(stack);
+            }
 
             VkClearValue.Buffer clears = VkClearValue.calloc(2, stack);
             clears.get(0).color()
@@ -577,6 +622,14 @@ final class VkTerrainRenderer {
             }
             vkCmdPushConstants(commandBuffer, pipelineLayout,
                     VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, mvpPush);
+
+            // Fog is constant across the frame; push it once alongside the MVP.
+            ByteBuffer fogPush = stack.malloc(32);
+            for (int i = 0; i < 8; i++) {
+                fogPush.putFloat(i * 4, fogState[i]);
+            }
+            vkCmdPushConstants(commandBuffer, pipelineLayout,
+                    VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 80, fogPush);
 
             // Standard (y-down) viewport: the GL-sourced matrices produce a
             // vertically flipped image in Vulkan's convention, which is
@@ -673,16 +726,11 @@ final class VkTerrainRenderer {
         }
         sb.append(" offset=[").append(push.getFloat(0)).append(' ').append(push.getFloat(4))
                 .append(' ').append(push.getFloat(8)).append(']');
+        // The first vertices used to be dumped here from the chunk's own
+        // staging copy. Uploads now pass through a shared ring that is
+        // overwritten within a few hundred chunks, so there is no copy left to
+        // read — and the geometry buffer is device-local.
         sb.append(" verts=").append(entry.size / BLOCK_VERTEX_STRIDE);
-        for (int v = 0; v < 2 && (v + 1) * BLOCK_VERTEX_STRIDE <= entry.size; v++) {
-            // The draw buffer is device-local; diagnostics inspect its
-            // persistently mapped staging copy instead.
-            long base = entry.stagingMappedAddress + (long) v * BLOCK_VERTEX_STRIDE;
-            sb.append(String.format(" v%d=(%.2f %.2f %.2f)", v,
-                    MemoryUtil.memGetFloat(base),
-                    MemoryUtil.memGetFloat(base + 4),
-                    MemoryUtil.memGetFloat(base + 8)));
-        }
         LOGGER.info(sb.toString());
     }
 
@@ -901,6 +949,15 @@ final class VkTerrainRenderer {
     // ------------------------------------------------------------------
 
     /** ARGB ints → RGBA8 staging bytes; no GL involvement, no pipeline stall. */
+    /** Order-sensitive so a swap of two texels still counts as a change. */
+    private static int hashLightmap(int[] argb) {
+        int hash = 1;
+        for (int i = 0; i < argb.length; i++) {
+            hash = hash * 31 + argb[i];
+        }
+        return hash;
+    }
+
     private void writeLightmapStaging(int[] argb) {
         for (int i = 0; i < argb.length; i++) {
             int v = argb[i];
@@ -1331,7 +1388,10 @@ final class VkTerrainRenderer {
         pushRange.get(0)
                 .stageFlags(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
                 .offset(0)
-                .size(80);
+                // mat4 mvp | vec4 offsetAndCutoff | vec4 fogColor | vec4 fogParams.
+                // Vulkan guarantees 128 bytes, so this stays inside the floor
+                // every implementation has to provide.
+                .size(112);
         VkPipelineLayoutCreateInfo layoutInfo = VkPipelineLayoutCreateInfo.calloc(stack)
                 .sType(VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO)
                 .pSetLayouts(stack.longs(descriptorSetLayout))

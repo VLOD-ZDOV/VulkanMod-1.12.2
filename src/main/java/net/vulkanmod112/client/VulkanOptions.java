@@ -138,6 +138,26 @@ final class VulkanOptions {
                                         mc.gameSettings.saveOptions();
                                     }
                                 }),
+                        new VSwitchOption("Fog",
+                                "Fade the Vulkan-drawn world into the distance the way the rest of "
+                                        + "the scene already does. Without it the terrain is the "
+                                        + "one thing in view with no fog at all, which shows up "
+                                        + "worst underwater: fish and mobs take on the colour of "
+                                        + "the water while the blocks behind them stay perfectly "
+                                        + "clear. Off leaves the world ending in a hard edge and is "
+                                        + "very slightly faster.",
+                                Cost.gpu(Level.LOW), null,
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return VulkanConfig.isFogEnabled();
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        VulkanConfig.setFogEnabled(value);
+                                    }
+                                }),
                         new VSwitchOption("Zoom",
                                 "Hold the zoom key to narrow the field of view, the way OptiFine "
                                         + "does it. Mouse sensitivity is scaled to match while it is "
@@ -242,6 +262,35 @@ final class VulkanOptions {
                                     public void set(boolean value) {
                                         mc.gameSettings.entityShadows = value;
                                         mc.gameSettings.saveOptions();
+                                    }
+                                })),
+                new VOptionBlock("Chunks",
+                        new VSwitchOption("Preload Offscreen Chunks",
+                                "Let chunks behind you be built too. Vanilla only ever schedules "
+                                        + "chunks that are on screen right now, so at high render "
+                                        + "distances the world fills in along whatever you look at, "
+                                        + "and turning around means waiting again. This tops the "
+                                        + "build queue up from the rest of the grid once the visible "
+                                        + "chunks are handled, so they never lose their place in "
+                                        + "line. Off by default, and the reason is worth knowing "
+                                        + "before you turn it on: measured at render distance 64, "
+                                        + "330 fps without it against 120-140 with. Filling the "
+                                        + "world in is not free work the game was skipping out of "
+                                        + "laziness — it is continuous chunk building, and it also "
+                                        + "means video memory reaches what the distance really "
+                                        + "implies instead of only what you have looked at. Worth it "
+                                        + "if you would rather the world were there than have the "
+                                        + "frames.",
+                                Cost.of(Level.HIGH, Level.NONE, Level.MEDIUM), null,
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return VulkanConfig.isChunkPreloadEnabled();
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        VulkanConfig.setChunkPreloadEnabled(value);
                                     }
                                 })),
                 new VOptionBlock("Window",
