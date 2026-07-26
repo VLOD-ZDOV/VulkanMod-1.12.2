@@ -20,8 +20,10 @@ public abstract class GuiVideoSettingsMixin extends GuiScreen {
 
     @Inject(method = "initGui", at = @At("RETURN"))
     private void vulkanmod112$addButton(CallbackInfo ci) {
-        this.buttonList.add(new GuiButton(VULKANMOD112_SETTINGS, this.width / 2 - 100,
-                this.height - 52, 200, 20, "VulkanMod112 Settings..."));
+        // The options list owns y=32..height-32 and Done sits at height-27, so
+        // the only free space is the strip above the list.
+        this.buttonList.add(new GuiButton(VULKANMOD112_SETTINGS, this.width - 104, 6,
+                100, 20, "VulkanMod112"));
     }
 
     @Inject(method = "actionPerformed", at = @At("HEAD"), cancellable = true)

@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Settings screen rebuilt in VulkanMod's own shape: page tabs, a scrolling list of grouped options, and a panel describing the option under the cursor together with how much it is worth in frames.
+- Game-side optimisations with their own page. Entity and block-entity draw distances are capped independently of vanilla's per-object limits, and the vanilla settings that matter most for framerate are reachable without leaving the screen.
+
+### Fixed
+
+- The Video Settings entry point no longer lands on top of the options list; it sits in the free strip above it.
+
 ## [0.3.0] - 2026-07-26
 
 ### Added
