@@ -41,6 +41,8 @@ Useful JVM properties:
 - `-Dvulkanmod112.debugLoader=true` — print LWJGL loader diagnostics.
 - `-Dvulkanmod112.cull=false` — disable Vulkan terrain backface culling for visual debugging.
 - `-Dvulkanmod112.overlay=true` — show the legacy Vulkan demo overlay.
+- `-Dvulkanmod112.ultraLog=true` — write a full diagnostics report to `logs/vulkanmod112-diagnostics.log`; the same switch lives in the settings screen under Advanced.
+- `-Dvulkanmod112.extraRendererMarkers=name` — treat additional mod jars as renderer replacements, so the Vulkan terrain mixins are not loaded beside them.
 - `-Dvulkanmod112.depthBlit=false` — composite depth through the fragment shader instead of `glBlitFramebuffer`; use if depth looks wrong after the change.
 - `-Dvulkanmod112.allowIncompatibleRenderer=true` — test with OptiFine/shader-mod renderer replacements; unsupported and off by default.
 
@@ -54,6 +56,8 @@ For Vulkan/OpenGL sharing, both APIs must select the same GPU. On hybrid Linux s
 
 ## Compatibility and diagnostics
 
-OptiFine and legacy shader mods alter the same renderer classes as this mod. Their presence disables Vulkan terrain automatically and leaves vanilla rendering active. This is a safety measure, not claimed support.
+OptiFine and legacy shader mods replace the same renderer classes this mod rewrites. When one of them is installed, the terrain mixins are not registered at all, so the game boots on that renderer while this mod's settings screen and game-side optimisations stay active. Sharing terrain rendering between the two is not possible: the vertex format and pass order differ, and with a shader pack loaded the format changes again. See [ROADMAP.md](ROADMAP.md) section G.
 
-The F3 overlay reports GPU selection, VBO mirror statistics, active terrain mode and chunk count. Periodic log entries report fence wait, command recording and submit/composite timings. Start with `validation=true` when debugging a driver or synchronisation issue.
+Any Forge build for 1.12.2 works; the only hard dependency is MixinBooter 10.7 or newer, which Forge now reports itself if missing.
+
+The F3 overlay reports GPU selection, VBO mirror statistics, active terrain mode and chunk count. Periodic log entries report fence wait, command recording, submit/composite and GPU timings. For anything more detailed, turn on Ultra Logging and attach `logs/vulkanmod112-diagnostics.log`. Start with `validation=true` when debugging a driver or synchronisation issue.

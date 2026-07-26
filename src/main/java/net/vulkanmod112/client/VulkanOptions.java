@@ -291,6 +291,36 @@ final class VulkanOptions {
                                     }
                                 })),
                 new VOptionBlock("Diagnostics",
+                        new VSwitchOption("Ultra Logging",
+                                "Write everything about the renderer, your mods and your settings to "
+                                        + "logs/vulkanmod112-diagnostics.log. Turn this on before "
+                                        + "reporting a problem — the file answers most questions on its own.",
+                                VOption.Impact.LOW, null,
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return VulkanConfig.isUltraLogEnabled();
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        VulkanConfig.setUltraLogEnabled(value);
+                                    }
+                                }),
+                        new VRangeOption("Log Interval",
+                                "How often a snapshot is appended to the diagnostics file.",
+                                VOption.Impact.NONE, null, 1, 60, 1, " s", null,
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getUltraLogSeconds();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setUltraLogSeconds(value);
+                                    }
+                                }),
                         new VSwitchOption("Diagnostic Overlay",
                                 "Small Vulkan-rendered test image in the corner. Proves the interop "
                                         + "path works; costs a submit and two semaphore waits a frame.",

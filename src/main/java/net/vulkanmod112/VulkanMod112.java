@@ -10,6 +10,9 @@ import org.apache.logging.log4j.Logger;
         name = Tags.MOD_NAME,
         version = Tags.VERSION,
         acceptedMinecraftVersions = "[1.12.2]",
+        // Any MixinBooter from 10.7 up works; naming it here turns a missing
+        // dependency into Forge's own error screen instead of a mixin crash.
+        dependencies = "required-after:mixinbooter@[10.7,)",
         clientSideOnly = true
 )
 public class VulkanMod112 {

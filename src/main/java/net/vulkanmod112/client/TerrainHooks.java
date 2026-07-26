@@ -123,6 +123,7 @@ public final class TerrainHooks {
         } catch (Throwable t) {
             broken = true;
             LOGGER.error("Vulkan terrain rendering failed — falling back to vanilla GL permanently", t);
+            Diagnostics.flushNow("terrain failed permanently: " + t);
             return false;
         }
     }
