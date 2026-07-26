@@ -8,9 +8,9 @@
   "mixins": [],
   "server": [],
   "client": [
-    "GuiVideoSettingsMixin",
-    "EntityRenderDistanceMixin",
-    "TileEntityRenderDistanceMixin",
-    "TextureMapAnimationMixin"
+    "VertexBufferMixin",
+    "VertexBufferAccessor",
+    "ChunkRenderContainerMixin",
+    "VboRenderListMixin"
   ]
 }

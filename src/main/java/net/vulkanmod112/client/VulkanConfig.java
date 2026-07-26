@@ -16,6 +16,7 @@ public final class VulkanConfig {
     /** 0 = leave vanilla's own limit alone. */
     private static int entityDistance;
     private static int tileEntityDistance;
+    private static boolean animationsEnabled = true;
     private static boolean depthBlitEnabled = true;
     private static boolean cullingEnabled = true;
 
@@ -33,6 +34,8 @@ public final class VulkanConfig {
                 "Stop drawing entities past this many blocks. 0 keeps vanilla's per-entity limit.");
         tileEntityDistance = config.getInt("tileEntityDistance", CATEGORY_OPTIMIZATION, 0, 0, 128,
                 "Stop drawing chests, signs and other block entities past this many blocks. 0 keeps vanilla's.");
+        animationsEnabled = config.getBoolean("animatedTextures", CATEGORY_OPTIMIZATION, true,
+                "Update animated block textures. Off skips the per-tick frame uploads for every animated sprite.");
         depthBlitEnabled = config.getBoolean("depthBlitEnabled", CATEGORY_ADVANCED, true,
                 "Copy Vulkan depth into the game's depth buffer with glBlitFramebuffer instead of a shader.");
         cullingEnabled = config.getBoolean("cullingEnabled", CATEGORY_ADVANCED, true,
@@ -81,6 +84,15 @@ public final class VulkanConfig {
     public static void setTileEntityDistance(int value) {
         tileEntityDistance = value;
         store(CATEGORY_OPTIMIZATION, "tileEntityDistance", value);
+    }
+
+    public static boolean areAnimationsEnabled() {
+        return animationsEnabled;
+    }
+
+    public static void setAnimationsEnabled(boolean value) {
+        animationsEnabled = value;
+        store(CATEGORY_OPTIMIZATION, "animatedTextures", value);
     }
 
     public static boolean isDepthBlitEnabled() {
