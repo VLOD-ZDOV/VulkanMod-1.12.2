@@ -152,6 +152,23 @@ final class VulkanOptions {
                                         mc.gameSettings.saveOptions();
                                     }
                                 })),
+                new VOptionBlock("Window",
+                        new VRangeOption("Background FPS Limit",
+                                "Framerate while the window is minimised or in the background. With "
+                                        + "the frame cap on unlimited the game otherwise keeps the GPU "
+                                        + "at full load drawing frames nobody sees.",
+                                VOption.Impact.HIGH, null, 0, 60, 5, " fps", "Off",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getBackgroundFpsLimit();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setBackgroundFpsLimit(value);
+                                    }
+                                })),
                 new VOptionBlock("Textures",
                         new VSwitchOption("Animated Textures",
                                 "Water, lava, fire, portals and every animated modded block upload a "

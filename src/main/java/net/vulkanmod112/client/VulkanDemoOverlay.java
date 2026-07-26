@@ -63,6 +63,7 @@ public final class VulkanDemoOverlay {
     public void onRenderTick(net.minecraftforge.fml.common.gameevent.TickEvent.RenderTickEvent event) {
         if (event.phase == net.minecraftforge.fml.common.gameevent.TickEvent.Phase.END) {
             Diagnostics.tick();
+            BackgroundThrottle.afterFrame();
         }
     }
 
