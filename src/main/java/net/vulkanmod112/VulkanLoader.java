@@ -56,19 +56,41 @@ public final class VulkanLoader {
     private static URL[] collectUrls() {
         List<URL> urls = new ArrayList<>();
         // Our own classes (in production the LWJGL 3 classes are shaded in here too)
-        urls.add(ownClassesRoot());
+        URL own = ownClassesRoot();
+        urls.add(own);
         // In the dev environment LWJGL 3 sits on the classpath as separate jars
-        for (String entry : System.getProperty("java.class.path", "").split(File.pathSeparator)) {
-            String name = new File(entry).getName();
-            if (LWJGL3_JAR.matcher(name).matches()) {
-                try {
-                    urls.add(new File(entry).toURI().toURL());
-                } catch (java.net.MalformedURLException ignored) {
+        // and has to be picked up from there. In production it is already
+        // shaded into our jar, and scanning must be skipped: on a platform that
+        // runs the game itself on LWJGL 3 — Cleanroom — the game's own jars
+        // match this pattern, and pulling a second, differently versioned LWJGL
+        // into the isolated loader is exactly the clash the loader exists to
+        // prevent.
+        if (!bundlesLwjgl3(own)) {
+            for (String entry : System.getProperty("java.class.path", "").split(File.pathSeparator)) {
+                String name = new File(entry).getName();
+                if (LWJGL3_JAR.matcher(name).matches()) {
+                    try {
+                        urls.add(new File(entry).toURI().toURL());
+                    } catch (java.net.MalformedURLException ignored) {
+                    }
                 }
             }
         }
         LOGGER.info("Vulkan classloader roots: {}", urls);
         return urls.toArray(new URL[0]);
+    }
+
+    /**
+     * Whether LWJGL 3 is shaded into our own root. Probed against that root
+     * alone rather than through the game's classloader, which on an LWJGL 3
+     * platform would answer yes for the game's copy as well.
+     */
+    private static boolean bundlesLwjgl3(URL own) {
+        try (URLClassLoader probe = new URLClassLoader(new URL[]{own}, null)) {
+            return probe.findResource("org/lwjgl/system/MemoryStack.class") != null;
+        } catch (java.io.IOException e) {
+            return false;
+        }
     }
 
     /**
