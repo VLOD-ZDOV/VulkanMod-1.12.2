@@ -719,13 +719,6 @@ final class VkChunkMirror {
      * enough — all of them have to be done.
      */
     private void waitForUploads() {
-        if (uploadSubmitted == null) {
-            // The ring is allocated on the first recorded batch, and this runs
-            // before that on the very first mirrored buffer: the geometry
-            // buffer is sized before anything has been submitted. A single
-            // boolean was null-safe by construction; an array is not.
-            return;
-        }
         for (int i = 0; i < UPLOAD_RING; i++) {
             if (uploadSubmitted[i]) {
                 check(vkWaitForFences(device(), uploadFences[i], true, 1_000_000_000L),
@@ -738,9 +731,6 @@ final class VkChunkMirror {
 
     /** True when no upload batch is still executing. Never blocks. */
     private boolean allUploadsComplete() {
-        if (uploadSubmitted == null) {
-            return true;
-        }
         for (int i = 0; i < UPLOAD_RING; i++) {
             if (uploadSubmitted[i] && vkGetFenceStatus(device(), uploadFences[i]) != VK_SUCCESS) {
                 return false;
