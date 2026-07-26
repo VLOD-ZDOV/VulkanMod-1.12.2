@@ -17,6 +17,7 @@ public final class VulkanConfig {
     private static int entityDistance;
     private static int tileEntityDistance;
     private static boolean animationsEnabled = true;
+    private static int backgroundFpsLimit = 10;
     private static boolean ultraLogEnabled;
     private static int ultraLogSeconds = 10;
     private static boolean depthBlitEnabled = true;
@@ -38,6 +39,8 @@ public final class VulkanConfig {
                 "Stop drawing chests, signs and other block entities past this many blocks. 0 keeps vanilla's.");
         animationsEnabled = config.getBoolean("animatedTextures", CATEGORY_OPTIMIZATION, true,
                 "Update animated block textures. Off skips the per-tick frame uploads for every animated sprite.");
+        backgroundFpsLimit = config.getInt("backgroundFpsLimit", CATEGORY_OPTIMIZATION, 10, 0, 60,
+                "Framerate cap while the game window is not active. 0 disables the cap.");
         ultraLogEnabled = config.getBoolean("ultraLog", CATEGORY_ADVANCED, false,
                 "Write a detailed diagnostics report to logs/vulkanmod112-diagnostics.log.");
         ultraLogSeconds = config.getInt("ultraLogSeconds", CATEGORY_ADVANCED, 10, 1, 120,
@@ -99,6 +102,15 @@ public final class VulkanConfig {
     public static void setAnimationsEnabled(boolean value) {
         animationsEnabled = value;
         store(CATEGORY_OPTIMIZATION, "animatedTextures", value);
+    }
+
+    public static int getBackgroundFpsLimit() {
+        return backgroundFpsLimit;
+    }
+
+    public static void setBackgroundFpsLimit(int value) {
+        backgroundFpsLimit = value;
+        store(CATEGORY_OPTIMIZATION, "backgroundFpsLimit", value);
     }
 
     public static boolean isUltraLogEnabled() {
