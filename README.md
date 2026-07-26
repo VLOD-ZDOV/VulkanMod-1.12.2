@@ -1,4 +1,4 @@
-# VulkanMod112 0.4.0
+# VulkanMod112 0.5.0
 
 Experimental Vulkan terrain renderer for Minecraft Forge 1.12.2. Minecraft still owns the window and OpenGL context; VulkanMod112 mirrors vanilla chunk VBOs to Vulkan, renders opaque terrain there, then composites colour and depth back into the game's framebuffer through GPU external-memory interop.
 

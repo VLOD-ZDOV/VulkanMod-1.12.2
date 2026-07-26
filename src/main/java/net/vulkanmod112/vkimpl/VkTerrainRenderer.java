@@ -673,16 +673,11 @@ final class VkTerrainRenderer {
         }
         sb.append(" offset=[").append(push.getFloat(0)).append(' ').append(push.getFloat(4))
                 .append(' ').append(push.getFloat(8)).append(']');
+        // The first vertices used to be dumped here from the chunk's own
+        // staging copy. Uploads now pass through a shared ring that is
+        // overwritten within a few hundred chunks, so there is no copy left to
+        // read — and the geometry buffer is device-local.
         sb.append(" verts=").append(entry.size / BLOCK_VERTEX_STRIDE);
-        for (int v = 0; v < 2 && (v + 1) * BLOCK_VERTEX_STRIDE <= entry.size; v++) {
-            // The draw buffer is device-local; diagnostics inspect its
-            // persistently mapped staging copy instead.
-            long base = entry.stagingMappedAddress + (long) v * BLOCK_VERTEX_STRIDE;
-            sb.append(String.format(" v%d=(%.2f %.2f %.2f)", v,
-                    MemoryUtil.memGetFloat(base),
-                    MemoryUtil.memGetFloat(base + 4),
-                    MemoryUtil.memGetFloat(base + 8)));
-        }
         LOGGER.info(sb.toString());
     }
 

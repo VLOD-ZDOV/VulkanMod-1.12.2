@@ -1,6 +1,20 @@
 # Changelog
 
-## [0.4.0] - unreleased
+## [0.5.0] - unreleased
+
+### Performance
+
+- Chunk uploads go through one shared staging ring instead of a persistently mapped staging buffer per chunk. Every mirrored chunk used to cost a `vkAllocateMemory`, a `vkCreateBuffer` and a `vkMapMemory`, and kept its pinned host copy for as long as the chunk lived — as much pinned system memory as the whole world took in VRAM. At render distance 12 that was already 4321 allocations, past the 4096 the Vulkan spec guarantees; at 64 it was tens of thousands, which is where drivers that hold close to the guarantee simply start failing the allocation.
+- Growing the shared geometry buffer copies the old contents on the GPU rather than re-uploading every chunk from the host. The old path pushed the entire mirrored world back across PCIe on each growth, and at high render distances there are several growths.
+
+### Fixed
+
+- The upload fence was created signalled and never reset before its first submission. `vkQueueSubmit` requires an unsignalled fence, and every wait on it afterwards returned immediately without the GPU having finished anything — so the upload command buffer was reset while still executing and its staging memory was reused underneath it. The symptom would have been corrupt geometry or a lost device with no reproducible pattern.
+- A geometry buffer replaced by a larger one is now freed only once every frame that could still name it has completed. Draws bind the buffer handle by value when they are recorded, so destroying it at replacement time could hand a destroyed handle to a submit.
+- Freed ranges in the geometry buffer are merged with their neighbours. Without that, flying around left the buffer as thousands of small adjacent holes that no rebuilt chunk fitted into, growing the buffer while the space was already there.
+- Zoom is eased over about a tenth of a second instead of snapping, timed off the wall clock. The state is decided on the 20 Hz tick, and interpolating on that clock is what made the transition look stepped. Mouse sensitivity now follows the same curve rather than jumping at the tick boundary.
+
+## [0.4.0] - 2026-07-26
 
 ### Added
 

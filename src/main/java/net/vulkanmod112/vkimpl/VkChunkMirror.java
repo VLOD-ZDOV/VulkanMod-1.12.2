@@ -32,11 +32,17 @@ import static org.lwjgl.vulkan.VK10.*;
  *
  * Every VBO upload the game performs is copied into a Vulkan vertex buffer
  * keyed by the GL buffer id, so the stage 3.3 terrain renderer can draw the
- * exact same geometry without touching OpenGL. The draw buffers are device
- * local; each has a persistently mapped system-memory staging buffer. Uploads
- * made while Minecraft rebuilds chunks are recorded together and submitted
- * once immediately before the terrain frame. This avoids the very expensive
- * PCIe reads caused by using host-visible memory as a vertex buffer.
+ * exact same geometry without touching OpenGL.
+ *
+ * All chunks are suballocations of one device-local buffer, and every upload
+ * passes through one host-visible staging ring. Uploads made while Minecraft
+ * rebuilds chunks are recorded together and submitted once immediately before
+ * the terrain frame, which avoids the very expensive PCIe reads that using
+ * host-visible memory as a vertex buffer would cause.
+ *
+ * Note what this mirror costs, because it is not free: the world's geometry
+ * exists twice, once in the game's own GL buffers and once here. At high
+ * render distances that doubling is the dominant memory cost of the mod.
  */
 final class VkChunkMirror {
 
@@ -44,11 +50,13 @@ final class VkChunkMirror {
     /** Vanilla's VboRenderList uses pos3f|color4ub|uv2f|light2s. */
     private static final int BLOCK_VERTEX_STRIDE = 28;
 
+    /**
+     * A chunk's slice of the shared geometry buffer. Nothing else: uploads go
+     * through one shared staging ring, so a mirrored chunk costs a range in
+     * VRAM and this object, not a Vulkan allocation of its own.
+     */
     static final class Entry {
         long offset;
-        long stagingBuffer;
-        long stagingMemory;
-        long stagingMappedAddress;
         int capacity;
         int size;
     }
@@ -210,11 +218,39 @@ final class VkChunkMirror {
         }
     }
 
+    /**
+     * A geometry buffer replaced by a larger one, waiting for every frame that
+     * could still name it to finish.
+     *
+     * Draws bind the buffer handle by value at record time, so a frame already
+     * recorded keeps referring to the old handle even after the field has been
+     * reassigned. Destroying it at replacement time would be a use-after-free
+     * on submit — the same reason mirrored ranges are retired rather than freed.
+     */
+    private static final class RetiredBuffer {
+        final long buffer;
+        final long memory;
+        final long frameStamp;
+
+        RetiredBuffer(long buffer, long memory, long frameStamp) {
+            this.buffer = buffer;
+            this.memory = memory;
+            this.frameStamp = frameStamp;
+        }
+    }
+
+    private final List<RetiredBuffer> retiredBuffers = new ArrayList<RetiredBuffer>();
+
+    /**
+     * A hole in the geometry buffer. Kept sorted by offset so neighbours can
+     * be merged; capacity is a long because a fully merged buffer can exceed
+     * what an int holds.
+     */
     private static final class FreeRange {
         final long offset;
-        final int capacity;
+        final long capacity;
 
-        FreeRange(long offset, int capacity) {
+        FreeRange(long offset, long capacity) {
             this.offset = offset;
             this.capacity = capacity;
         }
@@ -258,6 +294,30 @@ final class VkChunkMirror {
     private boolean uploadsRecording;
     private boolean uploadsSubmitted;
 
+    /**
+     * One host-visible ring every chunk upload passes through, instead of a
+     * permanently mapped staging buffer per chunk.
+     *
+     * The old scheme cost a {@code vkAllocateMemory}, a {@code vkCreateBuffer}
+     * and a {@code vkMapMemory} for every mirrored chunk, and kept the pinned
+     * copy alive for as long as the chunk existed — as much pinned system
+     * memory as the whole world took in VRAM. At render distance 12 that was
+     * already 4321 allocations; at 64 it is tens of thousands, which is both
+     * far past the 4096 the Vulkan spec guarantees and enough pinned memory to
+     * matter on its own.
+     *
+     * Writes advance {@link #stagingHead}. When a write would run off the end,
+     * the recorded copies are submitted and waited on before the head returns
+     * to zero, so nothing is overwritten while the GPU is still reading it.
+     */
+    private static final long STAGING_RING_MIN = 32L * 1024L * 1024L;
+    private long stagingBuffer;
+    private long stagingMemory;
+    private long stagingMappedAddress;
+    private long stagingCapacity;
+    private long stagingHead;
+    private long stagingWraps;
+
     /** Called by the terrain renderer at the start of each frame. */
     synchronized void setFrameStamp(long stamp) {
         this.frameStamp = stamp;
@@ -287,12 +347,16 @@ final class VkChunkMirror {
             entries.put(glBufferId, entry);
         }
         if (size > 0) {
+            ensureStagingRing(size);
             beginUploads();
-            MemoryUtil.memCopy(MemoryUtil.memAddress(data), entry.stagingMappedAddress, size);
+            // May submit and wait before returning 0, so it has to come before
+            // the copy is recorded but after the command buffer is open.
+            long src = allocateStagingRange(size);
+            MemoryUtil.memCopy(MemoryUtil.memAddress(data), stagingMappedAddress + src, size);
             try (MemoryStack stack = stackPush()) {
                 VkBufferCopy.Buffer copy = VkBufferCopy.calloc(1, stack);
-                copy.get(0).srcOffset(0).dstOffset(entry.offset).size(size);
-                vkCmdCopyBuffer(uploadCommandBuffer, entry.stagingBuffer, geometryBuffer, copy);
+                copy.get(0).srcOffset(src).dstOffset(entry.offset).size(size);
+                vkCmdCopyBuffer(uploadCommandBuffer, stagingBuffer, geometryBuffer, copy);
             }
         }
         totalBytes += size - entry.size;
@@ -322,9 +386,18 @@ final class VkChunkMirror {
         for (int i = retired.size() - 1; i >= 0; i--) {
             if (retired.get(i).frameStamp <= completedFrame) {
                 Entry entry = retired.get(i).entry;
-                destroyEntry(entry);
-                freeRanges.add(new FreeRange(entry.offset, entry.capacity));
+                // Nothing to destroy any more: the range goes back to the free
+                // list and the entry is ordinary garbage.
+                releaseGeometryRange(entry.offset, entry.capacity);
                 retired.remove(i);
+            }
+        }
+        for (int i = retiredBuffers.size() - 1; i >= 0; i--) {
+            RetiredBuffer stale = retiredBuffers.get(i);
+            if (stale.frameStamp <= completedFrame) {
+                vkDestroyBuffer(device(), stale.buffer, null);
+                vkFreeMemory(device(), stale.memory, null);
+                retiredBuffers.remove(i);
             }
         }
     }
@@ -353,58 +426,103 @@ final class VkChunkMirror {
     }
 
     synchronized String stats() {
-        return String.format("mirrored VBOs: %d (%.1f MiB VRAM, %d uploads)",
-                entries.size(), totalBytes / (1024.0 * 1024.0), uploadCount);
+        return String.format("mirrored VBOs: %d (%.1f MiB VRAM of %.1f MiB buffer, %d uploads, "
+                        + "staging ring %d MiB, %d wraps)",
+                entries.size(), totalBytes / (1024.0 * 1024.0),
+                geometryCapacity / (1024.0 * 1024.0), uploadCount,
+                stagingCapacity / (1024 * 1024), stagingWraps);
     }
 
     private Entry createEntry(int capacity) {
+        Entry entry = new Entry();
+        entry.capacity = capacity;
+        entry.offset = allocateGeometryRange(capacity);
+        return entry;
+    }
+
+    /** Grows the staging ring if a single upload would not fit in it. */
+    private void ensureStagingRing(int needed) {
+        if (stagingCapacity >= needed && stagingBuffer != 0) {
+            return;
+        }
+        long capacity = Math.max(STAGING_RING_MIN, stagingCapacity == 0 ? STAGING_RING_MIN : stagingCapacity);
+        while (capacity < needed) {
+            capacity *= 2;
+        }
+        if (stagingBuffer != 0) {
+            // Everything recorded so far reads from the buffer about to go.
+            flushUploads();
+            waitForUploads();
+            vkUnmapMemory(device(), stagingMemory);
+            vkDestroyBuffer(device(), stagingBuffer, null);
+            vkFreeMemory(device(), stagingMemory, null);
+        }
         try (MemoryStack stack = stackPush()) {
-            Entry entry = new Entry();
-            entry.capacity = capacity;
-
-            entry.offset = allocateGeometryRange(capacity);
-
-            VkBufferCreateInfo stagingInfo = VkBufferCreateInfo.calloc(stack)
+            VkBufferCreateInfo info = VkBufferCreateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO)
                     .size(capacity)
                     .usage(VK_BUFFER_USAGE_TRANSFER_SRC_BIT)
                     .sharingMode(VK_SHARING_MODE_EXCLUSIVE);
             LongBuffer pBuffer = stack.mallocLong(1);
-            check(vkCreateBuffer(device(), stagingInfo, null, pBuffer), "vkCreateBuffer(mirror staging)");
-            entry.stagingBuffer = pBuffer.get(0);
+            check(vkCreateBuffer(device(), info, null, pBuffer), "vkCreateBuffer(staging ring)");
+            stagingBuffer = pBuffer.get(0);
             VkMemoryRequirements req = VkMemoryRequirements.malloc(stack);
-            vkGetBufferMemoryRequirements(device(), entry.stagingBuffer, req);
+            vkGetBufferMemoryRequirements(device(), stagingBuffer, req);
             VkMemoryAllocateInfo alloc = VkMemoryAllocateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO)
                     .allocationSize(req.size())
                     .memoryTypeIndex(findMemoryType(stack, req.memoryTypeBits(),
                             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT));
             LongBuffer pMemory = stack.mallocLong(1);
-            check(vkAllocateMemory(device(), alloc, null, pMemory), "vkAllocateMemory(mirror staging)");
-            entry.stagingMemory = pMemory.get(0);
-            check(vkBindBufferMemory(device(), entry.stagingBuffer, entry.stagingMemory, 0),
-                    "vkBindBufferMemory(mirror staging)");
+            check(vkAllocateMemory(device(), alloc, null, pMemory), "vkAllocateMemory(staging ring)");
+            stagingMemory = pMemory.get(0);
+            check(vkBindBufferMemory(device(), stagingBuffer, stagingMemory, 0),
+                    "vkBindBufferMemory(staging ring)");
             PointerBuffer ppData = stack.mallocPointer(1);
-            check(vkMapMemory(device(), entry.stagingMemory, 0, capacity, 0, ppData),
-                    "vkMapMemory(mirror staging)");
-            entry.stagingMappedAddress = ppData.get(0);
-            return entry;
+            check(vkMapMemory(device(), stagingMemory, 0, capacity, 0, ppData), "vkMapMemory(staging ring)");
+            stagingMappedAddress = ppData.get(0);
         }
+        stagingCapacity = capacity;
+        stagingHead = 0;
+        LOGGER.info("Staging ring sized to {} MiB", capacity / (1024 * 1024));
     }
 
-    private void destroyEntry(Entry entry) {
-        vkUnmapMemory(device(), entry.stagingMemory);
-        vkDestroyBuffer(device(), entry.stagingBuffer, null);
-        vkFreeMemory(device(), entry.stagingMemory, null);
+    /**
+     * Reserves {@code size} bytes in the ring and returns their offset.
+     *
+     * Wrapping is where the correctness lives: the head may only return to
+     * zero once the GPU has finished reading what is already there, so a wrap
+     * submits the pending copies and waits for them. That wait is the price of
+     * not keeping a copy per chunk, and it only happens once the ring has been
+     * filled — with 32 MiB and ~50 KiB chunks, roughly every 600 uploads.
+     */
+    private long allocateStagingRange(int size) {
+        long aligned = (size + 15L) & ~15L;
+        if (stagingHead + aligned > stagingCapacity) {
+            flushUploads();
+            waitForUploads();
+            stagingHead = 0;
+            stagingWraps++;
+            beginUploads();
+        }
+        long offset = stagingHead;
+        stagingHead += aligned;
+        return offset;
+    }
+
+    private void waitForUploads() {
+        if (!uploadsSubmitted) {
+            return;
+        }
+        check(vkWaitForFences(device(), uploadFence, true, 1_000_000_000L),
+                "vkWaitForFences(staging ring)");
+        vkResetFences(device(), uploadFence);
+        uploadsSubmitted = false;
     }
 
     synchronized void destroyAll() {
+        // Long.MAX_VALUE also frees every retired geometry buffer.
         flushRetired(Long.MAX_VALUE);
-        for (Entry entry : entries.values()) {
-            if (entry != null) {
-                destroyEntry(entry);
-            }
-        }
         entries.clear();
         totalBytes = 0;
         largestEntrySize = 0;
@@ -416,6 +534,16 @@ final class VkChunkMirror {
             geometryCapacity = 0;
             nextGeometryOffset = 0;
             freeRanges.clear();
+        }
+        if (stagingBuffer != 0) {
+            vkUnmapMemory(device(), stagingMemory);
+            vkDestroyBuffer(device(), stagingBuffer, null);
+            vkFreeMemory(device(), stagingMemory, null);
+            stagingBuffer = 0;
+            stagingMemory = 0;
+            stagingMappedAddress = 0;
+            stagingCapacity = 0;
+            stagingHead = 0;
         }
         if (uploadFence != 0) {
             vkDestroyFence(device(), uploadFence, null);
@@ -473,9 +601,15 @@ final class VkChunkMirror {
             check(vkAllocateCommandBuffers(device(), allocInfo, pCommand), "vkAllocateCommandBuffers(VBO uploads)");
             uploadCommandBuffer = new VkCommandBuffer(pCommand.get(0), device());
 
+            // Deliberately NOT created signalled. vkQueueSubmit requires an
+            // unsignalled fence, and nothing here waits on it before the first
+            // submit — uploadsSubmitted already tracks "nothing submitted yet".
+            // Starting it signalled meant the first submit took a signalled
+            // fence, and every wait after that returned immediately without
+            // the GPU having finished anything, so the upload command buffer
+            // was reset and the staging ring reused while still in use.
             VkFenceCreateInfo fenceInfo = VkFenceCreateInfo.calloc(stack)
-                    .sType(VK_STRUCTURE_TYPE_FENCE_CREATE_INFO)
-                    .flags(VK_FENCE_CREATE_SIGNALED_BIT);
+                    .sType(VK_STRUCTURE_TYPE_FENCE_CREATE_INFO);
             LongBuffer pFence = stack.mallocLong(1);
             check(vkCreateFence(device(), fenceInfo, null, pFence), "vkCreateFence(VBO uploads)");
             uploadFence = pFence.get(0);
@@ -488,7 +622,9 @@ final class VkChunkMirror {
             if (range.capacity >= capacity) {
                 freeRanges.remove(i);
                 if (range.capacity > capacity) {
-                    freeRanges.add(new FreeRange(range.offset + capacity, range.capacity - capacity));
+                    // The remainder keeps the list sorted: it starts after the
+                    // part just taken and before whatever followed the range.
+                    freeRanges.add(i, new FreeRange(range.offset + capacity, range.capacity - capacity));
                 }
                 return range.offset;
             }
@@ -497,6 +633,45 @@ final class VkChunkMirror {
         long offset = nextGeometryOffset;
         nextGeometryOffset += capacity;
         return offset;
+    }
+
+    /**
+     * Returns a range to the free list, merging it with its neighbours.
+     *
+     * Without merging, a session spent flying around leaves the buffer as
+     * thousands of small adjacent holes that no rebuilt chunk fits into, so
+     * the buffer grows even though the free space was there all along — and
+     * growth is the expensive, stop-everything path.
+     */
+    private void releaseGeometryRange(long offset, long capacity) {
+        int lo = 0;
+        int hi = freeRanges.size();
+        while (lo < hi) {
+            int mid = (lo + hi) >>> 1;
+            if (freeRanges.get(mid).offset < offset) {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        long start = offset;
+        long end = offset + capacity;
+        if (lo < freeRanges.size()) {
+            FreeRange next = freeRanges.get(lo);
+            if (next.offset == end) {
+                end = next.offset + next.capacity;
+                freeRanges.remove(lo);
+            }
+        }
+        if (lo > 0) {
+            FreeRange previous = freeRanges.get(lo - 1);
+            if (previous.offset + previous.capacity == start) {
+                start = previous.offset;
+                lo--;
+                freeRanges.remove(lo);
+            }
+        }
+        freeRanges.add(lo, new FreeRange(start, end - start));
     }
 
     private static int alignVertexCapacity(int capacity) {
@@ -533,7 +708,16 @@ final class VkChunkMirror {
                 budgetMiB, initialGeometryCapacity / (1024 * 1024), ctx.vramMegabytes());
     }
 
-    /** Rare growth path; persistent staging copies repopulate the new VRAM buffer. */
+    /**
+     * Rare growth path. The used part of the old buffer is copied into the new
+     * one by the GPU.
+     *
+     * It used to be repopulated from the per-chunk staging copies, which is
+     * what made those copies worth keeping in the first place. Without them a
+     * device-to-device copy is both the only option and the faster one: the
+     * data never leaves VRAM, where re-uploading pushed the entire world back
+     * across PCIe.
+     */
     private void ensureGeometryCapacity(long required) {
         if (geometryBuffer != 0 && required <= geometryCapacity) {
             return;
@@ -541,17 +725,10 @@ final class VkChunkMirror {
         if (uploadsRecording) {
             flushUploads();
         }
-        if (uploadsSubmitted) {
-            check(vkWaitForFences(device(), uploadFence, true, 1_000_000_000L),
-                    "vkWaitForFences(geometry grow)");
-            vkResetFences(device(), uploadFence);
-            uploadsSubmitted = false;
-        }
-        if (geometryBuffer != 0) {
-            vkDeviceWaitIdle(device());
-            vkDestroyBuffer(device(), geometryBuffer, null);
-            vkFreeMemory(device(), geometryMemory, null);
-        }
+        waitForUploads();
+        long oldBuffer = geometryBuffer;
+        long oldMemory = geometryMemory;
+        long oldUsed = nextGeometryOffset;
         resolveBudget();
         long capacity = geometryCapacity == 0 ? initialGeometryCapacity : geometryCapacity;
         long step = Math.max(64L * 1024L * 1024L, geometryBudget / 8L);
@@ -582,16 +759,25 @@ final class VkChunkMirror {
                     "vkBindBufferMemory(chunk geometry)");
         }
         geometryCapacity = capacity;
-        if (entries.size() != 0) {
-            beginUploads();
-            try (MemoryStack stack = stackPush()) {
-                VkBufferCopy.Buffer copy = VkBufferCopy.calloc(1, stack);
-                for (Entry entry : entries.values()) {
-                    if (entry == null || entry.size == 0) continue;
-                    copy.get(0).srcOffset(0).dstOffset(entry.offset).size(entry.size);
-                    vkCmdCopyBuffer(uploadCommandBuffer, entry.stagingBuffer, geometryBuffer, copy);
+        if (oldBuffer != 0) {
+            if (oldUsed > 0) {
+                // One copy for the whole used region: the layout is identical
+                // in both buffers, so per-chunk copies would gain nothing.
+                beginUploads();
+                try (MemoryStack stack = stackPush()) {
+                    VkBufferCopy.Buffer copy = VkBufferCopy.calloc(1, stack);
+                    copy.get(0).srcOffset(0).dstOffset(0).size(oldUsed);
+                    vkCmdCopyBuffer(uploadCommandBuffer, oldBuffer, geometryBuffer, copy);
                 }
+                flushUploads();
+                waitForUploads();
             }
+            // Not destroyed here: frames already recorded still name this
+            // handle. It goes on the retired list and is freed once every
+            // frame that could reference it has completed. Nothing writes the
+            // old buffer any more, so those frames and the copy above are both
+            // reads and can safely overlap.
+            retiredBuffers.add(new RetiredBuffer(oldBuffer, oldMemory, frameStamp));
         }
         LOGGER.info("Shared Vulkan chunk geometry buffer sized to {} MiB", capacity / (1024 * 1024));
     }
