@@ -252,13 +252,16 @@ final class VulkanOptions {
                                         + "and turning around means waiting again. This tops the "
                                         + "build queue up from the rest of the grid once the visible "
                                         + "chunks are handled, so they never lose their place in "
-                                        + "line. Costs idle CPU time on the chunk builder threads. "
-                                        + "Be aware of what it means at very high render distances: "
-                                        + "a world that actually finishes loading is a world whose "
-                                        + "geometry is all resident, so video memory will reach what "
-                                        + "the distance really implies instead of only what you have "
-                                        + "looked at.",
-                                Cost.of(Level.MEDIUM, Level.NONE, Level.LOW), null,
+                                        + "line. Off by default, and the reason is worth knowing "
+                                        + "before you turn it on: measured at render distance 64, "
+                                        + "330 fps without it against 120-140 with. Filling the "
+                                        + "world in is not free work the game was skipping out of "
+                                        + "laziness — it is continuous chunk building, and it also "
+                                        + "means video memory reaches what the distance really "
+                                        + "implies instead of only what you have looked at. Worth it "
+                                        + "if you would rather the world were there than have the "
+                                        + "frames.",
+                                Cost.of(Level.HIGH, Level.NONE, Level.MEDIUM), null,
                                 new VSwitchOption.Access() {
                                     @Override
                                     public boolean get() {

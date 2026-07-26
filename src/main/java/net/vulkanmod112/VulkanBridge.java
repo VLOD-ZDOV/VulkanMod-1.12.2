@@ -59,9 +59,12 @@ public interface VulkanBridge {
     void interopFrameDisplayed();
 
     /**
-     * Mirrors a game VBO upload into a Vulkan vertex buffer. {@code data} is
-     * a duplicate positioned at the payload; keyed by the GL buffer id.
-     * Client thread only.
+     * Mirrors a game VBO upload into a Vulkan vertex buffer, keyed by the GL
+     * buffer id. Client thread only.
+     *
+     * {@code data} is the game's own buffer, positioned at the payload, and
+     * the game uploads it to OpenGL immediately afterwards. Implementations
+     * must treat it as read-only and must not change its position or limit.
      */
     void mirrorChunkBuffer(int glBufferId, java.nio.ByteBuffer data);
 

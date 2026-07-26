@@ -46,7 +46,7 @@ import java.util.Set;
 public abstract class ChunkPreloadMixin {
 
     /** Leave the queue alone above this; visible chunks have first claim. */
-    private static final int QUEUE_TARGET = 32;
+    private static final int QUEUE_TARGET = 16;
     /** Grid entries examined per frame. */
     private static final int SCAN_PER_FRAME = 4096;
 

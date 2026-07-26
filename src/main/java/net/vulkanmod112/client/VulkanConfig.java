@@ -30,7 +30,12 @@ public final class VulkanConfig {
     static final boolean DEF_CULLING = true;
     static final int DEF_GEOMETRY_BUDGET = 0;
     static final int DEF_FRAMES_IN_FLIGHT = 2;
-    static final boolean DEF_CHUNK_PRELOAD = true;
+    /**
+     * Off by default. Measured at render distance 64: 330 fps without it,
+     * 120-140 with. Filling the world in costs continuous chunk building, and
+     * that is not a price to charge anyone who did not ask for it.
+     */
+    static final boolean DEF_CHUNK_PRELOAD = false;
     static final boolean DEF_ZOOM = true;
     /** Stored as an integer so it fits the config and the slider; 4 = quarter FOV. */
     static final int DEF_ZOOM_FACTOR = 4;

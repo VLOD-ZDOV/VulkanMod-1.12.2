@@ -326,6 +326,48 @@ final class VkChunkMirror {
     private long stagingHead;
     private long stagingWraps;
 
+    /**
+     * Copy regions waiting to be recorded, all from the ring into the geometry
+     * buffer.
+     *
+     * They used to be recorded one {@code vkCmdCopyBuffer} at a time, which
+     * meant a stack frame and a native call per chunk. Turning the camera at a
+     * high render distance uploads chunks in bursts of dozens per frame, and
+     * one call carrying every region costs the same as one carrying a single
+     * one. Off-heap and reused, so this adds no allocation of its own.
+     */
+    private VkBufferCopy.Buffer pendingCopies;
+    private int pendingCopyCount;
+
+    private void queueCopy(long srcOffset, long dstOffset, int size) {
+        if (pendingCopies == null) {
+            pendingCopies = VkBufferCopy.calloc(256);
+        } else if (pendingCopyCount == pendingCopies.capacity()) {
+            VkBufferCopy.Buffer grown = VkBufferCopy.calloc(pendingCopies.capacity() * 2);
+            MemoryUtil.memCopy(MemoryUtil.memAddress(pendingCopies), MemoryUtil.memAddress(grown),
+                    (long) pendingCopyCount * VkBufferCopy.SIZEOF);
+            pendingCopies.free();
+            pendingCopies = grown;
+        }
+        pendingCopies.get(pendingCopyCount).srcOffset(srcOffset).dstOffset(dstOffset).size(size);
+        pendingCopyCount++;
+    }
+
+    /**
+     * Records the queued regions. Must run before anything that submits the
+     * command buffer, replaces the geometry buffer or rewinds the ring —
+     * every queued region names offsets in whatever is current right now.
+     */
+    private void emitPendingCopies() {
+        if (pendingCopyCount == 0) {
+            return;
+        }
+        pendingCopies.position(0).limit(pendingCopyCount);
+        vkCmdCopyBuffer(uploadCommandBuffer, stagingBuffer, geometryBuffer, pendingCopies);
+        pendingCopies.limit(pendingCopies.capacity());
+        pendingCopyCount = 0;
+    }
+
     /** Called by the terrain renderer at the start of each frame. */
     synchronized void setFrameStamp(long stamp) {
         this.frameStamp = stamp;
@@ -361,11 +403,7 @@ final class VkChunkMirror {
             // the copy is recorded but after the command buffer is open.
             long src = allocateStagingRange(size);
             MemoryUtil.memCopy(MemoryUtil.memAddress(data), stagingMappedAddress + src, size);
-            try (MemoryStack stack = stackPush()) {
-                VkBufferCopy.Buffer copy = VkBufferCopy.calloc(1, stack);
-                copy.get(0).srcOffset(src).dstOffset(entry.offset).size(size);
-                vkCmdCopyBuffer(uploadCommandBuffer, stagingBuffer, geometryBuffer, copy);
-            }
+            queueCopy(src, entry.offset, size);
         }
         totalBytes += size - entry.size;
         entry.size = size;
@@ -415,6 +453,7 @@ final class VkChunkMirror {
         if (!uploadsRecording) {
             return;
         }
+        emitPendingCopies();
         try (MemoryStack stack = stackPush()) {
             VkMemoryBarrier.Buffer barrier = VkMemoryBarrier.calloc(1, stack);
             barrier.get(0)
@@ -542,6 +581,11 @@ final class VkChunkMirror {
             geometryCapacity = 0;
             nextGeometryOffset = 0;
             freeRanges.clear();
+        }
+        if (pendingCopies != null) {
+            pendingCopies.free();
+            pendingCopies = null;
+            pendingCopyCount = 0;
         }
         if (stagingBuffer != 0) {
             vkUnmapMemory(device(), stagingMemory);
