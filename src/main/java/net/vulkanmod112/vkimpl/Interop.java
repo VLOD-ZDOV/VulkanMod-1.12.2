@@ -18,15 +18,21 @@ import org.lwjgl.vulkan.KHRExternalMemoryFd;
 import org.lwjgl.vulkan.KHRExternalMemoryWin32;
 import org.lwjgl.vulkan.KHRExternalSemaphoreFd;
 import org.lwjgl.vulkan.KHRExternalSemaphoreWin32;
+import org.lwjgl.vulkan.VK11;
 import org.lwjgl.vulkan.VkDevice;
 import org.lwjgl.vulkan.VkMemoryGetFdInfoKHR;
+import org.lwjgl.vulkan.VkPhysicalDevice;
+import org.lwjgl.vulkan.VkPhysicalDeviceIDProperties;
+import org.lwjgl.vulkan.VkPhysicalDeviceProperties2;
 import org.lwjgl.vulkan.VkMemoryGetWin32HandleInfoKHR;
 import org.lwjgl.vulkan.VkSemaphoreGetFdInfoKHR;
 import org.lwjgl.vulkan.VkSemaphoreGetWin32HandleInfoKHR;
 
+import java.nio.ByteBuffer;
 import java.nio.IntBuffer;
 import java.util.Locale;
 
+import static org.lwjgl.system.MemoryStack.stackPush;
 import static org.lwjgl.vulkan.VK10.VK_SUCCESS;
 import static org.lwjgl.vulkan.VK11.VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
 import static org.lwjgl.vulkan.VK11.VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
@@ -57,6 +63,9 @@ final class Interop {
     static final int SEMAPHORE_HANDLE_TYPE = WINDOWS
             ? VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_BIT
             : VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT;
+
+    /** Both GL_DEVICE_UUID_EXT and VkPhysicalDeviceIDProperties::deviceUUID are 16 bytes. */
+    private static final int UUID_BYTES = 16;
 
     private static final String[] DEVICE_EXTENSIONS_FD = {
             "VK_KHR_external_memory_fd",
@@ -93,6 +102,59 @@ final class Interop {
         return WINDOWS
                 ? "EXT_memory_object_win32/EXT_semaphore_win32"
                 : "EXT_memory_object_fd/EXT_semaphore_fd";
+    }
+
+    /**
+     * Fails unless OpenGL and Vulkan are driving the same physical GPU.
+     *
+     * Sharing memory between two different devices is not merely unsupported:
+     * the importing driver dereferences a handle that means nothing to it and
+     * takes the whole process down with a segfault, past any Java catch block.
+     * On a hybrid machine this is the default outcome — the game's GL context
+     * lands on the integrated GPU or on a software renderer while we pick the
+     * discrete card — so the check has to happen before the first import.
+     *
+     * Both APIs expose the same 16-byte device UUID for exactly this purpose.
+     */
+    static void requireSameDevice(VkPhysicalDevice physicalDevice) {
+        try (MemoryStack stack = stackPush()) {
+            VkPhysicalDeviceIDProperties idProps = VkPhysicalDeviceIDProperties.calloc(stack)
+                    .sType(VK11.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES);
+            VkPhysicalDeviceProperties2 props = VkPhysicalDeviceProperties2.calloc(stack)
+                    .sType(VK11.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2)
+                    .pNext(idProps.address());
+            VK11.vkGetPhysicalDeviceProperties2(physicalDevice, props);
+            byte[] vulkanUuid = new byte[UUID_BYTES];
+            idProps.deviceUUID().get(vulkanUuid);
+
+            int glDeviceCount = GL11C.glGetInteger(EXTMemoryObject.GL_NUM_DEVICE_UUIDS_EXT);
+            ByteBuffer glUuid = stack.malloc(UUID_BYTES);
+            byte[] glBytes = new byte[UUID_BYTES];
+            StringBuilder seen = new StringBuilder();
+            for (int i = 0; i < glDeviceCount; i++) {
+                glUuid.clear();
+                EXTMemoryObject.glGetUnsignedBytei_vEXT(EXTMemoryObject.GL_DEVICE_UUID_EXT, i, glUuid);
+                glUuid.get(glBytes);
+                if (java.util.Arrays.equals(vulkanUuid, glBytes)) {
+                    return;
+                }
+                seen.append(i == 0 ? "" : ", ").append(hex(glBytes));
+            }
+            throw new IllegalStateException("OpenGL and Vulkan are on different GPUs — "
+                    + "Vulkan device " + hex(vulkanUuid) + ", OpenGL device(s) " + seen
+                    + " (GL renderer: " + GL11C.glGetString(GL11C.GL_RENDERER) + "). "
+                    + "Zero-copy sharing would crash the process. On a hybrid system, launch the game "
+                    + "with the discrete GPU selected for OpenGL too "
+                    + "(on Linux: __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia).");
+        }
+    }
+
+    private static String hex(byte[] bytes) {
+        StringBuilder sb = new StringBuilder(bytes.length * 2);
+        for (byte b : bytes) {
+            sb.append(Character.forDigit((b >> 4) & 0xF, 16)).append(Character.forDigit(b & 0xF, 16));
+        }
+        return sb.toString();
     }
 
     /**
