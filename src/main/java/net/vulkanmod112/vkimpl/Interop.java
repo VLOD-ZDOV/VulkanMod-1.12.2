@@ -1,0 +1,163 @@
+package net.vulkanmod112.vkimpl;
+
+import org.lwjgl.PointerBuffer;
+import org.lwjgl.opengl.EXTMemoryObject;
+import org.lwjgl.opengl.EXTMemoryObjectFD;
+import org.lwjgl.opengl.EXTMemoryObjectWin32;
+import org.lwjgl.opengl.EXTSemaphore;
+import org.lwjgl.opengl.EXTSemaphoreFD;
+import org.lwjgl.opengl.EXTSemaphoreWin32;
+import org.lwjgl.opengl.GL11C;
+import org.lwjgl.opengl.GLCapabilities;
+import org.lwjgl.system.MemoryStack;
+import org.lwjgl.vulkan.KHRExternalMemoryFd;
+import org.lwjgl.vulkan.KHRExternalMemoryWin32;
+import org.lwjgl.vulkan.KHRExternalSemaphoreFd;
+import org.lwjgl.vulkan.KHRExternalSemaphoreWin32;
+import org.lwjgl.vulkan.VkDevice;
+import org.lwjgl.vulkan.VkMemoryGetFdInfoKHR;
+import org.lwjgl.vulkan.VkMemoryGetWin32HandleInfoKHR;
+import org.lwjgl.vulkan.VkSemaphoreGetFdInfoKHR;
+import org.lwjgl.vulkan.VkSemaphoreGetWin32HandleInfoKHR;
+
+import java.nio.IntBuffer;
+import java.util.Locale;
+
+import static org.lwjgl.vulkan.VK10.VK_SUCCESS;
+import static org.lwjgl.vulkan.VK11.VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+import static org.lwjgl.vulkan.VK11.VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+import static org.lwjgl.vulkan.VK11.VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT;
+import static org.lwjgl.vulkan.VK11.VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+
+/**
+ * Platform layer for zero-copy Vulkan↔OpenGL sharing.
+ *
+ * The mechanism is identical everywhere — export the Vulkan allocation, import
+ * it into GL — but the operating system decides what an "exported allocation"
+ * is: a file descriptor on Linux, a HANDLE on Windows. Everything that differs
+ * between the two lives here, so the renderers never mention either.
+ */
+final class Interop {
+
+    static final boolean WINDOWS =
+            System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
+
+    /** Vulkan handle type the renderers must request when exporting memory. */
+    static final int MEMORY_HANDLE_TYPE = WINDOWS
+            ? VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT
+            : VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+
+    /** Vulkan handle type the renderers must request when exporting semaphores. */
+    static final int SEMAPHORE_HANDLE_TYPE = WINDOWS
+            ? VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_BIT
+            : VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT;
+
+    private static final String[] DEVICE_EXTENSIONS_FD = {
+            "VK_KHR_external_memory_fd",
+            "VK_KHR_external_semaphore_fd"
+    };
+    private static final String[] DEVICE_EXTENSIONS_WIN32 = {
+            "VK_KHR_external_memory_win32",
+            "VK_KHR_external_semaphore_win32"
+    };
+
+    private Interop() {
+    }
+
+    /** Device extensions that must be present and enabled for interop to work. */
+    static String[] deviceExtensions() {
+        return WINDOWS ? DEVICE_EXTENSIONS_WIN32 : DEVICE_EXTENSIONS_FD;
+    }
+
+    /** True when the OpenGL driver exposes the matching import extensions. */
+    static boolean supportedByGL(GLCapabilities caps) {
+        if (!caps.GL_EXT_memory_object || !caps.GL_EXT_semaphore) {
+            return false;
+        }
+        return WINDOWS
+                ? caps.GL_EXT_memory_object_win32 && caps.GL_EXT_semaphore_win32
+                : caps.GL_EXT_memory_object_fd && caps.GL_EXT_semaphore_fd;
+    }
+
+    static String glExtensionNames() {
+        return WINDOWS
+                ? "EXT_memory_object_win32/EXT_semaphore_win32"
+                : "EXT_memory_object_fd/EXT_semaphore_fd";
+    }
+
+    /**
+     * Exports a device allocation and imports it as a GL memory object.
+     *
+     * {@code dedicated} must mirror whether the Vulkan allocation used
+     * VkMemoryDedicatedAllocateInfo: GL assumes a different memory layout
+     * otherwise and silently samples garbage.
+     */
+    static int importMemoryToGL(MemoryStack stack, VkDevice device, long memory, long size,
+                                boolean dedicated) {
+        IntBuffer pMemObj = stack.mallocInt(1);
+        EXTMemoryObject.glCreateMemoryObjectsEXT(pMemObj);
+        int memObj = pMemObj.get(0);
+        if (dedicated) {
+            EXTMemoryObject.glMemoryObjectParameterivEXT(memObj,
+                    EXTMemoryObject.GL_DEDICATED_MEMORY_OBJECT_EXT, stack.ints(GL11C.GL_TRUE));
+        }
+        if (WINDOWS) {
+            VkMemoryGetWin32HandleInfoKHR info = VkMemoryGetWin32HandleInfoKHR.calloc(stack)
+                    .sType(KHRExternalMemoryWin32.VK_STRUCTURE_TYPE_MEMORY_GET_WIN32_HANDLE_INFO_KHR)
+                    .memory(memory)
+                    .handleType(MEMORY_HANDLE_TYPE);
+            PointerBuffer pHandle = stack.mallocPointer(1);
+            check(KHRExternalMemoryWin32.vkGetMemoryWin32HandleKHR(device, info, pHandle),
+                    "vkGetMemoryWin32HandleKHR");
+            EXTMemoryObjectWin32.glImportMemoryWin32HandleEXT(memObj, size,
+                    EXTMemoryObjectWin32.GL_HANDLE_TYPE_OPAQUE_WIN32_EXT, pHandle.get(0));
+        } else {
+            VkMemoryGetFdInfoKHR info = VkMemoryGetFdInfoKHR.calloc(stack)
+                    .sType(KHRExternalMemoryFd.VK_STRUCTURE_TYPE_MEMORY_GET_FD_INFO_KHR)
+                    .memory(memory)
+                    .handleType(MEMORY_HANDLE_TYPE);
+            IntBuffer pFd = stack.mallocInt(1);
+            check(KHRExternalMemoryFd.vkGetMemoryFdKHR(device, info, pFd), "vkGetMemoryFdKHR");
+            // GL takes ownership of the descriptor and closes it with the object.
+            EXTMemoryObjectFD.glImportMemoryFdEXT(memObj, size,
+                    EXTMemoryObjectFD.GL_HANDLE_TYPE_OPAQUE_FD_EXT, pFd.get(0));
+        }
+        return memObj;
+    }
+
+    /** Exports a Vulkan semaphore and imports it as a GL semaphore. */
+    static int importSemaphoreToGL(MemoryStack stack, VkDevice device, long semaphore) {
+        IntBuffer pSem = stack.mallocInt(1);
+        EXTSemaphore.glGenSemaphoresEXT(pSem);
+        int glSem = pSem.get(0);
+        if (WINDOWS) {
+            VkSemaphoreGetWin32HandleInfoKHR info = VkSemaphoreGetWin32HandleInfoKHR.calloc(stack)
+                    .sType(KHRExternalSemaphoreWin32.VK_STRUCTURE_TYPE_SEMAPHORE_GET_WIN32_HANDLE_INFO_KHR)
+                    .semaphore(semaphore)
+                    .handleType(SEMAPHORE_HANDLE_TYPE);
+            PointerBuffer pHandle = stack.mallocPointer(1);
+            check(KHRExternalSemaphoreWin32.vkGetSemaphoreWin32HandleKHR(device, info, pHandle),
+                    "vkGetSemaphoreWin32HandleKHR");
+            EXTSemaphoreWin32.glImportSemaphoreWin32HandleEXT(glSem,
+                    EXTSemaphoreWin32.GL_HANDLE_TYPE_OPAQUE_WIN32_EXT, pHandle.get(0));
+        } else {
+            VkSemaphoreGetFdInfoKHR info = VkSemaphoreGetFdInfoKHR.calloc(stack)
+                    .sType(KHRExternalSemaphoreFd.VK_STRUCTURE_TYPE_SEMAPHORE_GET_FD_INFO_KHR)
+                    .semaphore(semaphore)
+                    .handleType(SEMAPHORE_HANDLE_TYPE);
+            IntBuffer pFd = stack.mallocInt(1);
+            check(KHRExternalSemaphoreFd.vkGetSemaphoreFdKHR(device, info, pFd),
+                    "vkGetSemaphoreFdKHR");
+            EXTSemaphoreFD.glImportSemaphoreFdEXT(glSem,
+                    EXTSemaphoreFD.GL_HANDLE_TYPE_OPAQUE_FD_EXT, pFd.get(0));
+        }
+        return glSem;
+    }
+
+    private static void check(int result, String what) {
+        if (result != VK_SUCCESS) {
+            throw new IllegalStateException(what + " failed: " + result);
+        }
+    }
+
+}

@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Windows support for the zero-copy path: external memory and semaphores are exported as Win32 handles there and as file descriptors on Linux, chosen at runtime by a single platform layer. Linux behaviour is unchanged.
+- Block atlas mip levels. The levels Minecraft already builds per sprite are copied into the Vulkan image, and the atlas sampler filters between them, which removes distant-chunk shimmer and cuts texture-cache misses.
+
+### Changed
+
+- Terrain depth is composited with `glBlitFramebuffer` instead of a `gl_FragDepth` write, so the fullscreen composite keeps early-Z. The depth target is 24-bit where the driver supports it; otherwise, or if the driver rejects the blit, the previous shader path is used automatically.
+
 ## [0.2.0] - 2026-07-24
 
 ### Added
