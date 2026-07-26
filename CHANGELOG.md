@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.3.0] - 2026-07-26
 
 ### Added
 
@@ -10,6 +10,10 @@
 ### Changed
 
 - Terrain depth is composited with `glBlitFramebuffer` instead of a `gl_FragDepth` write, so the fullscreen composite keeps early-Z. The depth target is 24-bit where the driver supports it; otherwise, or if the driver rejects the blit, the previous shader path is used automatically.
+
+### Documentation
+
+- `ROADMAP.md` lists the remaining work found while reviewing the renderer, in the order it should be done, including two limits that currently cap render distance.
 
 ## [0.2.0] - 2026-07-24
 
