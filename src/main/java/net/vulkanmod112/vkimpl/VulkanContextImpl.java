@@ -48,6 +48,8 @@ public final class VulkanContextImpl implements VulkanBridge {
     private VkDevice device;
     private VkQueue graphicsQueue;
     private int graphicsQueueFamily = -1;
+    /** How many GPUs Vulkan enumerated; the interop check weighs its fallback on it. */
+    private int physicalDeviceCount;
     private boolean initialized;
 
     private String gpuSummary = "Vulkan not initialized";
@@ -172,6 +174,7 @@ public final class VulkanContextImpl implements VulkanBridge {
             }
 
             this.physicalDevice = best;
+            this.physicalDeviceCount = deviceCount;
             VkPhysicalDeviceProperties props = VkPhysicalDeviceProperties.malloc(stack);
             vkGetPhysicalDeviceProperties(best, props);
             this.graphicsQueueFamily = findGraphicsQueueFamily(best, stack);
@@ -396,7 +399,7 @@ public final class VulkanContextImpl implements VulkanBridge {
         if (!Interop.supportedByGL(caps)) {
             throw new IllegalStateException("OpenGL driver lacks " + Interop.glExtensionNames());
         }
-        Interop.requireSameDevice(physicalDevice);
+        Interop.requireSameDevice(physicalDevice, physicalDeviceCount);
         glCapsReady = true;
     }
 

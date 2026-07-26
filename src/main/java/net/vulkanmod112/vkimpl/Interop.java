@@ -9,10 +9,12 @@ import org.lwjgl.opengl.EXTMemoryObjectWin32;
 import org.lwjgl.opengl.EXTSemaphore;
 import org.lwjgl.opengl.EXTSemaphoreFD;
 import org.lwjgl.opengl.EXTSemaphoreWin32;
+import org.lwjgl.opengl.GL;
 import org.lwjgl.opengl.GL11C;
 import org.lwjgl.opengl.GLCapabilities;
 import org.lwjgl.system.JNI;
 import org.lwjgl.system.MemoryStack;
+import org.lwjgl.system.MemoryUtil;
 import org.lwjgl.system.windows.Kernel32;
 import org.lwjgl.vulkan.KHRExternalMemoryFd;
 import org.lwjgl.vulkan.KHRExternalMemoryWin32;
@@ -116,7 +118,7 @@ final class Interop {
      *
      * Both APIs expose the same 16-byte device UUID for exactly this purpose.
      */
-    static void requireSameDevice(VkPhysicalDevice physicalDevice) {
+    static void requireSameDevice(VkPhysicalDevice physicalDevice, int vulkanDeviceCount) {
         try (MemoryStack stack = stackPush()) {
             VkPhysicalDeviceIDProperties idProps = VkPhysicalDeviceIDProperties.calloc(stack)
                     .sType(VK11.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES);
@@ -126,27 +128,105 @@ final class Interop {
             VK11.vkGetPhysicalDeviceProperties2(physicalDevice, props);
             byte[] vulkanUuid = new byte[UUID_BYTES];
             idProps.deviceUUID().get(vulkanUuid);
+            byte[] vulkanDriverUuid = new byte[UUID_BYTES];
+            idProps.driverUUID().get(vulkanDriverUuid);
 
-            int glDeviceCount = GL11C.glGetInteger(EXTMemoryObject.GL_NUM_DEVICE_UUIDS_EXT);
-            ByteBuffer glUuid = stack.malloc(UUID_BYTES);
-            byte[] glBytes = new byte[UUID_BYTES];
             StringBuilder seen = new StringBuilder();
-            for (int i = 0; i < glDeviceCount; i++) {
-                glUuid.clear();
-                EXTMemoryObject.glGetUnsignedBytei_vEXT(EXTMemoryObject.GL_DEVICE_UUID_EXT, i, glUuid);
-                glUuid.get(glBytes);
-                if (java.util.Arrays.equals(vulkanUuid, glBytes)) {
-                    return;
-                }
-                seen.append(i == 0 ? "" : ", ").append(hex(glBytes));
+            if (matchesGlDevice(stack, vulkanUuid, seen)) {
+                return;
             }
-            throw new IllegalStateException("OpenGL and Vulkan are on different GPUs — "
-                    + "Vulkan device " + hex(vulkanUuid) + ", OpenGL device(s) " + seen
-                    + " (GL renderer: " + GL11C.glGetString(GL11C.GL_RENDERER) + "). "
-                    + "Zero-copy sharing would crash the process. On a hybrid system, launch the game "
-                    + "with the discrete GPU selected for OpenGL too "
-                    + "(on Linux: __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia).");
+            if (seen.length() > 0) {
+                // The driver answered, and answered with a different GPU.
+                throw new IllegalStateException("OpenGL and Vulkan are on different GPUs — "
+                        + "Vulkan device " + hex(vulkanUuid) + ", OpenGL device(s) " + seen
+                        + " (GL renderer: " + GL11C.glGetString(GL11C.GL_RENDERER) + "). "
+                        + "Zero-copy sharing would crash the process. On a hybrid system, launch the game "
+                        + "with the discrete GPU selected for OpenGL too "
+                        + "(on Linux: __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia).");
+            }
+
+            // The extension is advertised but its queries return nothing. The
+            // tempting fallback is the driver UUID, which the same extension
+            // exposes without an index — but a query that answers with garbage
+            // is not evidence of anything, and an OpenGL side broken enough to
+            // fail here is not an OpenGL side to hand exported memory to. It
+            // is logged for bug reports and nothing more.
+            byte[] glDriverUuid = queryDriverUuid(stack);
+            throw new IllegalStateException("Cannot confirm OpenGL and Vulkan are on the same GPU — "
+                    + "the device UUID query returned nothing, and the driver UUID "
+                    + (glDriverUuid == null ? "is unavailable too" : "reads " + hex(glDriverUuid)
+                            + " against Vulkan's " + hex(vulkanDriverUuid))
+                    + ", with " + vulkanDeviceCount + " GPU(s) visible to Vulkan "
+                    + "(GL renderer: " + GL11C.glGetString(GL11C.GL_RENDERER) + "). "
+                    + "Sharing memory across two devices would crash the process, so terrain stays on OpenGL.");
         }
+    }
+
+    /**
+     * True when one of OpenGL's device UUIDs is the Vulkan one. Appends every
+     * UUID the driver actually returned to {@code seen}, so an empty {@code seen}
+     * on a false result means the query gave nothing rather than gave a mismatch.
+     */
+    private static boolean matchesGlDevice(MemoryStack stack, byte[] vulkanUuid, StringBuilder seen) {
+        // Drain, not pop: GL keeps a queue of errors and returns one at a
+        // time, so another mod leaving two behind would read as our failure.
+        int drained = 0;
+        while (GL11C.glGetError() != GL11C.GL_NO_ERROR && drained < 32) {
+            drained++;
+        }
+        IntBuffer countBuf = stack.callocInt(1);
+        GL11C.glGetIntegerv(EXTMemoryObject.GL_NUM_DEVICE_UUIDS_EXT, countBuf);
+        int countError = GL11C.glGetError();
+        int glDeviceCount = countBuf.get(0);
+        LOGGER.info("Interop check on LWJGL {} / GL {} ({}): {} GL device(s), glGetError 0x{}, {} stale error(s)",
+                org.lwjgl.Version.getVersion(), GL11C.glGetString(GL11C.GL_VERSION),
+                GL11C.glGetString(GL11C.GL_RENDERER), glDeviceCount,
+                Integer.toHexString(countError), drained);
+
+        // Zeroed before each query so "the driver wrote nothing" is
+        // distinguishable from "the driver wrote a different UUID".
+        ByteBuffer glUuid = stack.calloc(UUID_BYTES);
+        byte[] glBytes = new byte[UUID_BYTES];
+        for (int i = 0; i < glDeviceCount; i++) {
+            glUuid.clear();
+            MemoryUtil.memSet(glUuid, 0);
+            GL11C.glGetError();
+            EXTMemoryObject.glGetUnsignedBytei_vEXT(EXTMemoryObject.GL_DEVICE_UUID_EXT, i, glUuid);
+            int glError = GL11C.glGetError();
+            glUuid.get(glBytes);
+            if (glError != GL11C.GL_NO_ERROR || isAllZero(glBytes)) {
+                LOGGER.info("GL device {} of {}: query unusable (glGetError 0x{})",
+                        i, glDeviceCount, Integer.toHexString(glError));
+                continue;
+            }
+            if (java.util.Arrays.equals(vulkanUuid, glBytes)) {
+                return true;
+            }
+            seen.append(seen.length() == 0 ? "" : ", ").append(hex(glBytes));
+        }
+        return false;
+    }
+
+    /** The driver UUID, or null when that query is unusable as well. */
+    private static byte[] queryDriverUuid(MemoryStack stack) {
+        ByteBuffer buf = stack.calloc(UUID_BYTES);
+        MemoryUtil.memSet(buf, 0);
+        GL11C.glGetError();
+        EXTMemoryObject.glGetUnsignedBytevEXT(EXTMemoryObject.GL_DRIVER_UUID_EXT, buf);
+        int glError = GL11C.glGetError();
+        byte[] bytes = new byte[UUID_BYTES];
+        buf.get(bytes);
+        LOGGER.info("GL driver UUID: {} (glGetError 0x{})", hex(bytes), Integer.toHexString(glError));
+        return glError == GL11C.GL_NO_ERROR && !isAllZero(bytes) ? bytes : null;
+    }
+
+    private static boolean isAllZero(byte[] bytes) {
+        for (byte b : bytes) {
+            if (b != 0) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static String hex(byte[] bytes) {
