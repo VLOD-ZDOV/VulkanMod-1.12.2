@@ -12,6 +12,7 @@
     "ChunkRenderContainerMixin",
     "VboRenderListMixin",
     "ChunkPreloadMixin",
-    "ChunkBuildThreadsMixin"
+    "ChunkBuildThreadsMixin",
+    "ChunkUploadMixin"
   ]
 }

@@ -57,7 +57,11 @@ public final class VulkanContextImpl implements VulkanBridge {
     private int vramMegabytes;
     private VkDemoRenderer demoRenderer;
     private VkInteropRenderer interopRenderer;
-    private VkChunkMirror chunkMirror;
+    /**
+     * Volatile because the chunk builder threads read it without the monitor:
+     * the volatile write publishes the fully constructed mirror to them.
+     */
+    private volatile VkChunkMirror chunkMirror;
     private VkTerrainRenderer terrainRenderer;
     private boolean interopCapable;
 
@@ -344,6 +348,19 @@ public final class VulkanContextImpl implements VulkanBridge {
             chunkMirror = new VkChunkMirror(this);
         }
         chunkMirror.upload(slot, data);
+    }
+
+    @Override
+    public boolean stageChunkBuffer(int slot, java.nio.ByteBuffer data) {
+        // Deliberately not synchronized: this runs on the game's chunk builder
+        // threads, and taking the context monitor would serialise them against
+        // the render thread — the very cost this exists to remove. The mirror
+        // guards the little state involved with a lock of its own.
+        VkChunkMirror mirror = chunkMirror;
+        if (!initialized || !interopCapable || mirror == null) {
+            return false;
+        }
+        return mirror.stageFromWorker(slot, data);
     }
 
     @Override

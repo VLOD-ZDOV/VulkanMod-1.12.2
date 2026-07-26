@@ -164,6 +164,50 @@ final class VkChunkMirror {
         }
     }
 
+    /**
+     * A chunk copied into staging by a builder thread, waiting for the render
+     * thread to record the copy command for it.
+     *
+     * The builder threads may not touch Vulkan at all — the queue and the
+     * command pool are not thread-safe, and the render thread owns both. So a
+     * builder does only what needs no driver call: reserve a range and memcpy
+     * into already-mapped memory. Everything that allocates, records or submits
+     * stays where it was.
+     */
+    private static final class Staged {
+        long srcOffset;
+        int size;
+    }
+
+    /**
+     * Guards the builder half of the staging ring. Deliberately not the
+     * mirror's own monitor: the render thread holds that one several times a
+     * frame (every lookup of a visible chunk goes through it), and builders
+     * blocking it would move the cost back onto the thread this is meant to
+     * relieve. Builders never take the mirror monitor, so there is no cycle.
+     */
+    private final Object workerLock = new Object();
+    private final java.util.HashMap<Integer, Staged> staged = new java.util.HashMap<>();
+    /**
+     * Bumped whenever a slot is released. A builder reads it before its copy
+     * and publishes only if it still matches, which is what makes releasing a
+     * slot mid-copy safe: the copy is simply dropped.
+     *
+     * Without this the builder's publish happens after {@code release} has
+     * already searched for it, so a slot recycled to an unrelated chunk could
+     * inherit the previous one's staged bytes — and the size check alone would
+     * not catch it, because chunk buffers cluster around the same few sizes.
+     */
+    private int[] slotEpoch = new int[4096];
+    /** Builders own [workerRegionStart, workerRegionStart + workerRegionSize). */
+    private long workerRegionStart;
+    private long workerRegionSize;
+    private long workerHead;
+    /** Builders inside a memcpy right now; the region must not be reset under them. */
+    private int workerInFlight;
+    private long workerStaged;
+    private long workerRejected;
+
     private static final class Retired {
         final Entry entry;
         final long frameStamp;
@@ -337,6 +381,103 @@ final class VkChunkMirror {
         return ctx.getDevice();
     }
 
+    /**
+     * Copies a freshly built chunk into staging from the thread that built it.
+     *
+     * The game hands geometry to the render thread through a queue, and the
+     * render thread then spends a hard per-frame budget draining it — a quarter
+     * of the frame, minus what the frame already spent. Mirroring inside that
+     * budget made us spend it twice as fast as vanilla alone would: once for
+     * the GL buffer, once for this copy. The copy itself needs no OpenGL and no
+     * Vulkan call, only mapped memory, so it does not belong there.
+     *
+     * Returns false whenever the fast path is not available — no ring yet, no
+     * slot yet, or the builder region is full. The caller then does nothing and
+     * the render thread mirrors the chunk exactly as before, so a refusal costs
+     * one missed optimisation and never correctness.
+     */
+    boolean stageFromWorker(int slot, ByteBuffer data) {
+        int size = data.remaining();
+        if (size <= 0 || slot < 0) {
+            return false;
+        }
+        long aligned = (size + 15L) & ~15L;
+        long offset;
+        int epoch;
+        synchronized (workerLock) {
+            if (stagingBuffer == 0 || workerHead + aligned > workerRegionSize) {
+                workerRejected++;
+                return false;
+            }
+            offset = workerRegionStart + workerHead;
+            workerHead += aligned;
+            // Held across the copy so the region cannot be reset under us.
+            workerInFlight++;
+            epoch = epochOf(slot);
+        }
+        long mapped = stagingMappedAddress;
+        boolean copied = false;
+        boolean published = false;
+        try {
+            MemoryUtil.memCopy(MemoryUtil.memAddress(data), mapped + offset, size);
+            copied = true;
+        } finally {
+            // No return from here: the in-flight count has to be given back
+            // even if the copy threw, but returning inside a finally would
+            // swallow that exception on the way out.
+            synchronized (workerLock) {
+                workerInFlight--;
+                // A changed epoch means the slot was released while we were
+                // copying. The bytes are meaningless now and the slot may
+                // already belong to another chunk, so the copy is dropped.
+                if (copied && epochOf(slot) == epoch) {
+                    Staged entry = staged.get(slot);
+                    if (entry == null) {
+                        entry = new Staged();
+                        staged.put(slot, entry);
+                    }
+                    entry.srcOffset = offset;
+                    entry.size = size;
+                    workerStaged++;
+                    published = true;
+                } else {
+                    workerRejected++;
+                }
+            }
+        }
+        return published;
+    }
+
+    /** Caller must hold {@link #workerLock}. */
+    private int epochOf(int slot) {
+        return slot < slotEpoch.length ? slotEpoch[slot] : 0;
+    }
+
+    /** Caller must hold {@link #workerLock}. */
+    private void bumpEpoch(int slot) {
+        if (slot >= slotEpoch.length) {
+            int length = slotEpoch.length;
+            while (slot >= length) {
+                length *= 2;
+            }
+            int[] grown = new int[length];
+            System.arraycopy(slotEpoch, 0, grown, 0, slotEpoch.length);
+            slotEpoch = grown;
+        }
+        slotEpoch[slot]++;
+    }
+
+    /** The staged copy for this slot if it still matches, else -1. */
+    private long takeStaged(int slot, int size) {
+        synchronized (workerLock) {
+            Staged entry = staged.remove(slot);
+            // A size mismatch means the chunk was rebuilt again after staging.
+            // Writing newer bytes into a range measured for the older upload
+            // would overrun it, so that one goes the ordinary way.
+            return entry != null && entry.size == size ? entry.srcOffset : -1L;
+        }
+    }
+
     synchronized void upload(int slot, ByteBuffer data) {
         int size = data.remaining();
         Entry entry = entries.get(slot);
@@ -353,12 +494,17 @@ final class VkChunkMirror {
             entries.put(slot, entry);
         }
         if (size > 0) {
+            // Before taking the staged copy: growing the ring reallocates the
+            // memory it points into, and discards the staged records with it.
             ensureStagingRing(size);
             beginUploads();
-            // May submit and wait before returning 0, so it has to come before
-            // the copy is recorded but after the command buffer is open.
-            long src = allocateStagingRange(size);
-            MemoryUtil.memCopy(MemoryUtil.memAddress(data), stagingMappedAddress + src, size);
+            long src = takeStaged(slot, size);
+            if (src < 0) {
+                // May submit and wait before returning 0, so it has to come
+                // before the copy is recorded but after the buffer is open.
+                src = allocateStagingRange(size);
+                MemoryUtil.memCopy(MemoryUtil.memAddress(data), stagingMappedAddress + src, size);
+            }
             queueCopy(src, entry.offset, size);
         }
         totalBytes += size - entry.size;
@@ -373,6 +519,12 @@ final class VkChunkMirror {
     }
 
     synchronized void release(int slot) {
+        // Drop any staged copy first: its destination is about to be freed,
+        // and a later chunk reusing this slot must not inherit it.
+        synchronized (workerLock) {
+            staged.remove(slot);
+            bumpEpoch(slot);
+        }
         Entry entry = entries.remove(slot);
         if (entry != null) {
             totalBytes -= entry.size;
@@ -429,11 +581,18 @@ final class VkChunkMirror {
     }
 
     synchronized String stats() {
+        long offThread;
+        long onThread;
+        synchronized (workerLock) {
+            offThread = workerStaged;
+            onThread = workerRejected;
+        }
         return String.format("mirrored VBOs: %d (%.1f MiB VRAM of %.1f MiB buffer, %d uploads, "
-                        + "staging ring %d MiB, %d wraps)",
+                        + "staging ring %d MiB, %d wraps, %d copies off the render thread, "
+                        + "%d refused)",
                 entries.size(), totalBytes / (1024.0 * 1024.0),
                 geometryCapacity / (1024.0 * 1024.0), uploadCount,
-                stagingCapacity / (1024 * 1024), stagingWraps);
+                stagingCapacity / (1024 * 1024), stagingWraps, offThread, onThread);
     }
 
     private Entry createEntry(int capacity) {
@@ -456,6 +615,23 @@ final class VkChunkMirror {
             // Everything recorded so far reads from the buffer about to go.
             flushUploads();
             waitForUploads();
+            // And so does any builder still copying into it. Closing the
+            // region first matters: leaving it open while waiting would let
+            // new builders keep reserving ranges, and with enough of them the
+            // wait need never end. Once closed, only the copies already begun
+            // remain, and each is a memcpy — microseconds, bounded.
+            synchronized (workerLock) {
+                workerRegionSize = 0;
+                staged.clear();
+            }
+            while (true) {
+                synchronized (workerLock) {
+                    if (workerInFlight == 0) {
+                        break;
+                    }
+                }
+                Thread.yield();
+            }
             vkUnmapMemory(device(), stagingMemory);
             vkDestroyBuffer(device(), stagingBuffer, null);
             vkFreeMemory(device(), stagingMemory, null);
@@ -487,7 +663,18 @@ final class VkChunkMirror {
         }
         stagingCapacity = capacity;
         stagingHead = 0;
-        LOGGER.info("Staging ring sized to {} MiB", capacity / (1024 * 1024));
+        // Split in half: the render thread wraps within the lower part, the
+        // builder threads fill the upper one. Two independent regions mean a
+        // builder can never hand out a range the render thread is about to
+        // reuse, without either of them coordinating on every allocation.
+        synchronized (workerLock) {
+            workerRegionSize = capacity / 2;
+            workerRegionStart = capacity - workerRegionSize;
+            workerHead = 0;
+            staged.clear();
+        }
+        LOGGER.info("Staging ring sized to {} MiB ({} MiB of it for builder threads)",
+                capacity / (1024 * 1024), (capacity / 2) / (1024 * 1024));
     }
 
     /**
@@ -501,7 +688,8 @@ final class VkChunkMirror {
      */
     private long allocateStagingRange(int size) {
         long aligned = (size + 15L) & ~15L;
-        if (stagingHead + aligned > stagingCapacity) {
+        // Wraps at the builder region rather than at the end of the ring.
+        if (stagingHead + aligned > workerRegionStart) {
             flushUploads();
             waitForUploads();
             stagingHead = 0;
@@ -576,6 +764,18 @@ final class VkChunkMirror {
                     "vkWaitForFences(VBO uploads)");
             vkResetFences(device(), uploadFence);
             uploadsSubmitted = false;
+        }
+        // Past this point the previous submission has finished, so everything
+        // the builders staged and we already recorded has been read by the GPU
+        // and its space can be handed out again. Records not yet recorded go
+        // with it — those chunks simply take the ordinary path when their
+        // upload arrives — so the region is only recycled once it is half
+        // spent, which keeps that loss rare while stopping it filling up.
+        synchronized (workerLock) {
+            if (workerInFlight == 0 && workerHead * 2 >= workerRegionSize) {
+                workerHead = 0;
+                staged.clear();
+            }
         }
         vkResetCommandBuffer(uploadCommandBuffer, 0);
         try (MemoryStack stack = stackPush()) {

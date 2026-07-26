@@ -71,6 +71,17 @@ public interface VulkanBridge {
     /** Frees the Vulkan mirror of a deleted game VBO. */
     void releaseChunkBuffer(int slot);
 
+    /**
+     * Mirrors a chunk from the thread that built it, before the render thread
+     * ever sees it. Returns false when that was not possible, in which case the
+     * caller must leave the ordinary {@link #mirrorChunkBuffer} path to do the
+     * work — a refusal is never an error.
+     *
+     * Same contract on {@code data} as mirrorChunkBuffer: read only, position
+     * and limit untouched.
+     */
+    boolean stageChunkBuffer(int slot, java.nio.ByteBuffer data);
+
     /** One-line mirror statistics for the F3 screen. */
     String chunkMirrorStats();
 

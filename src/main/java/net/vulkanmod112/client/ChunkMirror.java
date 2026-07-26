@@ -29,6 +29,16 @@ public final class ChunkMirror {
         }
     }
 
+    /**
+     * Mirrors a chunk from the builder thread that produced it. Returns false
+     * when the fast path was unavailable, which is not a failure: the render
+     * thread then mirrors it the ordinary way when it uploads the GL buffer.
+     */
+    public static boolean onWorkerBuild(int slot, ByteBuffer data) {
+        VulkanBridge bridge = VulkanLoader.bridgeIfReady();
+        return bridge != null && bridge.isInitialized() && bridge.stageChunkBuffer(slot, data);
+    }
+
     public static void onBufferDelete(int slot) {
         VulkanBridge bridge = VulkanLoader.bridgeIfReady();
         if (bridge != null && bridge.isInitialized()) {

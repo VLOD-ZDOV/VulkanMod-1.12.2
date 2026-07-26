@@ -26,8 +26,13 @@ import java.nio.ByteBuffer;
 @Mixin(VertexBuffer.class)
 public abstract class VertexBufferMixin implements VertexBufferSlot {
 
+    /**
+     * Volatile: written by the render thread when the buffer is first
+     * uploaded, read by the chunk builder threads deciding whether they can
+     * mirror this chunk themselves.
+     */
     @Unique
-    private int vulkanmod112$slot = ChunkSlots.UNASSIGNED;
+    private volatile int vulkanmod112$slot = ChunkSlots.UNASSIGNED;
 
     @Override
     public int vulkanmod112$slot() {
