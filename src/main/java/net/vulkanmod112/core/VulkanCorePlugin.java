@@ -34,6 +34,11 @@ public class VulkanCorePlugin implements IFMLLoadingPlugin, IEarlyMixinLoader {
             "shadersmodcore.transform.SMCClassTransformer"
     };
     private static final String[] RENDERER_JAR_MARKERS = {"optifine", "shadersmod"};
+    /**
+     * Comma-separated extra jar-name fragments, for renderer replacements that
+     * appear after this version ships: -Dvulkanmod112.extraRendererMarkers=foo,bar
+     */
+    private static final String EXTRA_MARKERS_PROPERTY = "vulkanmod112.extraRendererMarkers";
 
     @Override
     public List<String> getMixinConfigs() {
@@ -83,6 +88,12 @@ public class VulkanCorePlugin implements IFMLLoadingPlugin, IEarlyMixinLoader {
             }
             for (String marker : RENDERER_JAR_MARKERS) {
                 if (name.contains(marker)) {
+                    return true;
+                }
+            }
+            for (String marker : System.getProperty(EXTRA_MARKERS_PROPERTY, "").split(",")) {
+                String trimmed = marker.trim().toLowerCase(Locale.ROOT);
+                if (!trimmed.isEmpty() && name.contains(trimmed)) {
                     return true;
                 }
             }

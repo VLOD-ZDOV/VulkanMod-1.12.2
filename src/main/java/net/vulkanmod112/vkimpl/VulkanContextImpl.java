@@ -341,6 +341,21 @@ public final class VulkanContextImpl implements VulkanBridge {
     }
 
     @Override
+    public synchronized String diagnosticsReport() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("  gpu: ").append(gpuSummary).append('\n');
+        sb.append("  interop: ").append(interopCapable ? "external memory/semaphores enabled" : "UNAVAILABLE")
+                .append(", handles: ").append(Interop.WINDOWS ? "win32" : "fd").append('\n');
+        sb.append("  mirror: ").append(chunkMirror != null ? chunkMirror.stats() : "not created").append('\n');
+        if (terrainRenderer != null) {
+            terrainRenderer.appendDiagnostics(sb);
+        } else {
+            sb.append("  terrain: renderer not created\n");
+        }
+        return sb.toString();
+    }
+
+    @Override
     public synchronized String chunkMirrorStats() {
         return chunkMirror != null ? chunkMirror.stats() : "mirrored VBOs: 0";
     }

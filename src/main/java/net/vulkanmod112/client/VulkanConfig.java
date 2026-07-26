@@ -17,6 +17,8 @@ public final class VulkanConfig {
     private static int entityDistance;
     private static int tileEntityDistance;
     private static boolean animationsEnabled = true;
+    private static boolean ultraLogEnabled;
+    private static int ultraLogSeconds = 10;
     private static boolean depthBlitEnabled = true;
     private static boolean cullingEnabled = true;
 
@@ -36,6 +38,10 @@ public final class VulkanConfig {
                 "Stop drawing chests, signs and other block entities past this many blocks. 0 keeps vanilla's.");
         animationsEnabled = config.getBoolean("animatedTextures", CATEGORY_OPTIMIZATION, true,
                 "Update animated block textures. Off skips the per-tick frame uploads for every animated sprite.");
+        ultraLogEnabled = config.getBoolean("ultraLog", CATEGORY_ADVANCED, false,
+                "Write a detailed diagnostics report to logs/vulkanmod112-diagnostics.log.");
+        ultraLogSeconds = config.getInt("ultraLogSeconds", CATEGORY_ADVANCED, 10, 1, 120,
+                "Seconds between diagnostics snapshots.");
         depthBlitEnabled = config.getBoolean("depthBlitEnabled", CATEGORY_ADVANCED, true,
                 "Copy Vulkan depth into the game's depth buffer with glBlitFramebuffer instead of a shader.");
         cullingEnabled = config.getBoolean("cullingEnabled", CATEGORY_ADVANCED, true,
@@ -93,6 +99,24 @@ public final class VulkanConfig {
     public static void setAnimationsEnabled(boolean value) {
         animationsEnabled = value;
         store(CATEGORY_OPTIMIZATION, "animatedTextures", value);
+    }
+
+    public static boolean isUltraLogEnabled() {
+        return ultraLogEnabled;
+    }
+
+    public static void setUltraLogEnabled(boolean value) {
+        ultraLogEnabled = value;
+        store(CATEGORY_ADVANCED, "ultraLog", value);
+    }
+
+    public static int getUltraLogSeconds() {
+        return ultraLogSeconds;
+    }
+
+    public static void setUltraLogSeconds(int value) {
+        ultraLogSeconds = value;
+        store(CATEGORY_ADVANCED, "ultraLogSeconds", value);
     }
 
     public static boolean isDepthBlitEnabled() {

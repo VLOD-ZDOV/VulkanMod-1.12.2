@@ -43,6 +43,9 @@ import org.lwjgl.vulkan.VkMemoryAllocateInfo;
 import org.lwjgl.vulkan.VkMemoryDedicatedAllocateInfo;
 import org.lwjgl.vulkan.VkMemoryRequirements;
 import org.lwjgl.vulkan.VkPhysicalDeviceMemoryProperties;
+import org.lwjgl.vulkan.VkPhysicalDeviceProperties;
+import org.lwjgl.vulkan.VkQueryPoolCreateInfo;
+import org.lwjgl.vulkan.VkQueueFamilyProperties;
 import org.lwjgl.vulkan.VkPipelineColorBlendAttachmentState;
 import org.lwjgl.vulkan.VkPipelineColorBlendStateCreateInfo;
 import org.lwjgl.vulkan.VkPipelineDepthStencilStateCreateInfo;
@@ -212,6 +215,13 @@ final class VkTerrainRenderer {
     private long recordNanos;
     private long submitCompositeNanos;
     private long timingWindowStartNanos;
+    // GPU-side cost of the terrain pass, read back from timestamp queries one
+    // frame late (the fence for a slot guarantees its queries have landed)
+    private long queryPool;
+    private float timestampPeriod;
+    private boolean timestampsSupported;
+    private long gpuNanos;
+    private int gpuSamples;
     // VK-side readback of a horizontal strip of the color target: tells apart
     // "Vulkan drew nothing" from "GL cannot see what Vulkan drew"
     private static final int READBACK_ROWS = 8;
@@ -340,17 +350,114 @@ final class VkTerrainRenderer {
         if (timingWindowStartNanos != 0) {
             double frames = TIMING_WINDOW;
             LOGGER.info("Terrain timings over {} frames: fence wait {} ms, record {} ms, "
-                            + "submit+composite {} ms per frame; {} fps overall",
+                            + "submit+composite {} ms, GPU {} per frame; {} fps overall",
                     TIMING_WINDOW,
                     String.format("%.2f", fenceWaitNanos / frames / 1e6),
                     String.format("%.2f", recordNanos / frames / 1e6),
                     String.format("%.2f", submitCompositeNanos / frames / 1e6),
+                    gpuTimeText(),
                     String.format("%.0f", frames * 1e9 / (now - timingWindowStartNanos)));
         }
         timingWindowStartNanos = now;
         fenceWaitNanos = 0;
         recordNanos = 0;
         submitCompositeNanos = 0;
+        gpuNanos = 0;
+        gpuSamples = 0;
+    }
+
+    /** Everything the ultra log wants to know about this renderer. */
+    synchronized void appendDiagnostics(StringBuilder sb) {
+        sb.append("  terrain: frame ").append(frameCounter)
+                .append(", ").append(frameChunks).append(" chunks, ")
+                .append(frameVertices).append(" vertices, ")
+                .append(frameSkipped).append(" skipped\n");
+        sb.append("  targets: ").append(width).append('x').append(height)
+                .append(", depth ").append(depthFormat == VK_FORMAT_X8_D24_UNORM_PACK32 ? "D24" : "D32F")
+                .append(", depth blit ").append(depthBlit ? "on" : "off")
+                .append(", atlas ").append(atlasWidth).append('x').append(atlasHeight)
+                .append(" (").append(atlasLevels).append(" mips)\n");
+        sb.append("  frame cost: fence wait ")
+                .append(String.format("%.2f", fenceWaitNanos / (double) Math.max(1, timingSamples()) / 1e6))
+                .append(" ms, record ")
+                .append(String.format("%.2f", recordNanos / (double) Math.max(1, timingSamples()) / 1e6))
+                .append(" ms, submit+composite ")
+                .append(String.format("%.2f", submitCompositeNanos / (double) Math.max(1, timingSamples()) / 1e6))
+                .append(" ms, GPU ").append(gpuTimeText()).append('\n');
+        sb.append("  index buffer: ").append(quadIndexCapacityQuads).append(" quads")
+                .append(", draws capped at ").append(MAX_INDIRECT_DRAWS)
+                .append(", frames in flight ").append(FRAMES_IN_FLIGHT).append('\n');
+        if (glErrorLogged) {
+            sb.append("  WARNING: a GL error was reported during composite (see the main log)\n");
+        }
+        if (frameSkipped > 0) {
+            sb.append("  WARNING: ").append(frameSkipped)
+                    .append(" chunks were skipped last frame — no mirror, or past the draw cap\n");
+        }
+    }
+
+    /** Frames accumulated into the current timing window. */
+    private int timingSamples() {
+        return (int) (frameCounter % TIMING_WINDOW == 0 ? TIMING_WINDOW : frameCounter % TIMING_WINDOW);
+    }
+
+    /** Average GPU time over the window, or "n/a" where the queue has no timestamps. */
+    private String gpuTimeText() {
+        if (!timestampsSupported) {
+            return "n/a";
+        }
+        if (gpuSamples == 0) {
+            return "pending";
+        }
+        return String.format("%.2f ms", gpuNanos / (double) gpuSamples / 1e6);
+    }
+
+    /**
+     * The graphics queue writes a timestamp before and after the terrain pass.
+     * Reading them costs nothing here because the slot's fence has already been
+     * waited on, so the results are guaranteed to be available.
+     */
+    private void createQueryPool(MemoryStack stack) {
+        VkPhysicalDeviceProperties props = VkPhysicalDeviceProperties.malloc(stack);
+        vkGetPhysicalDeviceProperties(ctx.getPhysicalDevice(), props);
+        timestampPeriod = props.limits().timestampPeriod();
+
+        IntBuffer familyCount = stack.mallocInt(1);
+        vkGetPhysicalDeviceQueueFamilyProperties(ctx.getPhysicalDevice(), familyCount, null);
+        VkQueueFamilyProperties.Buffer families =
+                VkQueueFamilyProperties.malloc(familyCount.get(0), stack);
+        vkGetPhysicalDeviceQueueFamilyProperties(ctx.getPhysicalDevice(), familyCount, families);
+        int validBits = families.get(ctx.getGraphicsQueueFamily()).timestampValidBits();
+
+        timestampsSupported = timestampPeriod > 0.0f && validBits > 0;
+        if (!timestampsSupported) {
+            LOGGER.info("Graphics queue has no timestamp support; GPU timings unavailable");
+            return;
+        }
+        VkQueryPoolCreateInfo info = VkQueryPoolCreateInfo.calloc(stack)
+                .sType(VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO)
+                .queryType(VK_QUERY_TYPE_TIMESTAMP)
+                .queryCount(FRAMES_IN_FLIGHT * 2);
+        LongBuffer pPool = stack.mallocLong(1);
+        check(vkCreateQueryPool(device(), info, null, pPool), "vkCreateQueryPool(terrain)");
+        queryPool = pPool.get(0);
+    }
+
+    private void readGpuTimestamps(MemoryStack stack, int slot) {
+        if (!timestampsSupported || frameCounter < FRAMES_IN_FLIGHT) {
+            return; // this slot has not run yet
+        }
+        LongBuffer results = stack.mallocLong(2);
+        int result = vkGetQueryPoolResults(device(), queryPool, slot * 2, 2, results, 8,
+                VK_QUERY_RESULT_64_BIT);
+        if (result != VK_SUCCESS) {
+            return; // VK_NOT_READY: skip this sample rather than stall the frame
+        }
+        long delta = results.get(1) - results.get(0);
+        if (delta > 0) {
+            gpuNanos += (long) (delta * timestampPeriod);
+            gpuSamples++;
+        }
     }
 
     // ------------------------------------------------------------------
@@ -371,6 +478,7 @@ final class VkTerrainRenderer {
             check(vkWaitForFences(device(), fence, true, 1_000_000_000L), "vkWaitForFences");
             fenceWaitNanos += System.nanoTime() - t0;
             vkResetFences(device(), fence);
+            readGpuTimestamps(stack, slot);
             // This slot's fence covers frame N-2; everything up to it is done
             mirror.setFrameStamp(frameCounter);
             mirror.flushRetired(frameCounter - FRAMES_IN_FLIGHT);
@@ -390,6 +498,13 @@ final class VkTerrainRenderer {
                     .sType(VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO)
                     .flags(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
             check(vkBeginCommandBuffer(commandBuffer, begin), "vkBeginCommandBuffer");
+
+            if (timestampsSupported) {
+                // Must be outside a render pass, so it goes first.
+                vkCmdResetQueryPool(commandBuffer, queryPool, slot * 2, 2);
+                vkCmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                        queryPool, slot * 2);
+            }
 
             recordLightmapUpload(stack);
 
@@ -527,6 +642,10 @@ final class VkTerrainRenderer {
             vkCmdEndRenderPass(commandBuffer);
             if (frameCounter == 0 || frameCounter == 119) {
                 recordColorReadback(stack);
+            }
+            if (timestampsSupported) {
+                vkCmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                        queryPool, activeFrameSlot * 2 + 1);
             }
             check(vkEndCommandBuffer(commandBuffer), "vkEndCommandBuffer");
 
@@ -814,6 +933,7 @@ final class VkTerrainRenderer {
             LongBuffer pPool = stack.mallocLong(1);
             check(vkCreateCommandPool(device(), poolInfo, null, pPool), "vkCreateCommandPool(terrain)");
             commandPool = pPool.get(0);
+            createQueryPool(stack);
 
             VkCommandBufferAllocateInfo allocInfo = VkCommandBufferAllocateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO)
@@ -1805,6 +1925,10 @@ final class VkTerrainRenderer {
                 vkDestroyFence(device(), frameFence, null);
             }
             fences = null;
+        }
+        if (queryPool != 0) {
+            vkDestroyQueryPool(device(), queryPool, null);
+            queryPool = 0;
         }
         vkDestroyCommandPool(device(), commandPool, null);
         baseReady = false;

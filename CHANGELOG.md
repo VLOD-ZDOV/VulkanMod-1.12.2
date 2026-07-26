@@ -4,6 +4,10 @@
 
 ### Added
 
+- GPU timings. Timestamp queries around the terrain pass are read back a frame late and reported alongside the CPU breakdown, so optimisation work can be measured instead of guessed at.
+- Ultra logging: a full diagnostics report written to `logs/vulkanmod112-diagnostics.log`, covering versions, installed mods, GPU and driver, every active renderer path and a periodic snapshot of frame costs and settings.
+- Animated block textures can be turned off, which vanilla offers no way to do.
+
 - Settings screen rebuilt in VulkanMod's own shape: page tabs, a scrolling list of grouped options, and a panel describing the option under the cursor together with how much it is worth in frames.
 - Game-side optimisations with their own page. Entity and block-entity draw distances are capped independently of vanilla's per-object limits, and the vanilla settings that matter most for framerate are reachable without leaving the screen.
 
