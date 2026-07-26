@@ -54,6 +54,34 @@ The slider permits 2–64 chunks. 64 is an experimental maximum: vanilla 1.12.2 
 
 For Vulkan/OpenGL sharing, both APIs must select the same GPU. On hybrid Linux systems, check F3: both the Vulkan device and OpenGL renderer should report the discrete NVIDIA GPU. Running only Vulkan on NVIDIA while OpenGL is on an iGPU is not supported.
 
+## Troubleshooting
+
+**The game dies the moment the world appears, with no crash report.** The log stops right
+after the block atlas is handed to Vulkan and a `hs_err_pid*.log` points at a driver
+library. This means OpenGL and Vulkan ended up on different GPUs: sharing memory between
+them dereferences a handle the importing driver cannot understand, and the process is gone
+before any Java code can react. Recent versions detect this first and refuse the zero-copy
+path with a message naming both device UUIDs, leaving the game on vanilla rendering.
+
+On a hybrid Linux system the game's OpenGL context goes to the integrated or software
+renderer by default, so force it onto the same discrete card Vulkan picks:
+
+```
+__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia
+```
+
+In Prism Launcher: Edit instance -> Settings -> Custom commands -> Wrapper command:
+
+```
+env __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia
+```
+
+Check the result in F3: the Vulkan device and the OpenGL renderer must name the same GPU.
+
+**Anything else.** Turn on Ultra Logging in the settings screen, reproduce, and attach
+`logs/vulkanmod112-diagnostics.log`. It records versions, installed mods, the GL driver,
+every active renderer path, the frame cost breakdown and resource counts.
+
 ## Compatibility and diagnostics
 
 OptiFine and legacy shader mods replace the same renderer classes this mod rewrites. When one of them is installed, the terrain mixins are not registered at all, so the game boots on that renderer while this mod's settings screen and game-side optimisations stay active. Sharing terrain rendering between the two is not possible: the vertex format and pass order differ, and with a shader pack loaded the format changes again. See [ROADMAP.md](ROADMAP.md) section G.
