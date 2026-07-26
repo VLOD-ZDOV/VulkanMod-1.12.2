@@ -56,6 +56,9 @@ public final class TerrainHooks {
     private static final float[] MV = new float[16];
     private static final float[] PROJ = new float[16];
     private static final float[] MVP = new float[16];
+    /** r, g, b, mode, start, end, density — handed to the renderer each frame. */
+    private static final float[] FOG = new float[7];
+    private static final FloatBuffer FOG_COLOR = BufferUtils.createFloatBuffer(16);
 
     /** Packed per chunk: glBufferId, blockX, blockY, blockZ. */
     private static int[] chunkData = new int[1024];
@@ -118,6 +121,8 @@ public final class TerrainHooks {
             int count = packChunks(layer, chunks);
             if (layer == BlockRenderLayer.SOLID) {
                 captureMatrices();
+                captureFog();
+                bridge.updateFogState(FOG);
                 if (lightmapColors != null) {
                     bridge.updateLightmapData(lightmapColors);
                 }
@@ -198,6 +203,41 @@ public final class TerrainHooks {
             lastChunksDrawn += i / 4;
         }
         return i / 4;
+    }
+
+    /**
+     * Copies the fixed-function fog the game has already configured for this
+     * frame, so the Vulkan terrain fades exactly like everything OpenGL still
+     * draws. Underwater this is the difference between entities turning the
+     * colour of the water and the blocks behind them staying perfectly clear.
+     *
+     * Read from GL rather than recomputed, because the game changes fog for
+     * water, lava, blindness, the void and render distance, and mods add more.
+     */
+    private static void captureFog() {
+        if (!VulkanConfig.isFogEnabled() || !GL11.glIsEnabled(GL11.GL_FOG)) {
+            FOG[3] = 0.0f; // mode 0: the shader skips the blend
+            return;
+        }
+        FOG_COLOR.clear();
+        GL11.glGetFloat(GL11.GL_FOG_COLOR, FOG_COLOR);
+        FOG[0] = FOG_COLOR.get(0);
+        FOG[1] = FOG_COLOR.get(1);
+        FOG[2] = FOG_COLOR.get(2);
+        int mode = GL11.glGetInteger(GL11.GL_FOG_MODE);
+        if (mode == GL11.GL_LINEAR) {
+            FOG[3] = 1.0f;
+        } else if (mode == GL11.GL_EXP) {
+            FOG[3] = 2.0f;
+        } else if (mode == GL11.GL_EXP2) {
+            FOG[3] = 3.0f;
+        } else {
+            FOG[3] = 0.0f;
+            return;
+        }
+        FOG[4] = GL11.glGetFloat(GL11.GL_FOG_START);
+        FOG[5] = GL11.glGetFloat(GL11.GL_FOG_END);
+        FOG[6] = GL11.glGetFloat(GL11.GL_FOG_DENSITY);
     }
 
     /** MVP = depth-range fix (GL [-1,1] → VK [0,1]) * projection * modelview. */

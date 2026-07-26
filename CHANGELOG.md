@@ -4,6 +4,7 @@
 
 ### Added
 
+- Fog. The Vulkan-drawn terrain was the one thing in the scene with no fog at all, which is most obvious underwater: fish and mobs take on the colour of the water while the blocks behind them stay perfectly clear. The parameters are read straight out of OpenGL each frame rather than recomputed, because the game changes fog for water, lava, blindness, the void and render distance, and mods add their own. There is a switch for it, on by default.
 - Offscreen chunk preloading, **off by default**. Vanilla flood-fills outward from the player's chunk and ANDs a frustum test into every expansion step, so a chunk that needs rebuilding but is not on screen is never even considered — it is discovered from scratch when the camera turns. At render distance 64 the result is a world that fills in along whatever you look at, and narrowing the field of view makes distant chunks appear because it shrinks the competition. The build queue is now topped up from the rest of the grid, but only once the visible chunks are handled, and by scanning a bounded slice per frame rather than sweeping 266 000 entries. Only the build queue is touched; what gets drawn is still decided by the frustum. It is off by default because it is not free work the game was skipping out of laziness: measured at render distance 64, 330 fps without it against 120-140 with, and a world that finishes loading holds all of its geometry in video memory rather than only the part you have looked at. The settings screen states both numbers.
 
 ### Performance

@@ -138,6 +138,26 @@ final class VulkanOptions {
                                         mc.gameSettings.saveOptions();
                                     }
                                 }),
+                        new VSwitchOption("Fog",
+                                "Fade the Vulkan-drawn world into the distance the way the rest of "
+                                        + "the scene already does. Without it the terrain is the "
+                                        + "one thing in view with no fog at all, which shows up "
+                                        + "worst underwater: fish and mobs take on the colour of "
+                                        + "the water while the blocks behind them stay perfectly "
+                                        + "clear. Off leaves the world ending in a hard edge and is "
+                                        + "very slightly faster.",
+                                Cost.gpu(Level.LOW), null,
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return VulkanConfig.isFogEnabled();
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        VulkanConfig.setFogEnabled(value);
+                                    }
+                                }),
                         new VSwitchOption("Zoom",
                                 "Hold the zoom key to narrow the field of view, the way OptiFine "
                                         + "does it. Mouse sensitivity is scaled to match while it is "

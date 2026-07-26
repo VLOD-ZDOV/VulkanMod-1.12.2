@@ -202,6 +202,11 @@ final class VkTerrainRenderer {
     private int lightmapHash;
     private boolean lightmapDirty = true;
     private int[] lightmapData;
+    /**
+     * rgb + mode, then start/end/density/unused. Mode 0 means the game has fog
+     * switched off, and the shader skips the blend entirely.
+     */
+    private final float[] fogState = new float[8];
 
     // Size-dependent shared targets
     private int width;
@@ -344,6 +349,13 @@ final class VkTerrainRenderer {
     }
 
     /** CPU-side lightmap colors (256 ARGB ints); preferred over glGetTexImage. */
+    /** rgb, mode, start, end, density, unused — see {@link #fogState}. */
+    synchronized void setFogState(float[] fog) {
+        if (fog != null && fog.length >= 7) {
+            System.arraycopy(fog, 0, fogState, 0, 7);
+        }
+    }
+
     synchronized void setLightmapData(int[] argb) {
         if (argb != null && argb.length == LIGHTMAP_SIZE * LIGHTMAP_SIZE) {
             this.lightmapData = argb;
@@ -594,6 +606,14 @@ final class VkTerrainRenderer {
             }
             vkCmdPushConstants(commandBuffer, pipelineLayout,
                     VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, mvpPush);
+
+            // Fog is constant across the frame; push it once alongside the MVP.
+            ByteBuffer fogPush = stack.malloc(32);
+            for (int i = 0; i < 8; i++) {
+                fogPush.putFloat(i * 4, fogState[i]);
+            }
+            vkCmdPushConstants(commandBuffer, pipelineLayout,
+                    VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 80, fogPush);
 
             // Standard (y-down) viewport: the GL-sourced matrices produce a
             // vertically flipped image in Vulkan's convention, which is
@@ -1352,7 +1372,10 @@ final class VkTerrainRenderer {
         pushRange.get(0)
                 .stageFlags(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
                 .offset(0)
-                .size(80);
+                // mat4 mvp | vec4 offsetAndCutoff | vec4 fogColor | vec4 fogParams.
+                // Vulkan guarantees 128 bytes, so this stays inside the floor
+                // every implementation has to provide.
+                .size(112);
         VkPipelineLayoutCreateInfo layoutInfo = VkPipelineLayoutCreateInfo.calloc(stack)
                 .sType(VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO)
                 .pSetLayouts(stack.longs(descriptorSetLayout))

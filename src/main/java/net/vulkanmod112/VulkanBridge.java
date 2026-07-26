@@ -98,6 +98,17 @@ public interface VulkanBridge {
     void updateLightmapData(int[] argb);
 
     /**
+     * Hands over the fixed-function fog the game has set up for this frame:
+     * {r, g, b, mode, start, end, density}, where mode is 0 for off, 1 linear,
+     * 2 exponential and 3 exponential squared.
+     *
+     * Without this the terrain is the only thing in the scene drawn without
+     * fog, which is most visible underwater — entities take the colour of the
+     * water while the blocks behind them stay clear.
+     */
+    void updateFogState(float[] fog);
+
+    /**
      * Draws one terrain layer with Vulkan. Layer ordinals follow
      * BlockRenderLayer: 0 SOLID, 1 CUTOUT_MIPPED, 2 CUTOUT, 3 TRANSLUCENT.
      * SOLID begins the frame, CUTOUT submits it and composites color+depth

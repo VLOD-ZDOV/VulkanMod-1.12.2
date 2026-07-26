@@ -36,6 +36,7 @@ public final class VulkanConfig {
      * that is not a price to charge anyone who did not ask for it.
      */
     static final boolean DEF_CHUNK_PRELOAD = false;
+    static final boolean DEF_FOG = true;
     static final boolean DEF_ZOOM = true;
     /** Stored as an integer so it fits the config and the slider; 4 = quarter FOV. */
     static final int DEF_ZOOM_FACTOR = 4;
@@ -56,6 +57,7 @@ public final class VulkanConfig {
     private static int geometryBudgetMiB = DEF_GEOMETRY_BUDGET;
     private static int framesInFlight = DEF_FRAMES_IN_FLIGHT;
     private static boolean chunkPreloadEnabled = DEF_CHUNK_PRELOAD;
+    private static boolean fogEnabled = DEF_FOG;
     private static boolean zoomEnabled = DEF_ZOOM;
     private static int zoomFactor = DEF_ZOOM_FACTOR;
 
@@ -96,6 +98,9 @@ public final class VulkanConfig {
                 "Let chunks outside the view be rebuilt. Vanilla only ever schedules chunks that are "
                         + "currently on screen, so at high render distances the world fills in along "
                         + "whatever you are looking at.");
+        fogEnabled = config.getBoolean("fog", CATEGORY_GENERAL, DEF_FOG,
+                "Fade Vulkan terrain into the distance the way the rest of the scene already does. "
+                        + "Off leaves the world ending in a hard edge, which is a little faster.");
         zoomEnabled = config.getBoolean("zoom", CATEGORY_GENERAL, DEF_ZOOM,
                 "Hold-to-zoom on the key bound in Controls.");
         zoomFactor = config.getInt("zoomFactor", CATEGORY_GENERAL, DEF_ZOOM_FACTOR, 2, 10,
@@ -123,6 +128,7 @@ public final class VulkanConfig {
         setGeometryBudgetMiB(DEF_GEOMETRY_BUDGET);
         setFramesInFlight(DEF_FRAMES_IN_FLIGHT);
         setChunkPreloadEnabled(DEF_CHUNK_PRELOAD);
+        setFogEnabled(DEF_FOG);
         setZoomEnabled(DEF_ZOOM);
         setZoomFactor(DEF_ZOOM_FACTOR);
     }
@@ -134,6 +140,15 @@ public final class VulkanConfig {
     public static void setChunkPreloadEnabled(boolean value) {
         chunkPreloadEnabled = value;
         store(CATEGORY_OPTIMIZATION, "chunkPreload", value);
+    }
+
+    public static boolean isFogEnabled() {
+        return fogEnabled;
+    }
+
+    public static void setFogEnabled(boolean value) {
+        fogEnabled = value;
+        store(CATEGORY_GENERAL, "fog", value);
     }
 
     public static boolean isZoomEnabled() {
