@@ -4,24 +4,48 @@ import net.minecraftforge.common.config.Configuration;
 
 import java.io.File;
 
-/** Small client-only configuration shared by the settings screen and hooks. */
+/**
+ * Small client-only configuration shared by the settings screen and hooks.
+ *
+ * Every default here is the conservative choice: the settings that trade
+ * safety for speed start off, so a fresh install behaves the same on every
+ * driver. The presets in the settings screen are how you opt into the rest.
+ */
 public final class VulkanConfig {
 
     private static final String CATEGORY_GENERAL = "general";
     private static final String CATEGORY_OPTIMIZATION = "optimization";
     private static final String CATEGORY_ADVANCED = "advanced";
+
+    // Defaults, named so "reset" and "what shipped" cannot drift apart.
+    static final boolean DEF_TERRAIN = true;
+    static final boolean DEF_OVERLAY = false;
+    static final int DEF_ENTITY_DISTANCE = 0;
+    static final int DEF_TILE_ENTITY_DISTANCE = 0;
+    static final boolean DEF_ANIMATIONS = true;
+    static final int DEF_BACKGROUND_FPS = 10;
+    static final boolean DEF_ULTRA_LOG = false;
+    static final int DEF_ULTRA_LOG_SECONDS = 10;
+    static final boolean DEF_DEPTH_BLIT = true;
+    static final boolean DEF_CULLING = true;
+    static final int DEF_GEOMETRY_BUDGET = 0;
+    static final int DEF_FRAMES_IN_FLIGHT = 2;
+
     private static Configuration config;
-    private static boolean terrainEnabled = true;
-    private static boolean overlayEnabled;
+    private static boolean terrainEnabled = DEF_TERRAIN;
+    private static boolean overlayEnabled = DEF_OVERLAY;
     /** 0 = leave vanilla's own limit alone. */
-    private static int entityDistance;
-    private static int tileEntityDistance;
-    private static boolean animationsEnabled = true;
-    private static int backgroundFpsLimit = 10;
-    private static boolean ultraLogEnabled;
-    private static int ultraLogSeconds = 10;
-    private static boolean depthBlitEnabled = true;
-    private static boolean cullingEnabled = true;
+    private static int entityDistance = DEF_ENTITY_DISTANCE;
+    private static int tileEntityDistance = DEF_TILE_ENTITY_DISTANCE;
+    private static boolean animationsEnabled = DEF_ANIMATIONS;
+    private static int backgroundFpsLimit = DEF_BACKGROUND_FPS;
+    private static boolean ultraLogEnabled = DEF_ULTRA_LOG;
+    private static int ultraLogSeconds = DEF_ULTRA_LOG_SECONDS;
+    private static boolean depthBlitEnabled = DEF_DEPTH_BLIT;
+    private static boolean cullingEnabled = DEF_CULLING;
+    /** MiB of VRAM the chunk geometry buffer may take; 0 = derive from the GPU. */
+    private static int geometryBudgetMiB = DEF_GEOMETRY_BUDGET;
+    private static int framesInFlight = DEF_FRAMES_IN_FLIGHT;
 
     private VulkanConfig() {
     }
@@ -29,28 +53,54 @@ public final class VulkanConfig {
     public static void load(File configDirectory) {
         config = new Configuration(new File(configDirectory, "vulkanmod112.cfg"));
         config.load();
-        terrainEnabled = config.getBoolean("terrainEnabled", CATEGORY_GENERAL, true,
+        terrainEnabled = config.getBoolean("terrainEnabled", CATEGORY_GENERAL, DEF_TERRAIN,
                 "Render supported terrain layers through Vulkan. Disabling immediately returns terrain to vanilla OpenGL.");
-        overlayEnabled = config.getBoolean("overlayEnabled", CATEGORY_GENERAL, false,
+        overlayEnabled = config.getBoolean("overlayEnabled", CATEGORY_GENERAL, DEF_OVERLAY,
                 "Show the legacy Vulkan diagnostic overlay.");
-        entityDistance = config.getInt("entityDistance", CATEGORY_OPTIMIZATION, 0, 0, 256,
+        entityDistance = config.getInt("entityDistance", CATEGORY_OPTIMIZATION, DEF_ENTITY_DISTANCE, 0, 256,
                 "Stop drawing entities past this many blocks. 0 keeps vanilla's per-entity limit.");
-        tileEntityDistance = config.getInt("tileEntityDistance", CATEGORY_OPTIMIZATION, 0, 0, 128,
+        tileEntityDistance = config.getInt("tileEntityDistance", CATEGORY_OPTIMIZATION, DEF_TILE_ENTITY_DISTANCE, 0, 128,
                 "Stop drawing chests, signs and other block entities past this many blocks. 0 keeps vanilla's.");
-        animationsEnabled = config.getBoolean("animatedTextures", CATEGORY_OPTIMIZATION, true,
+        animationsEnabled = config.getBoolean("animatedTextures", CATEGORY_OPTIMIZATION, DEF_ANIMATIONS,
                 "Update animated block textures. Off skips the per-tick frame uploads for every animated sprite.");
-        backgroundFpsLimit = config.getInt("backgroundFpsLimit", CATEGORY_OPTIMIZATION, 10, 0, 60,
+        backgroundFpsLimit = config.getInt("backgroundFpsLimit", CATEGORY_OPTIMIZATION, DEF_BACKGROUND_FPS, 0, 60,
                 "Framerate cap while the game window is not active. 0 disables the cap.");
-        ultraLogEnabled = config.getBoolean("ultraLog", CATEGORY_ADVANCED, false,
+        ultraLogEnabled = config.getBoolean("ultraLog", CATEGORY_ADVANCED, DEF_ULTRA_LOG,
                 "Write a detailed diagnostics report to logs/vulkanmod112-diagnostics.log.");
-        ultraLogSeconds = config.getInt("ultraLogSeconds", CATEGORY_ADVANCED, 10, 1, 120,
+        ultraLogSeconds = config.getInt("ultraLogSeconds", CATEGORY_ADVANCED, DEF_ULTRA_LOG_SECONDS, 1, 120,
                 "Seconds between diagnostics snapshots.");
-        depthBlitEnabled = config.getBoolean("depthBlitEnabled", CATEGORY_ADVANCED, true,
+        depthBlitEnabled = config.getBoolean("depthBlitEnabled", CATEGORY_ADVANCED, DEF_DEPTH_BLIT,
                 "Copy Vulkan depth into the game's depth buffer with glBlitFramebuffer instead of a shader.");
-        cullingEnabled = config.getBoolean("cullingEnabled", CATEGORY_ADVANCED, true,
+        cullingEnabled = config.getBoolean("cullingEnabled", CATEGORY_ADVANCED, DEF_CULLING,
                 "Skip triangles facing away from the camera. Off is for diagnosing geometry only.");
+        geometryBudgetMiB = config.getInt("geometryBudgetMiB", CATEGORY_ADVANCED, DEF_GEOMETRY_BUDGET, 0, 8192,
+                "VRAM in MiB the chunk geometry buffer may take before growth becomes cautious. "
+                        + "0 derives it from the amount of memory the GPU reports.");
+        framesInFlight = config.getInt("framesInFlight", CATEGORY_ADVANCED, DEF_FRAMES_IN_FLIGHT, 1, 3,
+                "How many terrain frames the CPU may run ahead of the GPU. Higher smooths out stalls "
+                        + "at the cost of one frame of input latency and more memory.");
         applySystemProperties();
         save();
+    }
+
+    /**
+     * Returns every mod-owned setting to its shipped value. Minecraft's own
+     * settings are left alone: they are not ours to reset, and the screen only
+     * borrows them.
+     */
+    public static void resetToDefaults() {
+        setTerrainEnabled(DEF_TERRAIN);
+        setOverlayEnabled(DEF_OVERLAY);
+        setEntityDistance(DEF_ENTITY_DISTANCE);
+        setTileEntityDistance(DEF_TILE_ENTITY_DISTANCE);
+        setAnimationsEnabled(DEF_ANIMATIONS);
+        setBackgroundFpsLimit(DEF_BACKGROUND_FPS);
+        setUltraLogEnabled(DEF_ULTRA_LOG);
+        setUltraLogSeconds(DEF_ULTRA_LOG_SECONDS);
+        setDepthBlitEnabled(DEF_DEPTH_BLIT);
+        setCullingEnabled(DEF_CULLING);
+        setGeometryBudgetMiB(DEF_GEOMETRY_BUDGET);
+        setFramesInFlight(DEF_FRAMES_IN_FLIGHT);
     }
 
     public static boolean isTerrainEnabled() {
@@ -59,10 +109,7 @@ public final class VulkanConfig {
 
     public static void setTerrainEnabled(boolean value) {
         terrainEnabled = value;
-        if (config != null) {
-            config.get(CATEGORY_GENERAL, "terrainEnabled", true).set(value);
-            save();
-        }
+        store(CATEGORY_GENERAL, "terrainEnabled", value);
     }
 
     public static boolean isOverlayEnabled() {
@@ -71,10 +118,7 @@ public final class VulkanConfig {
 
     public static void setOverlayEnabled(boolean value) {
         overlayEnabled = value;
-        if (config != null) {
-            config.get(CATEGORY_GENERAL, "overlayEnabled", false).set(value);
-            save();
-        }
+        store(CATEGORY_GENERAL, "overlayEnabled", value);
     }
 
     public static int getEntityDistance() {
@@ -151,6 +195,26 @@ public final class VulkanConfig {
         applySystemProperties();
     }
 
+    public static int getGeometryBudgetMiB() {
+        return geometryBudgetMiB;
+    }
+
+    public static void setGeometryBudgetMiB(int value) {
+        geometryBudgetMiB = value;
+        store(CATEGORY_ADVANCED, "geometryBudgetMiB", value);
+        applySystemProperties();
+    }
+
+    public static int getFramesInFlight() {
+        return framesInFlight;
+    }
+
+    public static void setFramesInFlight(int value) {
+        framesInFlight = value;
+        store(CATEGORY_ADVANCED, "framesInFlight", value);
+        applySystemProperties();
+    }
+
     /**
      * The renderer lives behind the bridge in its own classloader and reads
      * these as system properties, which both sides share.
@@ -158,6 +222,8 @@ public final class VulkanConfig {
     private static void applySystemProperties() {
         System.setProperty("vulkanmod112.depthBlit", Boolean.toString(depthBlitEnabled));
         System.setProperty("vulkanmod112.cull", Boolean.toString(cullingEnabled));
+        System.setProperty("vulkanmod112.geometryBudget", Integer.toString(geometryBudgetMiB));
+        System.setProperty("vulkanmod112.framesInFlight", Integer.toString(framesInFlight));
     }
 
     private static void store(String category, String key, int value) {

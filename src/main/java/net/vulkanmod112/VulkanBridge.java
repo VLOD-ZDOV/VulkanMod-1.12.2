@@ -22,6 +22,13 @@ public interface VulkanBridge {
     String gpuSummary();
 
     /**
+     * Total device-local memory in MiB, or 0 before the device is selected.
+     * Drives the automatic geometry budget: this is a hardware fact the game
+     * side has no other way to learn.
+     */
+    int vramMegabytes();
+
+    /**
      * Renders the demo scene offscreen on the GPU via Vulkan and returns the
      * frame as tightly packed RGBA8 pixels ({@code width * height * 4} bytes,
      * top row first). Direct java.nio buffers are safe to pass across the

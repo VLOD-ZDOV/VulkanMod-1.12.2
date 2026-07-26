@@ -2,6 +2,15 @@
 
 ## [0.4.0] - unreleased
 
+### Added
+
+- Presets: Stable, Balanced and Performance, on the Rendering page. Stable is what the mod ships with and what a fresh install uses; the other two trade progressively more detail for frames. A preset is a one-shot write rather than a mode, so anything changed afterwards stays changed.
+- Settings now state what they cost on the CPU, the GPU and in VRAM separately, as three bars in the description panel. Which resource is short decides whether a setting will help at all, and a single "impact" rating hid exactly that.
+- Geometry budget, on the Advanced page. It sets how much video memory the world geometry may take before the renderer stops growing its buffer generously — every growth stops the GPU and re-uploads every chunk, so a card with memory to spare can buy those stutters away, and a small one can keep the footprint tight. Automatic uses a quarter of what the GPU reports. Chunks are never dropped to stay inside it; the budget steers growth rather than capping it.
+- Frames in flight is configurable (1–3, default 2) instead of fixed at 2.
+- Reset button, restoring this mod's settings to their defaults. Minecraft's own settings are left alone.
+- The GPU's device-local memory is shown in the settings header and recorded in the diagnostics log.
+
 ### Fixed
 
 - Terrain layers no longer stop at 4096 chunks. The indirect batch was a fixed size and everything past it was silently dropped, so at high render distances the world had holes and the GPU was handed less geometry than the scene contained. The batch now grows to fit the largest layer.

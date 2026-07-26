@@ -24,6 +24,7 @@ import java.io.IOException;
 public final class GuiVulkanSettings extends GuiScreen {
 
     private static final int DONE = 200;
+    private static final int RESET = 201;
     private static final int PAGE_BUTTON_BASE = 300;
 
     private static final int MARGIN = 10;
@@ -83,7 +84,9 @@ public final class GuiVulkanSettings extends GuiScreen {
             this.buttonList.add(new GuiButton(PAGE_BUTTON_BASE + i, MARGIN, TOP + i * (ROW_HEIGHT + 2),
                     TAB_WIDTH, ROW_HEIGHT, this.pages[i].name));
         }
-        this.buttonList.add(new GuiButton(DONE, this.width / 2 - 100, this.height - 27, 200, 20,
+        this.buttonList.add(new GuiButton(RESET, this.width / 2 - 154, this.height - 27, 100, 20,
+                "Reset"));
+        this.buttonList.add(new GuiButton(DONE, this.width / 2 - 50, this.height - 27, 150, 20,
                 I18n.format("gui.done")));
         updateTabHighlight();
         clampScroll();
@@ -108,6 +111,11 @@ public final class GuiVulkanSettings extends GuiScreen {
         if (button.id == DONE) {
             this.mc.gameSettings.saveOptions();
             this.mc.displayGuiScreen(this.parent);
+        } else if (button.id == RESET) {
+            // Only this mod's settings: Minecraft's own are not ours to undo,
+            // and someone reaching for Reset here is not asking for their
+            // render distance back.
+            VulkanConfig.resetToDefaults();
         } else if (button.id >= PAGE_BUTTON_BASE) {
             this.currentPage = button.id - PAGE_BUTTON_BASE;
             this.scroll = 0;
@@ -128,6 +136,10 @@ public final class GuiVulkanSettings extends GuiScreen {
         this.drawCenteredString(this.fontRenderer, "VulkanMod112", this.width / 2, 12, 0xFFFFFF);
         VulkanBridge bridge = VulkanLoader.bridgeIfReady();
         String gpu = bridge == null ? "Vulkan unavailable" : bridge.gpuSummary();
+        int vram = VulkanOptions.vramMegabytes();
+        if (vram > 0) {
+            gpu = gpu + " — " + vram + " MiB";
+        }
         this.drawCenteredString(this.fontRenderer, gpu, this.width / 2, 24, 0x909090);
 
         drawRect(this.listLeft - 2, this.listTop - 2, this.listLeft + this.listWidth + 2,
@@ -193,6 +205,11 @@ public final class GuiVulkanSettings extends GuiScreen {
             java.util.List<String> lines = new java.util.ArrayList<String>();
             lines.add(this.hovered.name());
             lines.addAll(this.fontRenderer.listFormattedStringToWidth(this.hovered.tooltip(), 220));
+            VOption.Cost cost = this.hovered.cost();
+            if (!cost.isFree()) {
+                lines.add("CPU: " + cost.cpu.label + "   GPU: " + cost.gpu.label
+                        + "   VRAM: " + cost.vram.label);
+            }
             drawHoveringText(lines, mouseX, mouseY);
             return;
         }
@@ -208,11 +225,14 @@ public final class GuiVulkanSettings extends GuiScreen {
             this.fontRenderer.drawString((String) line, left + 4, y, 0xB0B0B0);
             y += 10;
         }
-        if (this.hovered.impact() != VOption.Impact.NONE) {
-            y += 6;
-            this.fontRenderer.drawString(this.hovered.impact().label, left + 4, y,
-                    this.hovered.impact().color);
+        VOption.Cost cost = this.hovered.cost();
+        if (!cost.isFree()) {
+            y += 8;
+            this.fontRenderer.drawString("Cost", left + 4, y, 0x808080);
             y += 12;
+            y = drawCostRow(left, y, "CPU", cost.cpu);
+            y = drawCostRow(left, y, "GPU", cost.gpu);
+            y = drawCostRow(left, y, "VRAM", cost.vram);
         }
         if (this.hovered.appliesWhen() != null) {
             y += 4;
@@ -222,6 +242,24 @@ public final class GuiVulkanSettings extends GuiScreen {
                 y += 10;
             }
         }
+    }
+
+    /**
+     * One resource of an option's cost: its name, then three segments filled
+     * to the level. Three short bars read at a glance in a way three sentences
+     * do not, and the whole point is to see at a glance whether a setting
+     * touches the resource you are short of.
+     */
+    private int drawCostRow(int left, int y, String label, VOption.Level level) {
+        this.fontRenderer.drawString(label, left + 4, y, 0xA0A0A0);
+        int barsLeft = left + 4 + 30;
+        for (int i = 0; i < 3; i++) {
+            int x = barsLeft + i * 10;
+            boolean filled = i < level.bars;
+            drawRect(x, y, x + 8, y + 7, filled ? 0xFF000000 | level.color : 0x40FFFFFF);
+        }
+        this.fontRenderer.drawString(level.label, barsLeft + 34, y, level.color);
+        return y + 11;
     }
 
     private void drawScrollbar() {

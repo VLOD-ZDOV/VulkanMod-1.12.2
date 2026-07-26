@@ -123,7 +123,24 @@ final class VkTerrainRenderer {
      * ordering (terrain N → composite N → terrain N+1) is still enforced by
      * the shared-image semaphore chain.
      */
-    private static final int FRAMES_IN_FLIGHT = 2;
+    private final int framesInFlight = resolveFramesInFlight();
+
+    /**
+     * How many terrain frames the CPU may prepare before it has to wait for
+     * the GPU. Two means waiting on frame N-2 instead of N-1, so the CPU no
+     * longer sits out the whole previous render; three gives it more room
+     * again at the cost of a frame of input delay and another set of
+     * per-frame buffers. Exposed in the settings screen, read once here
+     * because every per-frame array is sized from it.
+     */
+    private static int resolveFramesInFlight() {
+        try {
+            int value = Integer.parseInt(System.getProperty("vulkanmod112.framesInFlight", "2"));
+            return value < 1 ? 1 : (value > 3 ? 3 : value);
+        } catch (NumberFormatException ignored) {
+            return 2;
+        }
+    }
 
     // Stable resources
     private long commandPool;
@@ -142,10 +159,10 @@ final class VkTerrainRenderer {
     private long descriptorSetLayout;
     private long descriptorPool;
     private long descriptorSet;
-    private final long[] drawBatchBuffers = new long[FRAMES_IN_FLIGHT * 3];
-    private final long[] drawBatchMemories = new long[FRAMES_IN_FLIGHT * 3];
-    private final long[] drawBatchMapped = new long[FRAMES_IN_FLIGHT * 3];
-    private final long[] drawDescriptorSets = new long[FRAMES_IN_FLIGHT * 3];
+    private final long[] drawBatchBuffers = new long[framesInFlight * 3];
+    private final long[] drawBatchMemories = new long[framesInFlight * 3];
+    private final long[] drawBatchMapped = new long[framesInFlight * 3];
+    private final long[] drawDescriptorSets = new long[framesInFlight * 3];
     /** Draws each batch buffer can hold; grown to fit the scene, never shrunk. */
     private int indirectDrawCapacity = INITIAL_INDIRECT_DRAWS;
     private long drawCommandOffset = (long) INITIAL_INDIRECT_DRAWS * DRAW_ORIGIN_BYTES;
@@ -176,9 +193,9 @@ final class VkTerrainRenderer {
     private long lightmapImage;
     private long lightmapMemory;
     private long lightmapView;
-    private final long[] lightmapStagingBuffer = new long[FRAMES_IN_FLIGHT];
-    private final long[] lightmapStagingMemory = new long[FRAMES_IN_FLIGHT];
-    private final long[] lightmapStagingMapped = new long[FRAMES_IN_FLIGHT];
+    private final long[] lightmapStagingBuffer = new long[framesInFlight];
+    private final long[] lightmapStagingMemory = new long[framesInFlight];
+    private final long[] lightmapStagingMapped = new long[framesInFlight];
     private ByteBuffer lightmapReadBuffer;
     private boolean lightmapImageInitialized;
     private int[] lightmapData;
@@ -413,7 +430,7 @@ final class VkTerrainRenderer {
                 .append(" ms, GPU ").append(gpuTimeText()).append('\n');
         sb.append("  index buffer: ").append(quadIndexCapacityQuads).append(" quads")
                 .append(", draw batch ").append(indirectDrawCapacity)
-                .append(", frames in flight ").append(FRAMES_IN_FLIGHT).append('\n');
+                .append(", frames in flight ").append(framesInFlight).append('\n');
         if (glErrorLogged) {
             sb.append("  WARNING: a GL error was reported during composite (see the main log)\n");
         }
@@ -464,14 +481,14 @@ final class VkTerrainRenderer {
         VkQueryPoolCreateInfo info = VkQueryPoolCreateInfo.calloc(stack)
                 .sType(VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO)
                 .queryType(VK_QUERY_TYPE_TIMESTAMP)
-                .queryCount(FRAMES_IN_FLIGHT * 2);
+                .queryCount(framesInFlight * 2);
         LongBuffer pPool = stack.mallocLong(1);
         check(vkCreateQueryPool(device(), info, null, pPool), "vkCreateQueryPool(terrain)");
         queryPool = pPool.get(0);
     }
 
     private void readGpuTimestamps(MemoryStack stack, int slot) {
-        if (!timestampsSupported || frameCounter < FRAMES_IN_FLIGHT) {
+        if (!timestampsSupported || frameCounter < framesInFlight) {
             return; // this slot has not run yet
         }
         LongBuffer results = stack.mallocLong(2);
@@ -497,7 +514,7 @@ final class VkTerrainRenderer {
             // submission order, so the vertex fetches below see device-local
             // copies without a CPU-side wait.
             mirror.flushUploads();
-            int slot = (int) (frameCounter % FRAMES_IN_FLIGHT);
+            int slot = (int) (frameCounter % framesInFlight);
             activeFrameSlot = slot;
             commandBuffer = commandBuffers[slot];
             fence = fences[slot];
@@ -508,7 +525,7 @@ final class VkTerrainRenderer {
             readGpuTimestamps(stack, slot);
             // This slot's fence covers frame N-2; everything up to it is done
             mirror.setFrameStamp(frameCounter);
-            mirror.flushRetired(frameCounter - FRAMES_IN_FLIGHT);
+            mirror.flushRetired(frameCounter - framesInFlight);
             ensureQuadIndexCapacity(mirror.maxEntrySize() / BLOCK_VERTEX_STRIDE / 4);
             frameChunks = 0;
             frameVertices = 0;
@@ -971,16 +988,16 @@ final class VkTerrainRenderer {
                     .sType(VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO)
                     .commandPool(commandPool)
                     .level(VK_COMMAND_BUFFER_LEVEL_PRIMARY)
-                    .commandBufferCount(FRAMES_IN_FLIGHT);
-            PointerBuffer pCmd = stack.mallocPointer(FRAMES_IN_FLIGHT);
+                    .commandBufferCount(framesInFlight);
+            PointerBuffer pCmd = stack.mallocPointer(framesInFlight);
             check(vkAllocateCommandBuffers(device(), allocInfo, pCmd), "vkAllocateCommandBuffers(terrain)");
-            commandBuffers = new VkCommandBuffer[FRAMES_IN_FLIGHT];
-            fences = new long[FRAMES_IN_FLIGHT];
+            commandBuffers = new VkCommandBuffer[framesInFlight];
+            fences = new long[framesInFlight];
             VkFenceCreateInfo fenceInfo = VkFenceCreateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_FENCE_CREATE_INFO)
                     .flags(VK_FENCE_CREATE_SIGNALED_BIT);
             LongBuffer pFence = stack.mallocLong(1);
-            for (int i = 0; i < FRAMES_IN_FLIGHT; i++) {
+            for (int i = 0; i < framesInFlight; i++) {
                 commandBuffers[i] = new VkCommandBuffer(pCmd.get(i), device());
                 check(vkCreateFence(device(), fenceInfo, null, pFence), "vkCreateFence(terrain)");
                 fences[i] = pFence.get(0);
@@ -1746,7 +1763,7 @@ final class VkTerrainRenderer {
                     .sharingMode(VK_SHARING_MODE_EXCLUSIVE);
             LongBuffer pBuffer = stack.mallocLong(1);
             PointerBuffer ppData = stack.mallocPointer(1);
-            for (int i = 0; i < FRAMES_IN_FLIGHT; i++) {
+            for (int i = 0; i < framesInFlight; i++) {
                 check(vkCreateBuffer(device(), bufferInfo, null, pBuffer), "vkCreateBuffer(lightmap)");
                 lightmapStagingBuffer[i] = pBuffer.get(0);
                 vkGetBufferMemoryRequirements(device(), lightmapStagingBuffer[i], req);
@@ -1983,7 +2000,7 @@ final class VkTerrainRenderer {
             vkDestroyImageView(device(), lightmapView, null);
             vkDestroyImage(device(), lightmapImage, null);
             vkFreeMemory(device(), lightmapMemory, null);
-            for (int i = 0; i < FRAMES_IN_FLIGHT; i++) {
+            for (int i = 0; i < framesInFlight; i++) {
                 if (lightmapStagingMemory[i] != 0) {
                     vkUnmapMemory(device(), lightmapStagingMemory[i]);
                     vkDestroyBuffer(device(), lightmapStagingBuffer[i], null);

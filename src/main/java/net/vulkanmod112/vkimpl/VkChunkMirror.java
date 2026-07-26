@@ -237,7 +237,20 @@ final class VkChunkMirror {
     private long geometryCapacity;
     private long nextGeometryOffset;
     private final List<FreeRange> freeRanges = new ArrayList<FreeRange>();
-    private static final long INITIAL_GEOMETRY_CAPACITY = 128L * 1024L * 1024L;
+    /**
+     * How much VRAM the geometry buffer is allowed to take before growth turns
+     * cautious. Resolved once from the settings screen, or from the amount of
+     * device-local memory the GPU reports when left on automatic.
+     *
+     * This is deliberately not a hard wall: refusing to store geometry would
+     * make chunks disappear. Above the budget the buffer still grows, just in
+     * fixed steps instead of doubling — so a 4 GiB card ends up with a snug
+     * buffer and a 16 GiB one skips the regrowth stalls entirely. Each growth
+     * stops the GPU and re-uploads every mirrored chunk, which is exactly the
+     * stutter a larger starting size buys away.
+     */
+    private long geometryBudget;
+    private long initialGeometryCapacity;
 
     private long uploadCommandPool;
     private VkCommandBuffer uploadCommandBuffer;
@@ -491,6 +504,35 @@ final class VkChunkMirror {
         return remainder == 0 ? capacity : capacity + BLOCK_VERTEX_STRIDE - remainder;
     }
 
+    /**
+     * Reads the geometry budget once, from the settings screen or from the
+     * hardware. The game side sets the property; the renderer lives in its own
+     * classloader and cannot reach VulkanConfig directly.
+     */
+    private void resolveBudget() {
+        if (geometryBudget != 0) {
+            return;
+        }
+        long budgetMiB = 0;
+        try {
+            budgetMiB = Long.parseLong(System.getProperty("vulkanmod112.geometryBudget", "0"));
+        } catch (NumberFormatException ignored) {
+            // Left on automatic.
+        }
+        if (budgetMiB <= 0) {
+            // A quarter of the card, bounded: below 256 MiB the buffer would
+            // regrow constantly, and past 2 GiB there is nothing left to win.
+            long vram = ctx.vramMegabytes();
+            budgetMiB = vram > 0 ? Math.max(256L, Math.min(2048L, vram / 4L)) : 512L;
+        }
+        geometryBudget = budgetMiB * 1024L * 1024L;
+        // Start at a quarter of the budget: enough to cover a normal render
+        // distance without a single regrowth, without reserving it all upfront.
+        initialGeometryCapacity = Math.max(64L * 1024L * 1024L, geometryBudget / 4L);
+        LOGGER.info("Geometry budget {} MiB (initial buffer {} MiB, GPU reports {} MiB device-local)",
+                budgetMiB, initialGeometryCapacity / (1024 * 1024), ctx.vramMegabytes());
+    }
+
     /** Rare growth path; persistent staging copies repopulate the new VRAM buffer. */
     private void ensureGeometryCapacity(long required) {
         if (geometryBuffer != 0 && required <= geometryCapacity) {
@@ -510,9 +552,13 @@ final class VkChunkMirror {
             vkDestroyBuffer(device(), geometryBuffer, null);
             vkFreeMemory(device(), geometryMemory, null);
         }
-        long capacity = geometryCapacity == 0 ? INITIAL_GEOMETRY_CAPACITY : geometryCapacity;
+        resolveBudget();
+        long capacity = geometryCapacity == 0 ? initialGeometryCapacity : geometryCapacity;
+        long step = Math.max(64L * 1024L * 1024L, geometryBudget / 8L);
         while (capacity < required) {
-            capacity *= 2;
+            // Double while there is budget left, then creep, so a small card
+            // does not jump from 2 to 4 GiB to hold one chunk over the line.
+            capacity = capacity < geometryBudget ? capacity * 2 : capacity + step;
         }
         try (MemoryStack stack = stackPush()) {
             VkBufferCreateInfo info = VkBufferCreateInfo.calloc(stack)

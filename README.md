@@ -45,10 +45,18 @@ Useful JVM properties:
 - `-Dvulkanmod112.extraRendererMarkers=name` — treat additional mod jars as renderer replacements, so the Vulkan terrain mixins are not loaded beside them.
 - `-Dvulkanmod112.depthBlit=false` — composite depth through the fragment shader instead of `glBlitFramebuffer`; use if depth looks wrong after the change.
 - `-Dvulkanmod112.allowIncompatibleRenderer=true` — test with OptiFine/shader-mod renderer replacements; unsupported and off by default.
+- `-Dvulkanmod112.geometryBudget=MiB` — geometry budget; 0 derives it from the GPU. Also in the settings screen.
+- `-Dvulkanmod112.framesInFlight=1..3` — how far the CPU may run ahead of the GPU. Also in the settings screen.
 
 ## In-game settings
 
 Open **Options → Video Settings → VulkanMod112 Settings...**. The terrain switch is applied immediately and returns to vanilla OpenGL when disabled. The diagnostic overlay is off by default.
+
+Defaults are the conservative choice throughout: nothing is traded for speed until you ask for it. Three presets on the Rendering page do the asking — **Stable** (the shipped values), **Balanced** (caps the draw distances vanilla leaves wider than anyone can see) and **Performance** (trades visible detail for frames). A preset writes its settings once and then stops existing, so anything you change afterwards stays changed. **Reset** at the bottom restores this mod's settings only; Minecraft's own are left alone.
+
+Every row states what it costs on the CPU, the GPU and in VRAM separately, because which of the three you are short of decides whether a setting will help you at all.
+
+**Geometry Budget** (Advanced) sets how much video memory the world geometry may take before the renderer stops growing its buffer generously. Each growth stops the GPU and re-uploads every chunk, so on a card with memory to spare a larger budget buys those stutters away; on a small one a lower value keeps the footprint tight. Automatic uses a quarter of the device-local memory the GPU reports, shown in the screen header. Chunks are never dropped to stay inside the budget — it steers growth, it is not a cap.
 
 The slider permits 2–64 chunks. 64 is an experimental maximum: vanilla 1.12.2 must allocate a very large render-chunk grid, so it can consume substantial CPU and RAM, and multiplayer servers can impose a smaller view-distance cap. Increase it gradually and restart the world if the chunk grid does not refresh immediately.
 
