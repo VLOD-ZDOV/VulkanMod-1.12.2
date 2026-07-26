@@ -289,21 +289,10 @@ final class VkChunkMirror {
     private long initialGeometryCapacity;
 
     private long uploadCommandPool;
-    /**
-     * How many upload batches may be in flight at once.
-     *
-     * With a single command buffer the render thread had to wait for the
-     * previous batch to finish before it could record the next one, every
-     * frame that uploaded anything — the one stall left in this path. A ring
-     * means the batch we wait on is two submissions old and has almost always
-     * signalled already, so the wait returns without blocking.
-     */
-    private static final int UPLOAD_RING = 3;
-    private VkCommandBuffer[] uploadCommandBuffers;
-    private long[] uploadFences;
-    private boolean[] uploadSubmitted;
-    private int uploadIndex;
+    private VkCommandBuffer uploadCommandBuffer;
+    private long uploadFence;
     private boolean uploadsRecording;
+    private boolean uploadsSubmitted;
 
     /**
      * One host-visible ring every chunk upload passes through, instead of a
@@ -374,7 +363,7 @@ final class VkChunkMirror {
             return;
         }
         pendingCopies.position(0).limit(pendingCopyCount);
-        vkCmdCopyBuffer(uploadCommandBuffers[uploadIndex], stagingBuffer, geometryBuffer, pendingCopies);
+        vkCmdCopyBuffer(uploadCommandBuffer, stagingBuffer, geometryBuffer, pendingCopies);
         pendingCopies.limit(pendingCopies.capacity());
         pendingCopyCount = 0;
     }
@@ -579,16 +568,15 @@ final class VkChunkMirror {
                     .sType(VK_STRUCTURE_TYPE_MEMORY_BARRIER)
                     .srcAccessMask(VK_ACCESS_TRANSFER_WRITE_BIT)
                     .dstAccessMask(VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT);
-            vkCmdPipelineBarrier(uploadCommandBuffers[uploadIndex], VK_PIPELINE_STAGE_TRANSFER_BIT,
+            vkCmdPipelineBarrier(uploadCommandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
                     VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, 0, barrier, null, null);
-            check(vkEndCommandBuffer(uploadCommandBuffers[uploadIndex]), "vkEndCommandBuffer(VBO uploads)");
+            check(vkEndCommandBuffer(uploadCommandBuffer), "vkEndCommandBuffer(VBO uploads)");
             VkSubmitInfo submit = VkSubmitInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_SUBMIT_INFO)
-                    .pCommandBuffers(stack.pointers(uploadCommandBuffers[uploadIndex]));
-            check(vkQueueSubmit(ctx.getGraphicsQueue(), submit, uploadFences[uploadIndex]),
-                    "vkQueueSubmit(VBO uploads)");
+                    .pCommandBuffers(stack.pointers(uploadCommandBuffer));
+            check(vkQueueSubmit(ctx.getGraphicsQueue(), submit, uploadFence), "vkQueueSubmit(VBO uploads)");
             uploadsRecording = false;
-            uploadSubmitted[uploadIndex] = true;
+            uploadsSubmitted = true;
         }
     }
 
@@ -713,30 +701,14 @@ final class VkChunkMirror {
         return offset;
     }
 
-    /**
-     * Blocks until every outstanding upload batch has finished. Used where the
-     * memory they read is about to be reused or destroyed, so one batch is not
-     * enough — all of them have to be done.
-     */
     private void waitForUploads() {
-        for (int i = 0; i < UPLOAD_RING; i++) {
-            if (uploadSubmitted[i]) {
-                check(vkWaitForFences(device(), uploadFences[i], true, 1_000_000_000L),
-                        "vkWaitForFences(staging ring)");
-                vkResetFences(device(), uploadFences[i]);
-                uploadSubmitted[i] = false;
-            }
+        if (!uploadsSubmitted) {
+            return;
         }
-    }
-
-    /** True when no upload batch is still executing. Never blocks. */
-    private boolean allUploadsComplete() {
-        for (int i = 0; i < UPLOAD_RING; i++) {
-            if (uploadSubmitted[i] && vkGetFenceStatus(device(), uploadFences[i]) != VK_SUCCESS) {
-                return false;
-            }
-        }
-        return true;
+        check(vkWaitForFences(device(), uploadFence, true, 1_000_000_000L),
+                "vkWaitForFences(staging ring)");
+        vkResetFences(device(), uploadFence);
+        uploadsSubmitted = false;
     }
 
     synchronized void destroyAll() {
@@ -769,19 +741,14 @@ final class VkChunkMirror {
             stagingCapacity = 0;
             stagingHead = 0;
         }
-        if (uploadFences != null) {
-            for (int i = 0; i < uploadFences.length; i++) {
-                if (uploadFences[i] != 0) {
-                    vkDestroyFence(device(), uploadFences[i], null);
-                }
-            }
-            uploadFences = null;
-            uploadSubmitted = null;
+        if (uploadFence != 0) {
+            vkDestroyFence(device(), uploadFence, null);
+            uploadFence = 0;
         }
         if (uploadCommandPool != 0) {
             vkDestroyCommandPool(device(), uploadCommandPool, null);
             uploadCommandPool = 0;
-            uploadCommandBuffers = null;
+            uploadCommandBuffer = null;
         }
         LOGGER.info("Chunk mirror destroyed");
     }
@@ -792,13 +759,11 @@ final class VkChunkMirror {
         if (uploadsRecording) {
             return;
         }
-        uploadIndex = (uploadIndex + 1) % UPLOAD_RING;
-        if (uploadSubmitted[uploadIndex]) {
-            // Two submissions old by now, so this almost never actually blocks.
-            check(vkWaitForFences(device(), uploadFences[uploadIndex], true, 1_000_000_000L),
+        if (uploadsSubmitted) {
+            check(vkWaitForFences(device(), uploadFence, true, 1_000_000_000L),
                     "vkWaitForFences(VBO uploads)");
-            vkResetFences(device(), uploadFences[uploadIndex]);
-            uploadSubmitted[uploadIndex] = false;
+            vkResetFences(device(), uploadFence);
+            uploadsSubmitted = false;
         }
         // Past this point the previous submission has finished, so everything
         // the builders staged and we already recorded has been read by the GPU
@@ -806,25 +771,18 @@ final class VkChunkMirror {
         // with it — those chunks simply take the ordinary path when their
         // upload arrives — so the region is only recycled once it is half
         // spent, which keeps that loss rare while stopping it filling up.
-        // With a ring, waiting on one fence no longer proves the region is
-        // free: newer batches may still be reading it. Every outstanding one
-        // has to be checked, and non-blockingly — the point of the ring is not
-        // to wait here.
-        if (allUploadsComplete()) {
-            synchronized (workerLock) {
-                if (workerInFlight == 0 && workerHead * 2 >= workerRegionSize) {
-                    workerHead = 0;
-                    staged.clear();
-                }
+        synchronized (workerLock) {
+            if (workerInFlight == 0 && workerHead * 2 >= workerRegionSize) {
+                workerHead = 0;
+                staged.clear();
             }
         }
-        vkResetCommandBuffer(uploadCommandBuffers[uploadIndex], 0);
+        vkResetCommandBuffer(uploadCommandBuffer, 0);
         try (MemoryStack stack = stackPush()) {
             VkCommandBufferBeginInfo begin = VkCommandBufferBeginInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO)
                     .flags(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
-            check(vkBeginCommandBuffer(uploadCommandBuffers[uploadIndex], begin),
-                    "vkBeginCommandBuffer(VBO uploads)");
+            check(vkBeginCommandBuffer(uploadCommandBuffer, begin), "vkBeginCommandBuffer(VBO uploads)");
         }
         uploadsRecording = true;
     }
@@ -846,17 +804,14 @@ final class VkChunkMirror {
                     .sType(VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO)
                     .commandPool(uploadCommandPool)
                     .level(VK_COMMAND_BUFFER_LEVEL_PRIMARY)
-                    .commandBufferCount(UPLOAD_RING);
-            PointerBuffer pCommand = stack.mallocPointer(UPLOAD_RING);
+                    .commandBufferCount(1);
+            PointerBuffer pCommand = stack.mallocPointer(1);
             check(vkAllocateCommandBuffers(device(), allocInfo, pCommand), "vkAllocateCommandBuffers(VBO uploads)");
-            uploadCommandBuffers = new VkCommandBuffer[UPLOAD_RING];
-            for (int i = 0; i < UPLOAD_RING; i++) {
-                uploadCommandBuffers[i] = new VkCommandBuffer(pCommand.get(i), device());
-            }
+            uploadCommandBuffer = new VkCommandBuffer(pCommand.get(0), device());
 
             // Deliberately NOT created signalled. vkQueueSubmit requires an
             // unsignalled fence, and nothing here waits on it before the first
-            // submit — uploadSubmitted[] already tracks "nothing submitted yet".
+            // submit — uploadsSubmitted already tracks "nothing submitted yet".
             // Starting it signalled meant the first submit took a signalled
             // fence, and every wait after that returned immediately without
             // the GPU having finished anything, so the upload command buffer
@@ -864,12 +819,8 @@ final class VkChunkMirror {
             VkFenceCreateInfo fenceInfo = VkFenceCreateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_FENCE_CREATE_INFO);
             LongBuffer pFence = stack.mallocLong(1);
-            uploadFences = new long[UPLOAD_RING];
-            uploadSubmitted = new boolean[UPLOAD_RING];
-            for (int i = 0; i < UPLOAD_RING; i++) {
-                check(vkCreateFence(device(), fenceInfo, null, pFence), "vkCreateFence(VBO uploads)");
-                uploadFences[i] = pFence.get(0);
-            }
+            check(vkCreateFence(device(), fenceInfo, null, pFence), "vkCreateFence(VBO uploads)");
+            uploadFence = pFence.get(0);
         }
     }
 
@@ -1024,7 +975,7 @@ final class VkChunkMirror {
                 try (MemoryStack stack = stackPush()) {
                     VkBufferCopy.Buffer copy = VkBufferCopy.calloc(1, stack);
                     copy.get(0).srcOffset(0).dstOffset(0).size(oldUsed);
-                    vkCmdCopyBuffer(uploadCommandBuffers[uploadIndex], oldBuffer, geometryBuffer, copy);
+                    vkCmdCopyBuffer(uploadCommandBuffer, oldBuffer, geometryBuffer, copy);
                 }
                 flushUploads();
                 waitForUploads();
