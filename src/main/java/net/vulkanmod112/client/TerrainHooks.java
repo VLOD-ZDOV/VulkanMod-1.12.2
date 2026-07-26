@@ -92,6 +92,14 @@ public final class TerrainHooks {
 
     /** Returns true when the Vulkan side took the layer and GL must skip it. */
     public static boolean renderChunkLayer(BlockRenderLayer layer, List<RenderChunk> chunks) {
+        // TRANSLUCENT stays on the vanilla path, and the Vulkan side rejects it
+        // outright. Leaving before packChunks matters: water and glass make a
+        // long chunk list at high render distances, and every frame it was
+        // walked, packed and thrown away. It also kept the drawn-chunk counter
+        // reporting chunks nothing ever drew.
+        if (layer == BlockRenderLayer.TRANSLUCENT) {
+            return false;
+        }
         if (!terrainEnabled() || broken) {
             return false;
         }
@@ -128,9 +136,16 @@ public final class TerrainHooks {
         }
     }
 
+    /**
+     * Launch flag, read once. System.getProperty locks the global Properties
+     * table, and this sits on the per-layer path — the flag cannot change
+     * while the game runs, so there is nothing to re-read.
+     */
+    private static final boolean TERRAIN_ALLOWED_BY_PROPERTY =
+            !"false".equals(System.getProperty("vulkanmod112.terrain"));
+
     private static boolean terrainEnabled() {
-        return !"false".equals(System.getProperty("vulkanmod112.terrain"))
-                && VulkanConfig.isTerrainEnabled();
+        return TERRAIN_ALLOWED_BY_PROPERTY && VulkanConfig.isTerrainEnabled();
     }
 
     private static boolean checkRendererCompatibility() {

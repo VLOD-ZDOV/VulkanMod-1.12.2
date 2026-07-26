@@ -310,7 +310,15 @@ final class VkChunkMirror {
      * the recorded copies are submitted and waited on before the head returns
      * to zero, so nothing is overwritten while the GPU is still reading it.
      */
-    private static final long STAGING_RING_MIN = 32L * 1024L * 1024L;
+    /**
+     * Sized against the wrap, not against a single upload. Wrapping blocks the
+     * render thread until the GPU has drained the ring, so the interval between
+     * wraps is what matters: at roughly 50 KiB a chunk, 96 MiB is about 2000
+     * uploads of headroom. The cost is host memory that is never touched
+     * again once a chunk has been copied, which is far cheaper than it used to
+     * be — this replaced a pinned copy per chunk, not nothing.
+     */
+    private static final long STAGING_RING_MIN = 96L * 1024L * 1024L;
     private long stagingBuffer;
     private long stagingMemory;
     private long stagingMappedAddress;

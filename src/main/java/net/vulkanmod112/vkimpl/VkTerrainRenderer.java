@@ -198,6 +198,9 @@ final class VkTerrainRenderer {
     private final long[] lightmapStagingMapped = new long[framesInFlight];
     private ByteBuffer lightmapReadBuffer;
     private boolean lightmapImageInitialized;
+    /** Hash of the last uploaded lightmap; see beginFrame. */
+    private int lightmapHash;
+    private boolean lightmapDirty = true;
     private int[] lightmapData;
 
     // Size-dependent shared targets
@@ -531,8 +534,20 @@ final class VkTerrainRenderer {
             frameVertices = 0;
             frameSkipped = 0;
 
+            // The lightmap changes when the light level does — dawn, dusk,
+            // walking into a cave — and is identical on the great majority of
+            // frames. Hashing 256 ints is far cheaper than writing 1 KiB of
+            // staging and running two layout barriers plus a copy for data
+            // the image already holds.
+            lightmapDirty = true;
             if (lightmapData != null) {
-                writeLightmapStaging(lightmapData);
+                int hash = hashLightmap(lightmapData);
+                if (lightmapImageInitialized && hash == lightmapHash) {
+                    lightmapDirty = false;
+                } else {
+                    lightmapHash = hash;
+                    writeLightmapStaging(lightmapData);
+                }
             } else {
                 readLightmapFromGL(); // fallback: stalls the GL pipeline
             }
@@ -550,7 +565,9 @@ final class VkTerrainRenderer {
                         queryPool, slot * 2);
             }
 
-            recordLightmapUpload(stack);
+            if (lightmapDirty) {
+                recordLightmapUpload(stack);
+            }
 
             VkClearValue.Buffer clears = VkClearValue.calloc(2, stack);
             clears.get(0).color()
@@ -896,6 +913,15 @@ final class VkTerrainRenderer {
     // ------------------------------------------------------------------
 
     /** ARGB ints → RGBA8 staging bytes; no GL involvement, no pipeline stall. */
+    /** Order-sensitive so a swap of two texels still counts as a change. */
+    private static int hashLightmap(int[] argb) {
+        int hash = 1;
+        for (int i = 0; i < argb.length; i++) {
+            hash = hash * 31 + argb[i];
+        }
+        return hash;
+    }
+
     private void writeLightmapStaging(int[] argb) {
         for (int i = 0; i < argb.length; i++) {
             int v = argb[i];

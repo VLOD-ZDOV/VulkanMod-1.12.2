@@ -8,6 +8,12 @@
 
 ### Performance
 
+- The translucent layer no longer walks and packs its whole chunk list every frame for nothing. It stays on the vanilla path and the Vulkan side rejected it anyway, but the work was done first and then discarded — at high render distances water and glass make that list long. It was also inflating the drawn-chunk counter with chunks nothing ever drew.
+- The lightmap is only uploaded when it changed. It is 256 texels rewritten every single frame together with two layout barriers and a copy, for data that changes at dawn, at dusk and when you walk into a cave. A hash of the array decides.
+- The staging ring is 96 MiB rather than 32. Wrapping it blocks the render thread until the GPU has drained it, so what matters is the interval between wraps, not the size of one upload — this is roughly 2000 chunks of headroom instead of 600.
+- Offscreen preloading only tops the build queue up once it has run dry, instead of whenever it is short. Keeping it topped up meant vanilla's chunk builder never idled, which on a CPU that is already the bottleneck is a cost paid every frame for chunks nobody is looking at yet.
+- The terrain launch flag is read once instead of on every layer. `System.getProperty` locks the global property table.
+
 - Chunk uploads go through one shared staging ring instead of a persistently mapped staging buffer per chunk. Every mirrored chunk used to cost a `vkAllocateMemory`, a `vkCreateBuffer` and a `vkMapMemory`, and kept its pinned host copy for as long as the chunk lived — as much pinned system memory as the whole world took in VRAM. At render distance 12 that was already 4321 allocations, past the 4096 the Vulkan spec guarantees; at 64 it was tens of thousands, which is where drivers that hold close to the guarantee simply start failing the allocation.
 - Growing the shared geometry buffer copies the old contents on the GPU rather than re-uploading every chunk from the host. The old path pushed the entire mirrored world back across PCIe on each growth, and at high render distances there are several growths.
 

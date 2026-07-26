@@ -70,10 +70,15 @@ public abstract class ChunkPreloadMixin {
         if (grid == null || grid.length == 0) {
             return;
         }
-        int room = QUEUE_TARGET - chunksToUpdate.size();
-        if (room <= 0) {
+        // Only when the queue has run dry, not merely when it is short. Topping
+        // it up while work remains would keep vanilla's chunk builder busy
+        // every frame forever instead of only while there is catching up to do
+        // — and on a CPU that is already the bottleneck, that is a cost paid on
+        // every frame in exchange for chunks nobody is looking at yet.
+        if (!chunksToUpdate.isEmpty()) {
             return;
         }
+        int room = QUEUE_TARGET;
         int cursor = vulkanmod112$scanCursor;
         if (cursor >= grid.length) {
             cursor = 0;
