@@ -218,14 +218,18 @@ final class VkTerrainRenderer {
     private static final TerrainPipeline[] TERRAIN_PIPELINES = {
             new TerrainPipeline("solid", false, false, true),
             new TerrainPipeline("cutout", true, false, true),
+            new TerrainPipeline("translucent", false, true, false),
     };
+    /** Index into {@link #TERRAIN_PIPELINES}; also the layer ordinal vanilla uses. */
+    private static final int LAYER_TRANSLUCENT = 3;
+    private static final int PIPELINE_TRANSLUCENT = 2;
 
     /**
      * Vanilla's layer ordinals: SOLID, CUTOUT_MIPPED, CUTOUT, TRANSLUCENT.
      * The two cutout layers share a pipeline and differ only in their cutoff,
      * which is a push constant. -1 means the layer is not ours to draw.
      */
-    private static final int[] LAYER_PIPELINE = {0, 1, 1, -1};
+    private static final int[] LAYER_PIPELINE = {0, 1, 1, PIPELINE_TRANSLUCENT};
     private static final float[] LAYER_CUTOFF = {0.0f, 0.5f, 0.1f, 0.0f};
 
     private final long[] pipelines = new long[TERRAIN_PIPELINES.length];
@@ -290,6 +294,26 @@ final class VkTerrainRenderer {
     // Size-dependent shared targets
     private int width;
     private int height;
+    /**
+     * Where the translucent layer is drawn, kept apart from the opaque colour.
+     *
+     * It cannot share it. By the time the game asks for translucent terrain it
+     * has already drawn entities, particles and weather into its own
+     * framebuffer, and the opaque colour here was composited over there long
+     * before any of that. Blending water into this image and compositing it
+     * again would draw the terrain twice and lose everything OpenGL added in
+     * between. So this one is cleared to fully transparent, receives only the
+     * translucent layer, and is composited over the game's frame as a layer of
+     * its own.
+     */
+    private long translucentImage;
+    private long translucentMemory;
+    private long translucentView;
+    private long translucentFramebuffer;
+    private long translucentRenderPass;
+    private int glTranslucentMemoryObject;
+    private int glTranslucentTexture = -1;
+
     private long colorImage;
     private long colorMemory;
     private long colorView;
@@ -1500,6 +1524,65 @@ final class VkTerrainRenderer {
         LongBuffer pRenderPass = stack.mallocLong(1);
         check(vkCreateRenderPass(device(), rpInfo, null, pRenderPass), "vkCreateRenderPass(terrain)");
         renderPass = pRenderPass.get(0);
+
+        createTranslucentRenderPass(stack);
+    }
+
+    /**
+     * The pass the translucent layer is drawn in.
+     *
+     * Two things separate it from the opaque one. Its colour attachment starts
+     * cleared to fully transparent, because what it produces is composited over
+     * a frame OpenGL has meanwhile drawn entities into rather than replacing
+     * it. And its depth attachment is loaded rather than cleared, and never
+     * stored: the layer is depth-tested against what is already there and
+     * writes nothing back, which is what vanilla does too — {@code
+     * depthMask(false)} right before it asks for the layer.
+     */
+    private void createTranslucentRenderPass(MemoryStack stack) {
+        VkAttachmentDescription.Buffer attachments = VkAttachmentDescription.calloc(2, stack);
+        attachments.get(0)
+                .format(VK_FORMAT_R8G8B8A8_UNORM)
+                .samples(VK_SAMPLE_COUNT_1_BIT)
+                .loadOp(VK_ATTACHMENT_LOAD_OP_CLEAR)
+                .storeOp(VK_ATTACHMENT_STORE_OP_STORE)
+                .stencilLoadOp(VK_ATTACHMENT_LOAD_OP_DONT_CARE)
+                .stencilStoreOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
+                .initialLayout(VK_IMAGE_LAYOUT_UNDEFINED)
+                .finalLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        attachments.get(1)
+                .format(depthFormat(stack))
+                .samples(VK_SAMPLE_COUNT_1_BIT)
+                .loadOp(VK_ATTACHMENT_LOAD_OP_LOAD)
+                .storeOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
+                .stencilLoadOp(VK_ATTACHMENT_LOAD_OP_DONT_CARE)
+                .stencilStoreOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
+                // What the opaque pass left it in, and what it is handed back as
+                // so the GL side can go on sampling it.
+                .initialLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+                .finalLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+        VkAttachmentReference.Buffer colorRef = VkAttachmentReference.calloc(1, stack);
+        colorRef.get(0).attachment(0).layout(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+        // Read-only depth: the test runs, nothing is written.
+        VkAttachmentReference depthRef = VkAttachmentReference.calloc(stack)
+                .attachment(1).layout(VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
+
+        VkSubpassDescription.Buffer subpass = VkSubpassDescription.calloc(1, stack);
+        subpass.get(0)
+                .pipelineBindPoint(VK_PIPELINE_BIND_POINT_GRAPHICS)
+                .colorAttachmentCount(1)
+                .pColorAttachments(colorRef)
+                .pDepthStencilAttachment(depthRef);
+
+        VkRenderPassCreateInfo rpInfo = VkRenderPassCreateInfo.calloc(stack)
+                .sType(VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO)
+                .pAttachments(attachments)
+                .pSubpasses(subpass);
+        LongBuffer pRenderPass = stack.mallocLong(1);
+        check(vkCreateRenderPass(device(), rpInfo, null, pRenderPass),
+                "vkCreateRenderPass(translucent)");
+        translucentRenderPass = pRenderPass.get(0);
     }
 
     /**
@@ -1645,7 +1728,10 @@ final class VkTerrainRenderer {
                     .pColorBlendState(blend)
                     .pDynamicState(dynamic)
                     .layout(pipelineLayout)
-                    .renderPass(renderPass)
+                    // A pipeline belongs to the pass it is used in, and the
+                    // blended one is drawn in the translucent pass because that
+                    // is the pass whose depth is loaded rather than cleared.
+                    .renderPass(spec.blend ? translucentRenderPass : renderPass)
                     .subpass(0);
         }
         LongBuffer pPipeline = stack.mallocLong(TERRAIN_PIPELINES.length);
@@ -1755,6 +1841,17 @@ final class VkTerrainRenderer {
                 depthBlit = glDepthBlitFbo != -1;
             }
 
+            long[] translucentOut = new long[4];
+            createExportedTarget(stack, VK_FORMAT_R8G8B8A8_UNORM,
+                    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                    VK_IMAGE_ASPECT_COLOR_BIT, translucentOut);
+            translucentImage = translucentOut[0];
+            translucentMemory = translucentOut[1];
+            translucentView = translucentOut[2];
+            glTranslucentMemoryObject = importMemoryToGL(stack, translucentMemory, translucentOut[3]);
+            glTranslucentTexture = createGlTexture(glTranslucentMemoryObject,
+                    org.lwjgl.opengl.GL11.GL_RGBA8);
+
             VkFramebufferCreateInfo fbInfo = VkFramebufferCreateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO)
                     .renderPass(renderPass)
@@ -1765,6 +1862,14 @@ final class VkTerrainRenderer {
             LongBuffer pFb = stack.mallocLong(1);
             check(vkCreateFramebuffer(device(), fbInfo, null, pFb), "vkCreateFramebuffer(terrain)");
             framebuffer = pFb.get(0);
+
+            // Same depth image, so the translucent layer is hidden by opaque
+            // terrain in front of it without any work of its own.
+            fbInfo.renderPass(translucentRenderPass)
+                    .pAttachments(stack.longs(translucentView, depthView));
+            check(vkCreateFramebuffer(device(), fbInfo, null, pFb),
+                    "vkCreateFramebuffer(translucent)");
+            translucentFramebuffer = pFb.get(0);
 
             int prev = GL11C.glGetInteger(GL20C.GL_CURRENT_PROGRAM);
             for (int i = 0; i < compositePrograms.length; i++) {
@@ -2240,7 +2345,12 @@ final class VkTerrainRenderer {
             GL11C.glDeleteTextures(glDepthTexture);
             EXTMemoryObject.glDeleteMemoryObjectsEXT(glColorMemoryObject);
             EXTMemoryObject.glDeleteMemoryObjectsEXT(glDepthMemoryObject);
+            if (glTranslucentTexture != -1) {
+                GL11C.glDeleteTextures(glTranslucentTexture);
+                EXTMemoryObject.glDeleteMemoryObjectsEXT(glTranslucentMemoryObject);
+            }
         }
+        glTranslucentTexture = -1;
         if (glDepthBlitFbo != -1 && glContextCurrent()) {
             GL30C.glDeleteFramebuffers(glDepthBlitFbo);
         }
@@ -2249,6 +2359,14 @@ final class VkTerrainRenderer {
         glColorTexture = -1;
         glDepthTexture = -1;
         vkDestroyFramebuffer(device(), framebuffer, null);
+        if (translucentFramebuffer != 0) {
+            vkDestroyFramebuffer(device(), translucentFramebuffer, null);
+            vkDestroyImageView(device(), translucentView, null);
+            vkDestroyImage(device(), translucentImage, null);
+            vkFreeMemory(device(), translucentMemory, null);
+            translucentFramebuffer = 0;
+            translucentImage = 0;
+        }
         vkDestroyImageView(device(), colorView, null);
         vkDestroyImage(device(), colorImage, null);
         vkFreeMemory(device(), colorMemory, null);
@@ -2313,6 +2431,10 @@ final class VkTerrainRenderer {
             }
         }
         vkDestroyPipelineLayout(device(), pipelineLayout, null);
+        if (translucentRenderPass != 0) {
+            vkDestroyRenderPass(device(), translucentRenderPass, null);
+            translucentRenderPass = 0;
+        }
         vkDestroyRenderPass(device(), renderPass, null);
         vkDestroyDescriptorPool(device(), descriptorPool, null);
         vkDestroyDescriptorSetLayout(device(), descriptorSetLayout, null);
