@@ -180,7 +180,55 @@ final class VkTerrainRenderer {
      * test compiled out for SOLID, index 1 keeps it for the CUTOUT layers.
      * Index with {@code layerOrdinal == 0 ? 0 : 1}.
      */
-    private final long[] pipelines = new long[2];
+    /**
+     * How one terrain pipeline differs from the others.
+     *
+     * There used to be two of these built by a loop over a bare index, chosen
+     * at draw time by {@code layerOrdinal == 0 ? 0 : 1}. That works for exactly
+     * as long as the only difference between them is the alpha test, and the
+     * translucent layer differs in blending and in depth writes as well —
+     * neither of which a specialisation constant can express, because both are
+     * pipeline state rather than shader code.
+     */
+    private static final class TerrainPipeline {
+        final String name;
+        /** Compiled into the shader; see the constant in terrain.frag. */
+        final boolean alphaTest;
+        final boolean blend;
+        /**
+         * Off for anything blended: a translucent surface must not stop what
+         * is behind it from being drawn, and the layer is already sorted back
+         * to front when the chunk is built.
+         */
+        final boolean depthWrite;
+
+        TerrainPipeline(String name, boolean alphaTest, boolean blend, boolean depthWrite) {
+            this.name = name;
+            this.alphaTest = alphaTest;
+            this.blend = blend;
+            this.depthWrite = depthWrite;
+        }
+    }
+
+    /**
+     * The pipelines this renderer builds, in the order they are created.
+     *
+     * Adding one is an entry here plus a line in {@link #pipelineForLayer}.
+     */
+    private static final TerrainPipeline[] TERRAIN_PIPELINES = {
+            new TerrainPipeline("solid", false, false, true),
+            new TerrainPipeline("cutout", true, false, true),
+    };
+
+    /**
+     * Vanilla's layer ordinals: SOLID, CUTOUT_MIPPED, CUTOUT, TRANSLUCENT.
+     * The two cutout layers share a pipeline and differ only in their cutoff,
+     * which is a push constant. -1 means the layer is not ours to draw.
+     */
+    private static final int[] LAYER_PIPELINE = {0, 1, 1, -1};
+    private static final float[] LAYER_CUTOFF = {0.0f, 0.5f, 0.1f, 0.0f};
+
+    private final long[] pipelines = new long[TERRAIN_PIPELINES.length];
     private long atlasSampler;
     private long lightmapSampler;
 
@@ -661,10 +709,13 @@ final class VkTerrainRenderer {
 
     private void drawChunks(int layerOrdinal, int[] chunks, int chunkCount, float[] mvp,
                             double viewX, double viewY, double viewZ, VkChunkMirror mirror) {
-        float cutoff = layerOrdinal == 0 ? 0.0f : (layerOrdinal == 1 ? 0.5f : 0.1f);
+        int variant = pipelineForLayer(layerOrdinal);
+        if (variant < 0) {
+            return;
+        }
+        float cutoff = LAYER_CUTOFF[layerOrdinal];
         try (MemoryStack stack = stackPush()) {
-            vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                    pipelines[layerOrdinal == 0 ? 0 : 1]);
+            vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines[variant]);
             // The only thing left that changes between draws. Per-chunk origins
             // are fetched by the vertex shader from the storage buffer.
             ByteBuffer drawPush = stack.calloc(16);
@@ -1451,6 +1502,18 @@ final class VkTerrainRenderer {
         renderPass = pRenderPass.get(0);
     }
 
+    /**
+     * Which pipeline draws a vanilla render layer, or -1 if this renderer does
+     * not draw that layer at all.
+     */
+    private static int pipelineForLayer(int layerOrdinal) {
+        if (layerOrdinal < 0 || layerOrdinal >= LAYER_PIPELINE.length) {
+            return -1;
+        }
+        int variant = LAYER_PIPELINE[layerOrdinal];
+        return variant < TERRAIN_PIPELINES.length ? variant : -1;
+    }
+
     private void createPipeline(MemoryStack stack) {
         long vertModule = createShaderModule(stack, "vulkanmod112/shaders/terrain.vert.spv");
         long fragModule = createShaderModule(stack, "vulkanmod112/shaders/terrain.frag.spv");
@@ -1493,21 +1556,8 @@ final class VkTerrainRenderer {
                 .sType(VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO)
                 .rasterizationSamples(VK_SAMPLE_COUNT_1_BIT);
 
-        VkPipelineDepthStencilStateCreateInfo depthState = VkPipelineDepthStencilStateCreateInfo.calloc(stack)
-                .sType(VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO)
-                .depthTestEnable(true)
-                .depthWriteEnable(true)
-                .depthCompareOp(VK_COMPARE_OP_LESS_OR_EQUAL);
-
-        VkPipelineColorBlendAttachmentState.Buffer blendAttachment =
-                VkPipelineColorBlendAttachmentState.calloc(1, stack);
-        blendAttachment.get(0)
-                .blendEnable(false)
-                .colorWriteMask(VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT
-                        | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT);
-        VkPipelineColorBlendStateCreateInfo blend = VkPipelineColorBlendStateCreateInfo.calloc(stack)
-                .sType(VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO)
-                .pAttachments(blendAttachment);
+        // Depth and blend state are per pipeline, so they are built inside the
+        // loop below rather than shared the way the rest of the state is.
 
         VkPipelineDynamicStateCreateInfo dynamic = VkPipelineDynamicStateCreateInfo.calloc(stack)
                 .sType(VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO)
@@ -1535,11 +1585,41 @@ final class VkTerrainRenderer {
         VkSpecializationMapEntry.Buffer specEntry = VkSpecializationMapEntry.calloc(1, stack);
         specEntry.get(0).constantID(0).offset(0).size(4);
 
-        VkGraphicsPipelineCreateInfo.Buffer pipelineInfo = VkGraphicsPipelineCreateInfo.calloc(2, stack);
-        for (int variant = 0; variant < 2; variant++) {
+        VkGraphicsPipelineCreateInfo.Buffer pipelineInfo =
+                VkGraphicsPipelineCreateInfo.calloc(TERRAIN_PIPELINES.length, stack);
+        for (int variant = 0; variant < TERRAIN_PIPELINES.length; variant++) {
+            TerrainPipeline spec = TERRAIN_PIPELINES[variant];
             VkSpecializationInfo specInfo = VkSpecializationInfo.calloc(stack)
                     .pMapEntries(specEntry)
-                    .pData(stack.bytes((byte) variant, (byte) 0, (byte) 0, (byte) 0));
+                    .pData(stack.bytes((byte) (spec.alphaTest ? 1 : 0), (byte) 0, (byte) 0, (byte) 0));
+
+            VkPipelineDepthStencilStateCreateInfo depthState =
+                    VkPipelineDepthStencilStateCreateInfo.calloc(stack)
+                            .sType(VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO)
+                            .depthTestEnable(true)
+                            .depthWriteEnable(spec.depthWrite)
+                            .depthCompareOp(VK_COMPARE_OP_LESS_OR_EQUAL);
+
+            VkPipelineColorBlendAttachmentState.Buffer blendAttachment =
+                    VkPipelineColorBlendAttachmentState.calloc(1, stack);
+            blendAttachment.get(0)
+                    .blendEnable(spec.blend)
+                    .colorWriteMask(VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT
+                            | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT);
+            if (spec.blend) {
+                // What the game asks OpenGL for on its own translucent pass.
+                blendAttachment.get(0)
+                        .srcColorBlendFactor(VK_BLEND_FACTOR_SRC_ALPHA)
+                        .dstColorBlendFactor(VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA)
+                        .colorBlendOp(VK_BLEND_OP_ADD)
+                        .srcAlphaBlendFactor(VK_BLEND_FACTOR_ONE)
+                        .dstAlphaBlendFactor(VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA)
+                        .alphaBlendOp(VK_BLEND_OP_ADD);
+            }
+            VkPipelineColorBlendStateCreateInfo blend = VkPipelineColorBlendStateCreateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO)
+                    .pAttachments(blendAttachment);
+
             VkPipelineShaderStageCreateInfo.Buffer variantStages =
                     VkPipelineShaderStageCreateInfo.calloc(2, stack);
             variantStages.get(0)
@@ -1564,11 +1644,12 @@ final class VkTerrainRenderer {
                     .renderPass(renderPass)
                     .subpass(0);
         }
-        LongBuffer pPipeline = stack.mallocLong(2);
+        LongBuffer pPipeline = stack.mallocLong(TERRAIN_PIPELINES.length);
         check(vkCreateGraphicsPipelines(device(), VK_NULL_HANDLE, pipelineInfo, null, pPipeline),
                 "vkCreateGraphicsPipelines(terrain)");
-        pipelines[0] = pPipeline.get(0);
-        pipelines[1] = pPipeline.get(1);
+        for (int variant = 0; variant < TERRAIN_PIPELINES.length; variant++) {
+            pipelines[variant] = pPipeline.get(variant);
+        }
 
         vkDestroyShaderModule(device(), vertModule, null);
         vkDestroyShaderModule(device(), fragModule, null);
