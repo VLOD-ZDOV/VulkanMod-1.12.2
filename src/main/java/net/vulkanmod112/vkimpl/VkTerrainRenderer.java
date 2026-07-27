@@ -1607,13 +1607,17 @@ final class VkTerrainRenderer {
                     .colorWriteMask(VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT
                             | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT);
             if (spec.blend) {
-                // What the game asks OpenGL for on its own translucent pass.
+                // Copied from what the game asks OpenGL for before its own
+                // translucent pass, EntityRenderer.renderWorldPass:
+                // tryBlendFuncSeparate(SRC_ALPHA, ONE_MINUS_SRC_ALPHA, ONE, ZERO).
+                // The alpha channel is replaced rather than accumulated, which
+                // is what lets the result be composited over the game's frame.
                 blendAttachment.get(0)
                         .srcColorBlendFactor(VK_BLEND_FACTOR_SRC_ALPHA)
                         .dstColorBlendFactor(VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA)
                         .colorBlendOp(VK_BLEND_OP_ADD)
                         .srcAlphaBlendFactor(VK_BLEND_FACTOR_ONE)
-                        .dstAlphaBlendFactor(VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA)
+                        .dstAlphaBlendFactor(VK_BLEND_FACTOR_ZERO)
                         .alphaBlendOp(VK_BLEND_OP_ADD);
             }
             VkPipelineColorBlendStateCreateInfo blend = VkPipelineColorBlendStateCreateInfo.calloc(stack)
