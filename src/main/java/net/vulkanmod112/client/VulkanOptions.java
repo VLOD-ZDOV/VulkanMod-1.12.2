@@ -286,6 +286,32 @@ final class VulkanOptions {
                                         VulkanConfig.setChunkBuildThreads(value);
                                     }
                                 }),
+                        new VRangeOption("Visibility Walk Interval",
+                                "How often the game may redo its visibility search while chunks are "
+                                        + "still being rebuilt. That search decides which chunks are on "
+                                        + "screen, and measured with the game's own profiler at render "
+                                        + "distance 64 it is a quarter to a half of the entire frame — "
+                                        + "eight times what drawing the world costs. It reruns whenever "
+                                        + "the camera moves, which is fair, and also whenever any chunk "
+                                        + "is queued for rebuild, which while a world fills in means "
+                                        + "every frame even standing perfectly still. This limits only "
+                                        + "the second case; camera movement always gets a fresh search. "
+                                        + "The cost is that a chunk which just finished building can "
+                                        + "wait this long before it appears, so raising it too far makes "
+                                        + "the world visibly arrive in steps. Off by default.",
+                                Cost.of(Level.HIGH, Level.NONE, Level.NONE), null,
+                                0, 500, 10, " ms", "Off",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getVisibilityWalkInterval();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setVisibilityWalkInterval(value);
+                                    }
+                                }),
                         new VSwitchOption("Preload Offscreen Chunks",
                                 "Let chunks behind you be built too. Vanilla only ever schedules "
                                         + "chunks that are on screen right now, so at high render "

@@ -241,6 +241,7 @@ public final class Diagnostics {
         out.println("  " + TerrainHooks.stats());
         out.println("  " + TerrainHooks.vanillaLayerStats());
         out.println("  " + VanillaFrame.stats());
+        out.println("  " + VanillaFrame.walkStats());
         writeVanillaCounters(out, mc);
         writeProfilerTree(out, mc);
 

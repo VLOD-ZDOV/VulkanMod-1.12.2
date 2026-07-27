@@ -46,6 +46,24 @@ public final class VulkanConfig {
      * measurably what the frame is waiting for.
      */
     static final int DEF_CHUNK_BUILD_THREADS = 0;
+    /**
+     * Milliseconds between visibility walks that only pending chunk rebuilds
+     * asked for; 0 leaves vanilla alone.
+     *
+     * The walk is the flood fill in {@code RenderGlobal.setupTerrain} that
+     * decides which chunks are visible, and the game re-runs all of it whenever
+     * the camera moves *or* any chunk is waiting to be rebuilt. Measured with
+     * the game's own profiler at render distance 64, it is 25% to 48% of the
+     * frame, by a wide margin the largest single item — and while a world is
+     * filling in, the second condition holds on every frame, so a camera that
+     * has not moved at all pays for the identical walk again and again.
+     *
+     * A rebuilt chunk can genuinely reveal new area, so this is a rate limit
+     * rather than a removal: the walk still happens, just not ten times in the
+     * same tenth of a second. The visible cost is that a chunk which finished
+     * building may wait up to this long before it is drawn.
+     */
+    static final int DEF_VISIBILITY_WALK_INTERVAL = 0;
     static final boolean DEF_FOG = true;
     static final boolean DEF_ZOOM = true;
     /** Stored as an integer so it fits the config and the slider; 4 = quarter FOV. */
@@ -68,6 +86,7 @@ public final class VulkanConfig {
     private static int framesInFlight = DEF_FRAMES_IN_FLIGHT;
     private static boolean chunkPreloadEnabled = DEF_CHUNK_PRELOAD;
     private static int chunkBuildThreads = DEF_CHUNK_BUILD_THREADS;
+    private static int visibilityWalkInterval = DEF_VISIBILITY_WALK_INTERVAL;
     private static boolean fogEnabled = DEF_FOG;
     private static boolean zoomEnabled = DEF_ZOOM;
     private static int zoomFactor = DEF_ZOOM_FACTOR;
@@ -114,6 +133,13 @@ public final class VulkanConfig {
                 "How many threads build chunk geometry. 0 keeps vanilla's count, which it derives from "
                         + "the heap rather than the CPU and so caps well below a large core count. "
                         + "Takes effect on the next world load.");
+        visibilityWalkInterval = config.getInt("visibilityWalkInterval", CATEGORY_OPTIMIZATION,
+                DEF_VISIBILITY_WALK_INTERVAL, 0, 500,
+                "Milliseconds between visibility walks that only pending chunk rebuilds asked for. "
+                        + "The walk decides which chunks are visible and is the largest single item in "
+                        + "the frame; while a world fills in, the game repeats it every frame even with "
+                        + "the camera perfectly still. 0 leaves vanilla alone. A finished chunk may wait "
+                        + "up to this long before it appears.");
         fogEnabled = config.getBoolean("fog", CATEGORY_GENERAL, DEF_FOG,
                 "Fade Vulkan terrain into the distance the way the rest of the scene already does. "
                         + "Off leaves the world ending in a hard edge, which is a little faster.");
@@ -145,6 +171,7 @@ public final class VulkanConfig {
         setFramesInFlight(DEF_FRAMES_IN_FLIGHT);
         setChunkPreloadEnabled(DEF_CHUNK_PRELOAD);
         setChunkBuildThreads(DEF_CHUNK_BUILD_THREADS);
+        setVisibilityWalkInterval(DEF_VISIBILITY_WALK_INTERVAL);
         setFogEnabled(DEF_FOG);
         setZoomEnabled(DEF_ZOOM);
         setZoomFactor(DEF_ZOOM_FACTOR);
@@ -157,6 +184,16 @@ public final class VulkanConfig {
     public static void setChunkPreloadEnabled(boolean value) {
         chunkPreloadEnabled = value;
         store(CATEGORY_OPTIMIZATION, "chunkPreload", value);
+    }
+
+    /** Milliseconds between rebuild-triggered visibility walks; 0 leaves vanilla alone. */
+    public static int getVisibilityWalkInterval() {
+        return visibilityWalkInterval;
+    }
+
+    public static void setVisibilityWalkInterval(int value) {
+        visibilityWalkInterval = value;
+        store(CATEGORY_OPTIMIZATION, "visibilityWalkInterval", value);
     }
 
     /** Configured thread count, or 0 to leave vanilla's own choice alone. */

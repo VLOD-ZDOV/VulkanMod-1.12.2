@@ -25,6 +25,47 @@ package net.vulkanmod112.client;
  */
 public final class VanillaFrame {
 
+    /**
+     * Why each visibility walk happened, counted.
+     *
+     * Written because the throttle that suppresses redundant walks showed no
+     * effect at all in an A/B run, and "no effect" has two very different
+     * causes: the walk was not the cost, or the throttle never fired. Exactly
+     * this trap already cost a day once — a change that looked correct, was
+     * correct, and was reached 0.3% of the time.
+     */
+    private static long walkAsked;
+    private static long walkQueuePending;
+    private static long walkCameraMoved;
+    private static long walkSuppressed;
+
+    /**
+     * Both conditions are recorded on every call, not just the one that
+     * happened to short-circuit first. The first version of this counter
+     * returned at "queue empty" before ever looking at the camera, so it
+     * reported the camera as never moving — a counter that cannot distinguish
+     * "did not happen" from "was not looked at" is worse than none.
+     */
+    private static long walkDeferredPaid;
+
+    /** A held-back walk being paid back; if this stays 0 the deferral never runs. */
+    public static void countDeferredWalk() {
+        walkDeferredPaid++;
+    }
+
+    public static void countWalk(boolean queuePending, boolean cameraMoved, boolean suppressed) {
+        walkAsked++;
+        if (queuePending) {
+            walkQueuePending++;
+        }
+        if (cameraMoved) {
+            walkCameraMoved++;
+        }
+        if (suppressed) {
+            walkSuppressed++;
+        }
+    }
+
     private static long entityStart;
     private static long entityNanos;
     private static long layerStart;
@@ -71,6 +112,27 @@ public final class VanillaFrame {
         entityNanos = 0L;
         layerNanos = 0L;
         frames = 0L;
+        return line;
+    }
+
+    /**
+     * Where the visibility-walk decision went. {@code asked} counts only the
+     * frames that reached our test at all — a dirty flag set elsewhere
+     * short-circuits ahead of it, and the gap between {@code asked} and the
+     * frame count is itself the answer to why a throttle did nothing.
+     */
+    public static String walkStats() {
+        if (walkAsked == 0) {
+            return "visibility walk: never reached our check — the dirty flag was already set";
+        }
+        String line = String.format(
+                "visibility walk: %d arm requests — chunk churn %d, camera moved %d, deferred %d, paid back %d",
+                walkAsked, walkQueuePending, walkCameraMoved, walkSuppressed, walkDeferredPaid);
+        walkAsked = 0L;
+        walkQueuePending = 0L;
+        walkCameraMoved = 0L;
+        walkSuppressed = 0L;
+        walkDeferredPaid = 0L;
         return line;
     }
 }
