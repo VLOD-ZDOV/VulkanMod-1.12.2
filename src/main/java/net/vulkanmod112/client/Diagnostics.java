@@ -207,8 +207,23 @@ public final class Diagnostics {
         }
     }
 
-    /** Depth and share limits keep this to the few lines that carry the answer. */
+    /**
+     * Depth and share limits keep this to the few lines that carry the answer.
+     *
+     * {@code share} is the fraction of the whole frame this section's parent
+     * accounts for, carried down and multiplied. The game's own
+     * {@code totalUsePercentage} cannot be used for it: asking the profiler for
+     * a nested path renormalises against that path, so it comes back equal to
+     * the share of the parent and a section reads as far larger than it is. A
+     * walk that is 94% of a stage that is 51% of the frame printed as 94% of
+     * the frame, and that number nearly bought a wrong conclusion.
+     */
     private static void appendProfilerSection(StringBuilder out, Minecraft mc, String path, int depth) {
+        appendProfilerSection(out, mc, path, depth, 1.0);
+    }
+
+    private static void appendProfilerSection(StringBuilder out, Minecraft mc, String path, int depth,
+                                              double share) {
         if (depth > 3) {
             return;
         }
@@ -226,9 +241,10 @@ public final class Diagnostics {
             for (int d = 0; d < depth; d++) {
                 out.append("  ");
             }
+            double ofFrame = share * result.usePercentage / 100.0;
             out.append(String.format("%-28s %5.1f%% of parent, %5.1f%% of frame%n",
-                    result.profilerName, result.usePercentage, result.totalUsePercentage));
-            appendProfilerSection(out, mc, path + "." + result.profilerName, depth + 1);
+                    result.profilerName, result.usePercentage, ofFrame * 100.0));
+            appendProfilerSection(out, mc, path + "." + result.profilerName, depth + 1, ofFrame);
         }
     }
 
