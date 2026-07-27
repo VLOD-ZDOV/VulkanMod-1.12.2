@@ -7,7 +7,9 @@ import net.minecraft.world.World;
 import net.vulkanmod112.client.DynamicLights;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
  * Lights the item held in first person by whatever the player is carrying.
@@ -26,6 +28,12 @@ import org.spongepowered.asm.mixin.injection.Redirect;
  */
 @Mixin(ItemRenderer.class)
 public abstract class HeldItemLightMixin {
+
+    /** Counts the method itself, to tell "never called" from "never patched". */
+    @Inject(method = "setLightmap", at = @At("HEAD"))
+    private void vulkanmod112$countLightmapCall(CallbackInfo ci) {
+        DynamicLights.recordHeldItemLightmapCall();
+    }
 
     @Redirect(method = "setLightmap",
             at = @At(value = "INVOKE",

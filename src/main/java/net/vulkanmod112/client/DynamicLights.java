@@ -73,6 +73,20 @@ public final class DynamicLights {
     private static int heldLastBefore = -1;
     private static int heldLastAfter = -1;
 
+    /**
+     * Times {@code ItemRenderer.setLightmap} was entered at all.
+     *
+     * The redirect inside it reported never having run — not "ran and changed
+     * nothing", never. That leaves two possibilities which need opposite
+     * fixes: the method is not being called, or the redirect did not attach to
+     * the call inside it. Counting the method separately tells them apart.
+     */
+    private static long heldMethodCalls;
+
+    public static void recordHeldItemLightmapCall() {
+        heldMethodCalls++;
+    }
+
     public static void recordHeldItemLight(int before, int after) {
         heldLastBefore = before;
         heldLastAfter = after;
@@ -304,9 +318,9 @@ public final class DynamicLights {
                         + "level at camera %d",
                 gathered / (double) frames, scanned / (double) frames, frames,
                 levelAt(originX, originY, originZ))
-                + String.format("; held item hook raised %d, unchanged %d, last %d -> %d "
-                        + "(block light %d -> %d)",
-                        heldRaised, heldUnchanged, heldLastBefore, heldLastAfter,
+                + String.format("; setLightmap entered %d, hook raised %d, unchanged %d, "
+                        + "last %d -> %d (block light %d -> %d)",
+                        heldMethodCalls, heldRaised, heldUnchanged, heldLastBefore, heldLastAfter,
                         heldLastBefore < 0 ? -1 : (heldLastBefore >> 4) & 0xF,
                         heldLastAfter < 0 ? -1 : (heldLastAfter >> 4) & 0xF);
         gathered = 0L;
@@ -314,6 +328,7 @@ public final class DynamicLights {
         frames = 0L;
         heldRaised = 0L;
         heldUnchanged = 0L;
+        heldMethodCalls = 0L;
         return line;
     }
 }
