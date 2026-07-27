@@ -26,7 +26,17 @@ public abstract class VboRenderListMixin extends net.minecraft.client.renderer.C
         if (TerrainHooks.renderChunkLayer(layer, chunks)) {
             chunks.clear();
             ci.cancel();
+            return;
         }
+        // Vanilla is about to draw this one. Timing it is how we learn what the
+        // layers we do not take actually cost — over an ocean that is the whole
+        // frame, and it decides whether moving translucent into Vulkan pays.
+        TerrainHooks.beginVanillaLayer(layer, chunks.size());
+    }
+
+    @Inject(method = "renderChunkLayer", at = @At("RETURN"))
+    private void vulkanmod112$timeVanillaLayer(BlockRenderLayer layer, CallbackInfo ci) {
+        TerrainHooks.endVanillaLayer();
     }
 
 }

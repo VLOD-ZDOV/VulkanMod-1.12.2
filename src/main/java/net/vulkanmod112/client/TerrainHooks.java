@@ -65,7 +65,58 @@ public final class TerrainHooks {
     private static long framesDrawn;
     private static int lastChunksDrawn;
 
+    /**
+     * How long vanilla spends drawing the layers we did not take, and how many
+     * chunks it drew there. TRANSLUCENT is the whole of it today.
+     *
+     * This exists to price D2 before building it. Over an ocean at render
+     * distance 64 the frame collapses to 71 fps while this renderer draws 554
+     * chunks for 0.33 ms of it — everything visible is water, which stays on
+     * vanilla GL. Moving that layer into Vulkan removes vanilla's per-chunk
+     * draw calls, but it does *not* remove the re-sorting vanilla does when the
+     * player moves, because the geometry still has to be built. Which of the
+     * two dominates decides whether D2 is worth its complexity, and guessing
+     * at it is exactly how the last two days went wrong.
+     */
+    private static long vanillaLayerStart;
+    private static long vanillaLayerNanos;
+    private static long vanillaLayerFrames;
+    private static int vanillaLayerChunks;
+
     private TerrainHooks() {
+    }
+
+    /** Called by the mixin when vanilla, not Vulkan, is about to draw a layer. */
+    public static void beginVanillaLayer(BlockRenderLayer layer, int chunkCount) {
+        if (layer != BlockRenderLayer.TRANSLUCENT) {
+            vanillaLayerStart = 0L;
+            return;
+        }
+        vanillaLayerChunks = chunkCount;
+        vanillaLayerStart = System.nanoTime();
+    }
+
+    /** Paired with the above; a cancelled layer never reaches it. */
+    public static void endVanillaLayer() {
+        if (vanillaLayerStart == 0L) {
+            return;
+        }
+        vanillaLayerNanos += System.nanoTime() - vanillaLayerStart;
+        vanillaLayerFrames++;
+        vanillaLayerStart = 0L;
+    }
+
+    /** Milliseconds per frame vanilla spent on the translucent layer, and its chunk count. */
+    public static String vanillaLayerStats() {
+        if (vanillaLayerFrames == 0) {
+            return "vanilla translucent: not drawn";
+        }
+        double perFrame = vanillaLayerNanos / 1_000_000.0 / vanillaLayerFrames;
+        String line = String.format("vanilla translucent: %.2f ms per frame over %d frames, %d chunks last frame",
+                perFrame, vanillaLayerFrames, vanillaLayerChunks);
+        vanillaLayerNanos = 0L;
+        vanillaLayerFrames = 0L;
+        return line;
     }
 
     public static void setViewPosition(double x, double y, double z) {

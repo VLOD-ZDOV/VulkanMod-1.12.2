@@ -152,6 +152,7 @@ public final class Diagnostics {
                 + ", world: " + (mc.world == null ? "none" : "loaded")
                 + ", gui: " + (mc.currentScreen == null ? "none" : mc.currentScreen.getClass().getSimpleName()));
         out.println("  " + TerrainHooks.stats());
+        out.println("  " + TerrainHooks.vanillaLayerStats());
 
         VulkanBridge bridge = VulkanLoader.bridgeIfReady();
         if (bridge == null || !bridge.isInitialized()) {
