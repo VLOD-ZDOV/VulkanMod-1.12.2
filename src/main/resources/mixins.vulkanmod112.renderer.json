@@ -18,6 +18,8 @@
     "VanillaFrameMixin",
     "VisibilityWalkMixin",
     "NearPlaneMixin",
-    "VisibilityWalkCostMixin"
+    "VisibilityWalkCostMixin",
+    "RenderInfoMixin",
+    "FrustumTestMixin"
   ]
 }

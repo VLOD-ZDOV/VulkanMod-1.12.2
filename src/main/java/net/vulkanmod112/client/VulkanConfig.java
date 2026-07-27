@@ -93,6 +93,13 @@ public final class VulkanConfig {
      * is left is to do the same work without allocating for it.
      */
     static final boolean DEF_OWN_VISIBILITY_WALK = false;
+    /**
+     * Test boxes against the frustum by their far corner. On by default: the
+     * answer is the same one vanilla computes, by the same arithmetic, for
+     * strictly fewer corners — this is not a trade between speed and accuracy,
+     * and the switch is here to rule it out rather than to choose.
+     */
+    static final boolean DEF_FAST_FRUSTUM_TEST = true;
     static final boolean DEF_FOG = true;
     static final boolean DEF_ZOOM = true;
     /** Stored as an integer so it fits the config and the slider; 4 = quarter FOV. */
@@ -119,6 +126,7 @@ public final class VulkanConfig {
     private static int nearPlaneHundredths = DEF_NEAR_PLANE_HUNDREDTHS;
     private static boolean visibilitySeedCache = DEF_VISIBILITY_SEED_CACHE;
     private static boolean ownVisibilityWalk = DEF_OWN_VISIBILITY_WALK;
+    private static boolean fastFrustumTest = DEF_FAST_FRUSTUM_TEST;
     private static boolean fogEnabled = DEF_FOG;
     private static boolean zoomEnabled = DEF_ZOOM;
     private static int zoomFactor = DEF_ZOOM_FACTOR;
@@ -194,6 +202,15 @@ public final class VulkanConfig {
                         + "version at a quarter to a half of the frame at render distance 64. Off "
                         + "by default because it replaces vanilla logic, and the way that goes "
                         + "wrong is that something stops being drawn.");
+        fastFrustumTest = config.getBoolean("fastFrustumTest", CATEGORY_OPTIMIZATION,
+                DEF_FAST_FRUSTUM_TEST,
+                "Decide whether a box is off screen from its far corner rather than from all "
+                        + "eight of them. The same answer by the same arithmetic: the corner "
+                        + "furthest along a plane's normal is the last one to leave it, so if it "
+                        + "is outside, all of them are. Vanilla checks up to forty-eight corner "
+                        + "positions to reject one box, and the chunk visibility search does this "
+                        + "once for every chunk it reaches. On by default; the switch is for "
+                        + "ruling it out, not for choosing.");
         fogEnabled = config.getBoolean("fog", CATEGORY_GENERAL, DEF_FOG,
                 "Fade Vulkan terrain into the distance the way the rest of the scene already does. "
                         + "Off leaves the world ending in a hard edge, which is a little faster.");
@@ -229,6 +246,7 @@ public final class VulkanConfig {
         setNearPlaneHundredths(DEF_NEAR_PLANE_HUNDREDTHS);
         setVisibilitySeedCacheEnabled(DEF_VISIBILITY_SEED_CACHE);
         setOwnVisibilityWalk(DEF_OWN_VISIBILITY_WALK);
+        setFastFrustumTest(DEF_FAST_FRUSTUM_TEST);
         setFogEnabled(DEF_FOG);
         setZoomEnabled(DEF_ZOOM);
         setZoomFactor(DEF_ZOOM_FACTOR);
@@ -279,6 +297,15 @@ public final class VulkanConfig {
     public static void setOwnVisibilityWalk(boolean value) {
         ownVisibilityWalk = value;
         store(CATEGORY_OPTIMIZATION, "ownVisibilityWalk", value);
+    }
+
+    public static boolean isFastFrustumTest() {
+        return fastFrustumTest;
+    }
+
+    public static void setFastFrustumTest(boolean value) {
+        fastFrustumTest = value;
+        store(CATEGORY_OPTIMIZATION, "fastFrustumTest", value);
     }
 
     /** Configured thread count, or 0 to leave vanilla's own choice alone. */

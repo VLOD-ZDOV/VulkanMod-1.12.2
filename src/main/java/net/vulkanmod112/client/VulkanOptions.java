@@ -337,6 +337,31 @@ final class VulkanOptions {
                                         VulkanConfig.setNearPlaneHundredths(value);
                                     }
                                 }),
+                        new VSwitchOption("Fast Frustum Test",
+                                "Decide whether something is off screen from its far corner "
+                                        + "instead of from all eight. It is the same answer by the "
+                                        + "same arithmetic, not an approximation: the corner "
+                                        + "furthest along a clipping plane is the last one to "
+                                        + "leave it, so if that one is outside then all of them "
+                                        + "are. Vanilla evaluates up to forty-eight corner "
+                                        + "positions to reject a single box, and the search that "
+                                        + "decides which chunks are on screen does this once for "
+                                        + "every chunk it reaches — which its own profiler puts at "
+                                        + "a quarter to a half of the frame at high render "
+                                        + "distances. On by default; the switch is here to rule it "
+                                        + "out, not to choose.",
+                                Cost.of(Level.NONE, Level.NONE, Level.NONE), null,
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return VulkanConfig.isFastFrustumTest();
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        VulkanConfig.setFastFrustumTest(value);
+                                    }
+                                }),
                         new VSwitchOption("Own Visibility Search",
                                 "Decide which chunks are on screen with this mod's search instead "
                                         + "of the game's. Same answer, run just as often — the "

@@ -137,6 +137,18 @@ public final class VanillaFrame {
         return line;
     }
 
+    /**
+     * Frustum tests asked for, counted so the cost of one can be worked out
+     * from the walk timings rather than argued about. Everything that culls
+     * against the camera lands here, entities included, but the visibility
+     * search is far and away the loudest caller.
+     */
+    private static long frustumTests;
+
+    public static void countFrustumTest() {
+        frustumTests++;
+    }
+
     private static long entityStart;
     private static long entityNanos;
     private static long layerStart;
@@ -178,11 +190,15 @@ public final class VanillaFrame {
             return "vanilla frame: not rendered";
         }
         String line = String.format(
-                "vanilla frame: renderEntities %.2f ms, renderBlockLayer (all 4) %.2f ms per frame over %d frames",
-                entityNanos / 1_000_000.0 / frames, layerNanos / 1_000_000.0 / frames, frames);
+                "vanilla frame: renderEntities %.2f ms, renderBlockLayer (all 4) %.2f ms per frame "
+                        + "over %d frames, %d frustum tests per frame (%s)",
+                entityNanos / 1_000_000.0 / frames, layerNanos / 1_000_000.0 / frames, frames,
+                frustumTests / frames,
+                VulkanConfig.isFastFrustumTest() ? "far corner" : "vanilla eight corners");
         entityNanos = 0L;
         layerNanos = 0L;
         frames = 0L;
+        frustumTests = 0L;
         return line;
     }
 
