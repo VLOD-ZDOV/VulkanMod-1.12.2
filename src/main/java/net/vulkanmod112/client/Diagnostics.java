@@ -174,6 +174,64 @@ public final class Diagnostics {
         }
     }
 
+    /**
+     * The Shift+F3 pie chart, as text.
+     *
+     * The chart itself is drawn in GUI coordinates, so on a large display it
+     * ends up a few hundred pixels across with unreadable labels — the one time
+     * it was needed, it could not be read. The numbers behind it are plain
+     * objects, so they can simply be written down instead.
+     *
+     * Only runs when the game has the profiler on, which is exactly when the
+     * chart is open; the profiler's own section calls are boolean-guarded
+     * no-ops otherwise, so nothing here costs anything the rest of the time.
+     */
+    private static void writeProfilerTree(PrintWriter out, Minecraft mc) {
+        if (!mc.profiler.profilingEnabled) {
+            return;
+        }
+        try {
+            StringBuilder tree = new StringBuilder();
+            appendProfilerSection(tree, mc, "root", 0);
+            if (tree.length() == 0) {
+                // The game clears the profiler whenever the chart is toggled on,
+                // so a snapshot can land before any section has closed. Saying so
+                // beats a bare heading that reads like the profiler found nothing.
+                out.println("  profiler: on, but no section has been recorded yet");
+                return;
+            }
+            out.println("  profiler (open the chart with Shift+F3; these are its numbers):");
+            out.print(tree);
+        } catch (Throwable t) {
+            out.println("  profiler: unavailable (" + t + ")");
+        }
+    }
+
+    /** Depth and share limits keep this to the few lines that carry the answer. */
+    private static void appendProfilerSection(StringBuilder out, Minecraft mc, String path, int depth) {
+        if (depth > 3) {
+            return;
+        }
+        java.util.List<net.minecraft.profiler.Profiler.Result> results = mc.profiler.getProfilingData(path);
+        if (results == null || results.size() < 2) {
+            return;
+        }
+        // Index 0 is the synthetic "unspecified" remainder; the rest are real.
+        for (int i = 1; i < results.size(); i++) {
+            net.minecraft.profiler.Profiler.Result result = results.get(i);
+            if (result.usePercentage < 1.0) {
+                continue;
+            }
+            out.append("    ");
+            for (int d = 0; d < depth; d++) {
+                out.append("  ");
+            }
+            out.append(String.format("%-28s %5.1f%% of parent, %5.1f%% of frame%n",
+                    result.profilerName, result.usePercentage, result.totalUsePercentage));
+            appendProfilerSection(out, mc, path + "." + result.profilerName, depth + 1);
+        }
+    }
+
     private static void writeSnapshot(PrintWriter out) {
         Minecraft mc = Minecraft.getMinecraft();
         out.println("[" + STAMP.format(new Date()) + "] snapshot");
@@ -184,6 +242,7 @@ public final class Diagnostics {
         out.println("  " + TerrainHooks.vanillaLayerStats());
         out.println("  " + VanillaFrame.stats());
         writeVanillaCounters(out, mc);
+        writeProfilerTree(out, mc);
 
         VulkanBridge bridge = VulkanLoader.bridgeIfReady();
         if (bridge == null || !bridge.isInitialized()) {
