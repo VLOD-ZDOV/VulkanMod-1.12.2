@@ -138,6 +138,30 @@ final class VulkanOptions {
                                         mc.gameSettings.saveOptions();
                                     }
                                 }),
+                        new VSwitchOption("Dynamic Lights",
+                                "Let a carried torch, a dropped glowing block or a burning "
+                                        + "creature light the ground around it. The light is added "
+                                        + "while the world is being shaded rather than written "
+                                        + "into it, so no chunk is rebuilt — and rebuilding chunks "
+                                        + "is exactly what the frame is already waiting on while "
+                                        + "you move, which is what makes the usual approach to "
+                                        + "this cost so much. Any block that gives off light does, "
+                                        + "including modded ones, because the value is read from "
+                                        + "the block itself. It lights the terrain only: entities "
+                                        + "and everything else still drawn by OpenGL are "
+                                        + "unaffected.",
+                                Cost.of(Level.LOW, Level.LOW, Level.NONE), null,
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return VulkanConfig.isDynamicLights();
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        VulkanConfig.setDynamicLights(value);
+                                    }
+                                }),
                         new VSwitchOption("Fog",
                                 "Fade the Vulkan-drawn world into the distance the way the rest of "
                                         + "the scene already does. Without it the terrain is the "

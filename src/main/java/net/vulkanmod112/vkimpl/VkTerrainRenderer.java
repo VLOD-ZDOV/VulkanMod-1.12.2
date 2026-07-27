@@ -292,8 +292,15 @@ final class VkTerrainRenderer {
     private final long[] frameUniformBuffers = new long[framesInFlight];
     private final long[] frameUniformMemories = new long[framesInFlight];
     private final long[] frameUniformMapped = new long[framesInFlight];
-    /** mat4 mvp + vec4 fogColor + vec4 fogParams, padded to a round size. */
-    private static final int FRAME_UNIFORM_BYTES = 256;
+    /**
+     * mat4 mvp | vec4 fogColor | vec4 fogParams | vec4 lightInfo | vec4 lights[32],
+     * padded to a round size. Uniform buffers are guaranteed at least 16 KiB,
+     * so there is room here for a good deal more than this holds.
+     */
+    private static final int MAX_DYNAMIC_LIGHTS = 32;
+    private static final int FRAME_UNIFORM_BYTES = 1024;
+    private final float[] dynamicLights = new float[MAX_DYNAMIC_LIGHTS * 4];
+    private int dynamicLightCount;
 
     private final long[] lightmapStagingBuffer = new long[framesInFlight];
     private final long[] lightmapStagingMemory = new long[framesInFlight];
@@ -1657,6 +1664,25 @@ final class VkTerrainRenderer {
         for (int i = 0; i < 8; i++) {
             MemoryUtil.memPutFloat(base + 64 + i * 4L, fogState[i]);
         }
+        // vec4 lightInfo at 96: x is how many of the array below to read.
+        MemoryUtil.memPutFloat(base + 96, dynamicLightCount);
+        MemoryUtil.memPutFloat(base + 100, 0.0f);
+        MemoryUtil.memPutFloat(base + 104, 0.0f);
+        MemoryUtil.memPutFloat(base + 108, 0.0f);
+        for (int i = 0; i < dynamicLightCount * 4; i++) {
+            MemoryUtil.memPutFloat(base + 112 + i * 4L, dynamicLights[i]);
+        }
+    }
+
+    /**
+     * The light sources for the coming frame. Copied rather than referenced:
+     * the array on the other side of the bridge belongs to the game thread and
+     * is refilled every frame.
+     */
+    void setDynamicLights(float[] lights, int count) {
+        int clamped = Math.max(0, Math.min(count, MAX_DYNAMIC_LIGHTS));
+        System.arraycopy(lights, 0, dynamicLights, 0, clamped * 4);
+        dynamicLightCount = clamped;
     }
 
     private void updateDescriptors() {

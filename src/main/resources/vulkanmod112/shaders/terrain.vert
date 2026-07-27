@@ -6,8 +6,10 @@
 // to be given to the shaders at all.
 layout(set = 0, binding = 3, std140) uniform Frame {
     mat4 mvp;
-    vec4 fogColor;  // rgb = colour, a = mode: 0 off, 1 linear, 2 exp, 3 exp2
-    vec4 fogParams; // x = start, y = end, z = density
+    vec4 fogColor;   // rgb = colour, a = mode: 0 off, 1 linear, 2 exp, 3 exp2
+    vec4 fogParams;  // x = start, y = end, z = density
+    vec4 lightInfo;  // x = how many of lights[] are in use
+    vec4 lights[32]; // xyz = position relative to the camera, w = light level
 } frame;
 
 // What actually differs between draws.

@@ -6,8 +6,10 @@ layout(set = 0, binding = 1) uniform sampler2D lightmap;
 // Same block as the vertex stage; see terrain.vert for why it is a buffer.
 layout(set = 0, binding = 3, std140) uniform Frame {
     mat4 mvp;
-    vec4 fogColor;  // rgb = colour, a = mode: 0 off, 1 linear, 2 exp, 3 exp2
-    vec4 fogParams; // x = start, y = end, z = density
+    vec4 fogColor;   // rgb = colour, a = mode: 0 off, 1 linear, 2 exp, 3 exp2
+    vec4 fogParams;  // x = start, y = end, z = density
+    vec4 lightInfo;  // x = how many of lights[] are in use
+    vec4 lights[32]; // xyz = position relative to the camera, w = light level
 } frame;
 
 layout(push_constant) uniform Draw {
@@ -64,7 +66,27 @@ void main() {
             discard;
         }
     }
-    vec3 light = texture(lightmap, vLight).rgb;
+    // Dynamic light is added by raising the block-light coordinate, not by
+    // mixing a colour in. The game's light map is a 16x16 table whose rows and
+    // columns are block and sky light, already carrying the warm cast of torch
+    // light and whatever a mod has done to it, and it changes with the time of
+    // day. Sampling it one step brighter is what makes a carried torch look
+    // like a torch; adding white would look like a flashlight.
+    float blockLight = vLight.x;
+    int lightCount = int(frame.lightInfo.x);
+    for (int i = 0; i < lightCount; ++i) {
+        vec4 source = frame.lights[i];
+        float distance = length(source.xyz - vRelative);
+        // Vanilla propagates block light one level per block, so a source of
+        // level L reaches L blocks. The same falloff, in a straight line.
+        float level = source.w - distance;
+        if (level > 0.0) {
+            // The light map is sampled at (level * 16 + 8) / 256, which is the
+            // texel centre of that row.
+            blockLight = max(blockLight, (level * 16.0 + 8.0) / 256.0);
+        }
+    }
+    vec3 light = texture(lightmap, vec2(blockLight, vLight.y)).rgb;
     vec3 shaded = tex.rgb * vColor.rgb * light;
 
     int mode = int(frame.fogColor.a);

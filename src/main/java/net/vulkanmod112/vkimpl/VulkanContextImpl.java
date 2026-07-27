@@ -542,6 +542,14 @@ public final class VulkanContextImpl implements VulkanBridge {
     }
 
     @Override
+    public synchronized void updateDynamicLights(float[] lights, int count) {
+        if (!initialized || !interopCapable) {
+            return;
+        }
+        terrainRenderer().setDynamicLights(lights, count);
+    }
+
+    @Override
     public synchronized void updateLightmapData(int[] argb) {
         if (!initialized || !interopCapable) {
             return;

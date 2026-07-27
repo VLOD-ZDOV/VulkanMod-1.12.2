@@ -120,6 +120,16 @@ public final class VulkanConfig {
      * waits on.
      */
     static final boolean DEF_VULKAN_TRANSLUCENT = true;
+    /**
+     * Light from carried torches and burning entities, added while the terrain
+     * is shaded instead of written into the world.
+     *
+     * Off by default, like every setting here that changes what the world looks
+     * like. It costs no chunk rebuilds — which is the whole reason it is done
+     * this way — but it is arithmetic per fragment per source, and it lights
+     * only what this renderer draws.
+     */
+    static final boolean DEF_DYNAMIC_LIGHTS = false;
     static final boolean DEF_FOG = true;
     static final boolean DEF_ZOOM = true;
     /** Stored as an integer so it fits the config and the slider; 4 = quarter FOV. */
@@ -148,6 +158,7 @@ public final class VulkanConfig {
     private static boolean ownVisibilityWalk = DEF_OWN_VISIBILITY_WALK;
     private static boolean fastFrustumTest = DEF_FAST_FRUSTUM_TEST;
     private static boolean vulkanTranslucent = DEF_VULKAN_TRANSLUCENT;
+    private static boolean dynamicLights = DEF_DYNAMIC_LIGHTS;
     private static boolean fogEnabled = DEF_FOG;
     private static boolean zoomEnabled = DEF_ZOOM;
     private static int zoomFactor = DEF_ZOOM_FACTOR;
@@ -239,6 +250,13 @@ public final class VulkanConfig {
                         + "here because the Vulkan terrain has fog and the OpenGL leftovers do "
                         + "not, so water is currently the one surface that stays clear when "
                         + "everything around it fades. Off by default while it is new.");
+        dynamicLights = config.getBoolean("dynamicLights", CATEGORY_GENERAL, DEF_DYNAMIC_LIGHTS,
+                "Let a carried torch, a dropped glowing block or a burning creature light the "
+                        + "terrain around it. The light is added while the world is being shaded, "
+                        + "so no chunk is rebuilt for it — which is what makes this affordable, "
+                        + "because rebuilding chunks is what the frame is already waiting on when "
+                        + "you move. It lights terrain only: entities and anything else OpenGL "
+                        + "still draws are unaffected.");
         fogEnabled = config.getBoolean("fog", CATEGORY_GENERAL, DEF_FOG,
                 "Fade Vulkan terrain into the distance the way the rest of the scene already does. "
                         + "Off leaves the world ending in a hard edge, which is a little faster.");
@@ -276,6 +294,7 @@ public final class VulkanConfig {
         setOwnVisibilityWalk(DEF_OWN_VISIBILITY_WALK);
         setFastFrustumTest(DEF_FAST_FRUSTUM_TEST);
         setVulkanTranslucent(DEF_VULKAN_TRANSLUCENT);
+        setDynamicLights(DEF_DYNAMIC_LIGHTS);
         setFogEnabled(DEF_FOG);
         setZoomEnabled(DEF_ZOOM);
         setZoomFactor(DEF_ZOOM_FACTOR);
@@ -335,6 +354,15 @@ public final class VulkanConfig {
     public static void setVulkanTranslucent(boolean value) {
         vulkanTranslucent = value;
         store(CATEGORY_OPTIMIZATION, "vulkanTranslucent", value);
+    }
+
+    public static boolean isDynamicLights() {
+        return dynamicLights;
+    }
+
+    public static void setDynamicLights(boolean value) {
+        dynamicLights = value;
+        store(CATEGORY_GENERAL, "dynamicLights", value);
     }
 
     public static boolean isFastFrustumTest() {

@@ -120,6 +120,18 @@ public interface VulkanBridge {
     void updateFogState(float[] fog);
 
     /**
+     * Light sources near the camera, four floats each: position relative to the
+     * camera, then the vanilla light level the source emits.
+     *
+     * They are added by the terrain shader while it shades, rather than written
+     * into the world and rebuilt into chunk geometry the way the game itself
+     * would do it. Rebuilding chunks is what the frame is already waiting on
+     * when the player moves, so a light that travels with them is the last
+     * thing to pay for that way.
+     */
+    void updateDynamicLights(float[] lights, int count);
+
+    /**
      * Draws one terrain layer with Vulkan. Layer ordinals follow
      * BlockRenderLayer: 0 SOLID, 1 CUTOUT_MIPPED, 2 CUTOUT, 3 TRANSLUCENT.
      * SOLID begins the frame, CUTOUT submits it and composites color+depth

@@ -187,6 +187,8 @@ public final class TerrainHooks {
                 captureMatrices();
                 captureFog();
                 bridge.updateFogState(FOG);
+                DynamicLights.gather(viewX, viewY, viewZ);
+                bridge.updateDynamicLights(DynamicLights.lights(), DynamicLights.count());
                 if (lightmapColors != null) {
                     bridge.updateLightmapData(lightmapColors);
                 }

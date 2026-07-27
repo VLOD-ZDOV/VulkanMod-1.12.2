@@ -20,6 +20,9 @@
     "NearPlaneMixin",
     "VisibilityWalkCostMixin",
     "RenderInfoMixin",
-    "FrustumTestMixin"
+    "FrustumTestMixin",
+    "EntityBrightnessMixin",
+    "ParticleBrightnessMixin",
+    "HeldItemLightMixin"
   ]
 }

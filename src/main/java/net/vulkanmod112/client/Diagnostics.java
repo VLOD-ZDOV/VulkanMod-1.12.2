@@ -259,6 +259,7 @@ public final class Diagnostics {
         out.println("  " + VanillaFrame.stats());
         out.println("  " + VanillaFrame.walkStats());
         out.println("  " + VanillaFrame.ownWalkStats());
+        out.println("  " + DynamicLights.stats());
         writeVanillaCounters(out, mc);
         writeProfilerTree(out, mc);
 
