@@ -337,6 +337,32 @@ final class VulkanOptions {
                                         VulkanConfig.setNearPlaneHundredths(value);
                                     }
                                 }),
+                        new VSwitchOption("Own Visibility Search",
+                                "Decide which chunks are on screen with this mod's search instead "
+                                        + "of the game's. Same answer, run just as often — the "
+                                        + "difference is that vanilla builds a fresh queue, a fresh "
+                                        + "set and an object per visited chunk every time, and this "
+                                        + "reuses all of it. The game's own profiler puts its "
+                                        + "version at a quarter to a half of the entire frame at "
+                                        + "render distance 64, against 4.5% for drawing the world, "
+                                        + "so it is the largest single item there is. Off by "
+                                        + "default because it replaces the game's logic rather than "
+                                        + "this mod's, and the way that goes wrong is that "
+                                        + "something quietly stops being drawn. Turn it off again "
+                                        + "if you see a chunk missing that comes back when you "
+                                        + "approach it.",
+                                Cost.of(Level.NONE, Level.NONE, Level.NONE), null,
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return VulkanConfig.isOwnVisibilityWalk();
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        VulkanConfig.setOwnVisibilityWalk(value);
+                                    }
+                                }),
                         new VSwitchOption("Preload Offscreen Chunks",
                                 "Let chunks behind you be built too. Vanilla only ever schedules "
                                         + "chunks that are on screen right now, so at high render "

@@ -84,6 +84,59 @@ public final class VanillaFrame {
         }
     }
 
+    /**
+     * The replacement walk, measured in the only terms that can be compared
+     * against vanilla's: how long one walk takes and how much of the grid it
+     * touched to get there.
+     *
+     * The framerate on its own cannot answer whether this works, because the
+     * walk does not run every frame and the frames it does not run are the fast
+     * ones. A per-walk millisecond figure is comparable between the setting on
+     * and off; an average frame time is not.
+     */
+    private static long ownWalks;
+    private static long ownWalkNanos;
+    private static long ownWalkVisited;
+    private static long ownWalkVisible;
+    /**
+     * Walks handed back to vanilla. Any non-zero value here means the
+     * replacement met a case it does not implement, and the per-walk timings
+     * above then describe a mixture of the two.
+     */
+    private static long ownWalkFellBack;
+
+    public static void countOwnWalk(int visited, int visible, long nanos) {
+        ownWalks++;
+        ownWalkNanos += nanos;
+        ownWalkVisited += visited;
+        ownWalkVisible += visible;
+    }
+
+    public static void countOwnWalkFallback() {
+        ownWalkFellBack++;
+    }
+
+    /** Reads and resets, like the others, so a snapshot covers one interval. */
+    public static String ownWalkStats() {
+        if (ownWalks == 0 && ownWalkFellBack == 0) {
+            return "own visibility walk: off";
+        }
+        String line = ownWalks == 0
+                ? String.format("own visibility walk: never ran, fell back to vanilla %d times",
+                        ownWalkFellBack)
+                : String.format(
+                        "own visibility walk: %d walks, %.2f ms each, %d visited → %d visible "
+                                + "per walk, fell back to vanilla %d times",
+                        ownWalks, ownWalkNanos / 1_000_000.0 / ownWalks,
+                        ownWalkVisited / ownWalks, ownWalkVisible / ownWalks, ownWalkFellBack);
+        ownWalks = 0L;
+        ownWalkNanos = 0L;
+        ownWalkVisited = 0L;
+        ownWalkVisible = 0L;
+        ownWalkFellBack = 0L;
+        return line;
+    }
+
     private static long entityStart;
     private static long entityNanos;
     private static long layerStart;
