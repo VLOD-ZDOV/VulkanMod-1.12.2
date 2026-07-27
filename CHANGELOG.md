@@ -8,8 +8,13 @@
 
 ### Performance
 
+- The indirect draw batches are allocated in memory the GPU owns rather than in ordinary host memory, where the driver offers such a type. The GPU reads both halves of every batch on each frame — a chunk origin per draw in the vertex shader, and the draw commands themselves in the command processor — so at high render distances that was thousands of small reads across PCIe per frame, competing with chunk geometry streaming over the same bus. Cards without resizable BAR expose only a small window of this memory for the whole system, so an allocation refused there falls back to the old behaviour rather than failing.
 - The mirror copy now happens on the thread that built the chunk instead of the thread that draws. Vanilla gives chunk uploads a hard budget of a quarter of a frame minus whatever the frame has already spent, and runs them on the render thread because they need the OpenGL context. This mod's half of the work needs neither OpenGL nor a driver call — it is a memcpy into mapped staging — but it rode along on that same thread, so the budget drained twice as fast as vanilla alone. Builder threads now reserve a range in their own half of the staging ring and copy there directly; the render thread picks up the finished copy. No Vulkan call is made off the render thread, because the queue and the command pool belong to it and are not thread-safe. Measured flying into unexplored terrain at render distance 64: **97.4% of 29 940 uploads copied off the render thread, none refused.**
 - The mirror is keyed by a dense slot number carried on the chunk's own vertex buffer instead of by its OpenGL buffer name. The old index held an entry for every live buffer, and the game keeps one per layer for every render chunk in the grid — hundreds of thousands at high render distances — so every lookup reached into a random place in a very large array. Command recording for a frame dropped from 0.19–0.21 ms to 0.11 ms at around 10 500 chunks. That is a tenth of a millisecond in a frame of several, so the real value is that it unblocks the change above: on a builder thread the OpenGL name does not exist yet, but the slot does.
+
+### Changed
+
+- The diagnostics report states how much of each video memory heap the driver considers spoken for, against how much it is willing to hand out, and says so when the two cross. That is the point where a driver starts moving allocations into system memory, and until now a session that slowed to a crawl with no change in the scene gave no way to tell whether that was happening. The figures cover everything on the machine, not this game alone.
 
 ### Fixed
 
