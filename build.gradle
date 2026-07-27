@@ -164,6 +164,68 @@ if (propertyBool('use_access_transformer')) {
     }
 }
 
+// Compile the GLSL shaders to SPIR-V as part of the build.
+//
+// They used to be compiled by hand and the .spv committed beside the source,
+// which means editing a shader and not remembering the extra step produces a
+// build that runs the old one and says nothing. The compiled files stay in the
+// tree so that a machine without the Vulkan SDK can still build this, and are
+// only rewritten when the source is newer.
+tasks.register('compileShaders') {
+    def shaderDir = file('src/main/resources/vulkanmod112/shaders')
+    inputs.dir shaderDir
+    // Deliberately no declared outputs. They would land inside
+    // src/main/resources, and Gradle then treats every task that reads the
+    // resource tree — sourcesJar among them — as implicitly depending on this
+    // one and fails the build for not saying so. Whether a file needs
+    // recompiling is decided below by timestamp instead.
+    doLast {
+        def compiler = ['glslc', 'glslangValidator'].find { name ->
+            try {
+                def probe = new ProcessBuilder(name, '--version').redirectErrorStream(true).start()
+                probe.inputStream.text
+                probe.waitFor() == 0
+            } catch (IOException ignored) {
+                false
+            }
+        }
+        def sources = shaderDir.listFiles().findAll { it.name =~ /\.(vert|frag|comp)$/ }
+        if (compiler == null) {
+            def stale = sources.findAll {
+                def spv = new File(it.parentFile, "${it.name}.spv")
+                !spv.exists() || spv.lastModified() < it.lastModified()
+            }
+            if (stale.isEmpty()) {
+                logger.lifecycle 'No shader compiler found; the committed SPIR-V is up to date.'
+                return
+            }
+            throw new GradleException(
+                    'No shader compiler on PATH (install glslc or glslangValidator from the ' +
+                            'Vulkan SDK) and these shaders changed since their SPIR-V was built: ' +
+                            stale.collect { it.name }.join(', '))
+        }
+        sources.each { source ->
+            def spv = new File(source.parentFile, "${source.name}.spv")
+            if (spv.exists() && spv.lastModified() >= source.lastModified()) {
+                return
+            }
+            def cmd = compiler == 'glslc'
+                    ? [compiler, '-O', '--target-env=vulkan1.1', source.absolutePath, '-o', spv.absolutePath]
+                    : [compiler, '-V', '--target-env', 'vulkan1.1', source.absolutePath, '-o', spv.absolutePath]
+            def process = new ProcessBuilder(cmd).redirectErrorStream(true).start()
+            def output = process.inputStream.text
+            if (process.waitFor() != 0) {
+                throw new GradleException("Compiling ${source.name} failed:\n${output}")
+            }
+            logger.lifecycle "Compiled shader ${source.name}"
+        }
+    }
+}
+
+tasks.matching { it.name in ['processResources', 'sourcesJar'] }.configureEach {
+    dependsOn 'compileShaders'
+}
+
 processResources {
 
     inputs.property 'mod_id', propertyString('mod_id')
