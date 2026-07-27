@@ -3,8 +3,10 @@ package net.vulkanmod112.mixin;
 import net.minecraft.client.renderer.vertex.VertexBuffer;
 import net.vulkanmod112.client.ChunkMirror;
 import net.vulkanmod112.client.ChunkSlots;
+import net.vulkanmod112.client.TerrainHooks;
 import net.vulkanmod112.client.VertexBufferSlot;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -47,9 +49,26 @@ public abstract class VertexBufferMixin implements VertexBufferSlot {
         return vulkanmod112$slot;
     }
 
-    @Inject(method = "bufferData", at = @At("HEAD"))
+    /** Vanilla's vertex count, and the reason the whole method is cancelled. */
+    @Shadow
+    private int count;
+
+    @Inject(method = "bufferData", at = @At("HEAD"), cancellable = true)
     private void vulkanmod112$mirrorUpload(ByteBuffer data, CallbackInfo ci) {
+        // The mirror takes its copy first, whatever happens next.
         ChunkMirror.onBufferData(vulkanmod112$slotOrAssign(), data);
+        if (!TerrainHooks.dropVanillaBuffers()) {
+            return;
+        }
+        // Skipping only the glBufferData call would leave the count set for a
+        // buffer with nothing in it, and any vanilla draw that slipped through
+        // would read past the end of an empty buffer. Zeroing it first means
+        // the worst case is a chunk that draws nothing.
+        //
+        // Vanilla's whole method is these four lines: bind, upload, unbind, set
+        // the count. With the upload gone the binds have nothing to do either.
+        this.count = 0;
+        ci.cancel();
     }
 
     @Inject(method = "deleteGlBuffers", at = @At("HEAD"))

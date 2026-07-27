@@ -130,6 +130,23 @@ public final class VulkanConfig {
      * only what this renderer draws.
      */
     static final boolean DEF_DYNAMIC_LIGHTS = false;
+    /**
+     * Stop filling the game's own chunk buffers once Vulkan holds the geometry.
+     *
+     * The world is currently stored twice in video memory — once in the game's
+     * OpenGL buffers and once in the mirror this renderer draws from — and this
+     * is what removes the first copy. It also takes the second of the two
+     * uploads out of the per-frame budget vanilla reserves for them, which is
+     * the one place chunk loading is actually gated.
+     *
+     * Off by default, and for a sharper reason than novelty. Every failure path
+     * in this mod ends in "fall back to vanilla rendering", and that only works
+     * while the vanilla buffers still hold the world. With them empty, falling
+     * back would mean an invisible world — so the fallback has to rebuild the
+     * whole grid first, and that is a stutter nobody asked for on a setting
+     * they did not turn on.
+     */
+    static final boolean DEF_DROP_VANILLA_BUFFERS = false;
     static final boolean DEF_FOG = true;
     static final boolean DEF_ZOOM = true;
     /** Stored as an integer so it fits the config and the slider; 4 = quarter FOV. */
@@ -159,6 +176,7 @@ public final class VulkanConfig {
     private static boolean fastFrustumTest = DEF_FAST_FRUSTUM_TEST;
     private static boolean vulkanTranslucent = DEF_VULKAN_TRANSLUCENT;
     private static boolean dynamicLights = DEF_DYNAMIC_LIGHTS;
+    private static boolean dropVanillaBuffers = DEF_DROP_VANILLA_BUFFERS;
     private static boolean fogEnabled = DEF_FOG;
     private static boolean zoomEnabled = DEF_ZOOM;
     private static int zoomFactor = DEF_ZOOM_FACTOR;
@@ -250,6 +268,15 @@ public final class VulkanConfig {
                         + "here because the Vulkan terrain has fog and the OpenGL leftovers do "
                         + "not, so water is currently the one surface that stays clear when "
                         + "everything around it fades. Off by default while it is new.");
+        dropVanillaBuffers = config.getBoolean("dropVanillaBuffers", CATEGORY_OPTIMIZATION,
+                DEF_DROP_VANILLA_BUFFERS,
+                "Stop filling the game's own chunk buffers once Vulkan has the geometry. The world "
+                        + "is held twice in video memory today; this removes one of the copies and "
+                        + "halves what a render distance costs there. It also takes the second "
+                        + "upload out of the budget the game reserves each frame for getting "
+                        + "chunks onto the card, which is what actually limits how fast a world "
+                        + "fills in. Off by default: with those buffers empty, every fallback to "
+                        + "vanilla rendering has to rebuild the entire world first.");
         dynamicLights = config.getBoolean("dynamicLights", CATEGORY_GENERAL, DEF_DYNAMIC_LIGHTS,
                 "Let a carried torch, a dropped glowing block or a burning creature light the "
                         + "terrain around it. The light is added while the world is being shaded, "
@@ -295,6 +322,7 @@ public final class VulkanConfig {
         setFastFrustumTest(DEF_FAST_FRUSTUM_TEST);
         setVulkanTranslucent(DEF_VULKAN_TRANSLUCENT);
         setDynamicLights(DEF_DYNAMIC_LIGHTS);
+        setDropVanillaBuffers(DEF_DROP_VANILLA_BUFFERS);
         setFogEnabled(DEF_FOG);
         setZoomEnabled(DEF_ZOOM);
         setZoomFactor(DEF_ZOOM_FACTOR);
@@ -354,6 +382,15 @@ public final class VulkanConfig {
     public static void setVulkanTranslucent(boolean value) {
         vulkanTranslucent = value;
         store(CATEGORY_OPTIMIZATION, "vulkanTranslucent", value);
+    }
+
+    public static boolean isDropVanillaBuffers() {
+        return dropVanillaBuffers;
+    }
+
+    public static void setDropVanillaBuffers(boolean value) {
+        dropVanillaBuffers = value;
+        store(CATEGORY_OPTIMIZATION, "dropVanillaBuffers", value);
     }
 
     public static boolean isDynamicLights() {

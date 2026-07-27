@@ -158,8 +158,59 @@ public final class TerrainHooks {
         return "terrain: Vulkan, " + lastChunksDrawn + " chunks, frame " + framesDrawn;
     }
 
+    /**
+     * Whether the game's own chunk upload should be skipped right now.
+     *
+     * Read by the upload hook on every chunk, so it is a field rather than a
+     * chain of checks: it is settled once a frame by
+     * {@link #updateVanillaBufferDrop()}.
+     */
+    private static boolean droppingVanillaBuffers;
+
+    public static boolean dropVanillaBuffers() {
+        return droppingVanillaBuffers;
+    }
+
+    /**
+     * Turns the drop on and off, and rebuilds the world whenever it changes.
+     *
+     * This is the whole safety of the feature. Every failure path in this mod
+     * ends in falling back to vanilla rendering, which works only because the
+     * vanilla buffers hold the world; with them empty it would mean an
+     * invisible one. So the moment anything makes the Vulkan path unavailable —
+     * a failure, the setting, the terrain switch — the buffers have to be
+     * filled again, and the only way to do that is to rebuild every chunk.
+     *
+     * It runs before the guards in {@link #renderChunkLayer} on purpose:
+     * {@code broken} makes that method return early, and this is exactly the
+     * case that must not be missed.
+     */
+    private static void updateVanillaBufferDrop() {
+        boolean want = VulkanConfig.isDropVanillaBuffers()
+                && !broken
+                && terrainEnabled()
+                && !incompatibleRenderer;
+        if (want) {
+            VulkanBridge bridge = VulkanLoader.bridgeIfReady();
+            want = bridge != null && bridge.isInitialized();
+        }
+        if (want == droppingVanillaBuffers) {
+            return;
+        }
+        droppingVanillaBuffers = want;
+        Minecraft mc = Minecraft.getMinecraft();
+        if (mc.renderGlobal != null) {
+            LOGGER.info("Vanilla chunk buffers {} — rebuilding every chunk so the world stays drawn",
+                    want ? "no longer filled" : "filled again");
+            mc.renderGlobal.loadRenderers();
+        }
+    }
+
     /** Returns true when the Vulkan side took the layer and GL must skip it. */
     public static boolean renderChunkLayer(BlockRenderLayer layer, List<RenderChunk> chunks) {
+        if (layer == BlockRenderLayer.SOLID) {
+            updateVanillaBufferDrop();
+        }
         // Leaving before packChunks matters when the layer is not taken: water
         // and glass make a long chunk list at high render distances, and every
         // frame of it was walked, packed and thrown away. It also kept the

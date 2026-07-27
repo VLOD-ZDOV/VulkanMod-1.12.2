@@ -361,6 +361,33 @@ final class VulkanOptions {
                                         VulkanConfig.setNearPlaneHundredths(value);
                                     }
                                 }),
+                        new VSwitchOption("Drop Vanilla Chunk Buffers",
+                                "Stop filling the game's own chunk buffers once Vulkan has the "
+                                        + "geometry. The world is currently held twice in video "
+                                        + "memory, once for each renderer, and this removes one of "
+                                        + "the copies — the single largest saving there is at high "
+                                        + "render distances. It also takes the second upload out "
+                                        + "of the budget the game reserves each frame for getting "
+                                        + "chunks onto the card, which is what really decides how "
+                                        + "fast a world fills in around you. Off by default for a "
+                                        + "specific reason: everything in this mod falls back to "
+                                        + "vanilla rendering when something goes wrong, and that "
+                                        + "works because those buffers hold the world. With them "
+                                        + "empty, falling back has to rebuild every chunk first, "
+                                        + "which it will do — but it is a pause, and one you "
+                                        + "should have chosen.",
+                                Cost.of(Level.NONE, Level.NONE, Level.NONE), null,
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return VulkanConfig.isDropVanillaBuffers();
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        VulkanConfig.setDropVanillaBuffers(value);
+                                    }
+                                }),
                         new VSwitchOption("Vulkan Water and Glass",
                                 "Draw the translucent layer in Vulkan instead of leaving it to "
                                         + "OpenGL. Not a speed setting — measured, that layer is "
