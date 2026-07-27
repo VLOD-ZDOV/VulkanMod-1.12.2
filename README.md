@@ -17,7 +17,7 @@ This is not yet a complete replacement for the modern VulkanMod renderer.
 ## Current limits
 
 - The world's geometry exists twice while this is enabled: once in the game's own OpenGL buffers and once in the Vulkan mirror. On a card with little memory to spare that is what caps the usable render distance, and it depends on how much geometry is actually in view rather than on the distance setting alone. The settings header shows the memory the GPU reports, and the diagnostics log shows what the mirror is using.
-- Chunk building and uploading dominate the frame while the camera moves at high render distances. Every chunk is uploaded twice — once by the game to OpenGL, once here to Vulkan.
+- Chunk building and uploading dominate the frame while the camera moves at high render distances. Every chunk is still uploaded twice — once by the game to OpenGL, once here to Vulkan — but this mod's copy now happens on the thread that built the chunk rather than on the thread that draws, so it no longer competes for the per-frame upload budget the game runs on the render thread.
 - Translucent terrain, entities, particles, the sky and the GUI are still drawn by vanilla OpenGL.
 
 ## Requirements

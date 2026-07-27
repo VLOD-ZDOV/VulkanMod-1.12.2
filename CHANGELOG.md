@@ -1,5 +1,21 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **Chunk Build Threads** (Advanced), default 0 for vanilla behaviour. Vanilla sizes its chunk builder pool from the heap rather than from the processor: `threads = clamp(cores, 1, (maxMemory * 0.3 / 10 MiB) / 5)`, which on a 4 GiB heap caps out at 21 no matter how many cores are present. The setting overrides the cap. Measured honestly, it did not buy frames — +11% peak upload rate for +52% threads, and no change in the framerate — so it ships off by default; chunk building was not the bottleneck. It is kept because the heap ceiling bites hardest exactly where it is least expected, on a machine with many cores and a small heap.
+
+### Performance
+
+- The mirror copy now happens on the thread that built the chunk instead of the thread that draws. Vanilla gives chunk uploads a hard budget of a quarter of a frame minus whatever the frame has already spent, and runs them on the render thread because they need the OpenGL context. This mod's half of the work needs neither OpenGL nor a driver call — it is a memcpy into mapped staging — but it rode along on that same thread, so the budget drained twice as fast as vanilla alone. Builder threads now reserve a range in their own half of the staging ring and copy there directly; the render thread picks up the finished copy. No Vulkan call is made off the render thread, because the queue and the command pool belong to it and are not thread-safe. Measured flying into unexplored terrain at render distance 64: **97.4% of 29 940 uploads copied off the render thread, none refused.**
+- The mirror is keyed by a dense slot number carried on the chunk's own vertex buffer instead of by its OpenGL buffer name. The old index held an entry for every live buffer, and the game keeps one per layer for every render chunk in the grid — hundreds of thousands at high render distances — so every lookup reached into a random place in a very large array. Command recording for a frame dropped from 0.19–0.21 ms to 0.11 ms at around 10 500 chunks. That is a tenth of a millisecond in a frame of several, so the real value is that it unblocks the change above: on a builder thread the OpenGL name does not exist yet, but the slot does.
+
+### Fixed
+
+- The mod no longer loads its isolated LWJGL 3 runtime on a Java version it has not been built against, and it no longer scans the game's classpath for LWJGL when it ships its own. LWJGL 3.3 installs its OpenGL function tables by patching the JVM's JNI function table and only knows the layout of JVMs it has seen. On a newer one it prints `Unsupported JVM detected` and then keeps running with a corrupted table: OpenGL calls start returning their own arguments instead of results, and the process dies seconds later anywhere at all. The failure looks like a broken graphics driver, which is why it is worth naming here.
+- Interop now says which of the two device checks failed — a genuine mismatch between the OpenGL and Vulkan GPUs, or an inability to read the driver UUID at all. They need different answers from the user and used to produce the same message.
+
 ## [0.5.0] - 2026-07-26
 
 ### Added
