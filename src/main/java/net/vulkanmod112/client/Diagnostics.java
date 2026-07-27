@@ -145,6 +145,35 @@ public final class Diagnostics {
         }
     }
 
+    /**
+     * The counters the F3 overlay shows, taken from the same methods it calls.
+     *
+     * These were missing, and their absence cost a day. A frame breakdown says
+     * how much of the frame this mod accounts for; when the answer came back
+     * "four percent", there was nothing in the report to say what the other
+     * ninety-six were doing. The entity line is the one that matters most: at
+     * render distance 64 the integrated server keeps a very large number of
+     * chunks loaded, and whether the client walks all of their entities every
+     * frame is a question these numbers answer directly.
+     *
+     * Every call here is one the game itself makes each frame while F3 is held,
+     * so none of it is work the game would not otherwise do.
+     */
+    private static void writeVanillaCounters(PrintWriter out, Minecraft mc) {
+        if (mc.world == null || mc.renderGlobal == null) {
+            return;
+        }
+        try {
+            out.println("  f3 chunks: " + mc.renderGlobal.getDebugInfoRenders());
+            out.println("  f3 entities: " + mc.renderGlobal.getDebugInfoEntities());
+            out.println("  f3 particles/tiles: P: " + mc.effectRenderer.getStatistics()
+                    + ". T: " + mc.world.getDebugLoadedEntities());
+            out.println("  f3 world: " + mc.world.getProviderName());
+        } catch (Throwable t) {
+            out.println("  f3: unavailable (" + t + ")");
+        }
+    }
+
     private static void writeSnapshot(PrintWriter out) {
         Minecraft mc = Minecraft.getMinecraft();
         out.println("[" + STAMP.format(new Date()) + "] snapshot");
@@ -153,6 +182,7 @@ public final class Diagnostics {
                 + ", gui: " + (mc.currentScreen == null ? "none" : mc.currentScreen.getClass().getSimpleName()));
         out.println("  " + TerrainHooks.stats());
         out.println("  " + TerrainHooks.vanillaLayerStats());
+        writeVanillaCounters(out, mc);
 
         VulkanBridge bridge = VulkanLoader.bridgeIfReady();
         if (bridge == null || !bridge.isInitialized()) {
