@@ -98,7 +98,7 @@ public final class VulkanConfig {
      * from the camera moving, which is exactly when the answer has changed. What
      * is left is to do the same work without allocating for it.
      */
-    static final boolean DEF_OWN_VISIBILITY_WALK = false;
+    static final boolean DEF_OWN_VISIBILITY_WALK = true;
     /**
      * Test boxes against the frustum by their far corner. On by default: the
      * answer is the same one vanilla computes, by the same arithmetic, for

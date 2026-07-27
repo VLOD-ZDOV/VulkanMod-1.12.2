@@ -8,7 +8,7 @@ rather than crashing.
 
 ## Done
 
-### 0.6.0 — in development
+### 0.6.0
 
 - **Water and glass drawn in Vulkan.** They now get fog like everything else.
 - **Dynamic lights.** A carried torch, a dropped glowing block or a burning mob lights the world
@@ -16,8 +16,8 @@ rather than crashing.
 - **Vanilla chunk buffers can be dropped.** The world is then stored once in video memory instead
   of twice. Off by default.
 - **Own visibility search.** The game's own search for which chunks are on screen is a quarter to
-  a half of the whole frame at high render distances; this replaces it with one that does not
-  chase pointers. Off by default.
+  a half of the whole frame at high render distances; this replaces it with one that reads flat
+  arrays instead of chasing pointers. On by default.
 - **Snow and slabs no longer speckle at a distance**, through a nearer clipping plane.
 - Faster on-screen test for chunks.
 - Chunk copies happen on the threads that build chunks, not on the one that draws.
