@@ -182,6 +182,7 @@ public final class Diagnostics {
                 + ", gui: " + (mc.currentScreen == null ? "none" : mc.currentScreen.getClass().getSimpleName()));
         out.println("  " + TerrainHooks.stats());
         out.println("  " + TerrainHooks.vanillaLayerStats());
+        out.println("  " + VanillaFrame.stats());
         writeVanillaCounters(out, mc);
 
         VulkanBridge bridge = VulkanLoader.bridgeIfReady();
