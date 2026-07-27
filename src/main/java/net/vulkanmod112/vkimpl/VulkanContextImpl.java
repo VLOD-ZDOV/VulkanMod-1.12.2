@@ -55,6 +55,8 @@ public final class VulkanContextImpl implements VulkanBridge {
     private String gpuSummary = "Vulkan not initialized";
     /** Total device-local memory, filled in when the GPU is selected. */
     private int vramMegabytes;
+    /** Whether the driver can report per-heap usage and budget (VK_EXT_memory_budget). */
+    private boolean memoryBudgetSupported;
     private VkDemoRenderer demoRenderer;
     private VkInteropRenderer interopRenderer;
     /**
@@ -238,6 +240,36 @@ public final class VulkanContextImpl implements VulkanBridge {
     /** Device extensions needed to share images and semaphores with OpenGL (platform specific). */
     private static final String[] INTEROP_EXTENSIONS = Interop.deviceExtensions();
 
+    /** Lets the driver tell us how much of each heap it considers spoken for. */
+    private static final String MEMORY_BUDGET_EXTENSION =
+            org.lwjgl.vulkan.EXTMemoryBudget.VK_EXT_MEMORY_BUDGET_EXTENSION_NAME;
+
+    /** Whatever of the above the driver actually offers; missing ones are simply not asked for. */
+    private String[] deviceExtensionsToEnable() {
+        java.util.List<String> names = new java.util.ArrayList<>();
+        if (interopCapable) {
+            java.util.Collections.addAll(names, INTEROP_EXTENSIONS);
+        }
+        if (memoryBudgetSupported) {
+            names.add(MEMORY_BUDGET_EXTENSION);
+        }
+        return names.toArray(new String[0]);
+    }
+
+    private boolean hasDeviceExtension(MemoryStack stack, String name) {
+        IntBuffer count = stack.mallocInt(1);
+        vkEnumerateDeviceExtensionProperties(physicalDevice, (String) null, count, null);
+        org.lwjgl.vulkan.VkExtensionProperties.Buffer available =
+                org.lwjgl.vulkan.VkExtensionProperties.malloc(count.get(0), stack);
+        vkEnumerateDeviceExtensionProperties(physicalDevice, (String) null, count, available);
+        for (int i = 0; i < available.capacity(); i++) {
+            if (name.equals(available.get(i).extensionNameString())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private boolean hasInteropExtensions(MemoryStack stack) {
         IntBuffer count = stack.mallocInt(1);
         vkEnumerateDeviceExtensionProperties(physicalDevice, (String) null, count, null);
@@ -267,16 +299,27 @@ public final class VulkanContextImpl implements VulkanBridge {
                     .pQueueCreateInfos(queueInfo);
 
             this.interopCapable = hasInteropExtensions(stack);
-            if (interopCapable) {
-                PointerBuffer extensions = stack.mallocPointer(INTEROP_EXTENSIONS.length);
-                for (int i = 0; i < INTEROP_EXTENSIONS.length; i++) {
-                    extensions.put(i, memAddress(stack.UTF8(INTEROP_EXTENSIONS[i])));
-                }
-                deviceInfo.ppEnabledExtensionNames(extensions);
-                LOGGER.info("External memory extensions enabled for OpenGL interop");
-            } else {
+            if (!interopCapable) {
                 LOGGER.warn("Driver lacks {} — zero-copy GL interop unavailable",
                         java.util.Arrays.toString(INTEROP_EXTENSIONS));
+            }
+            // Purely diagnostic, and only worth asking for on Vulkan 1.1, where
+            // the query it feeds is core. Knowing how close the driver thinks it
+            // is to the edge is the difference between diagnosing an eviction
+            // stall and guessing at one.
+            this.memoryBudgetSupported = pickApiVersion() >= org.lwjgl.vulkan.VK11.VK_API_VERSION_1_1
+                    && hasDeviceExtension(stack, MEMORY_BUDGET_EXTENSION);
+
+            String[] wanted = deviceExtensionsToEnable();
+            if (wanted.length != 0) {
+                PointerBuffer extensions = stack.mallocPointer(wanted.length);
+                for (int i = 0; i < wanted.length; i++) {
+                    extensions.put(i, memAddress(stack.UTF8(wanted[i])));
+                }
+                deviceInfo.ppEnabledExtensionNames(extensions);
+            }
+            if (interopCapable) {
+                LOGGER.info("External memory extensions enabled for OpenGL interop");
             }
 
             PointerBuffer pDevice = stack.mallocPointer(1);
@@ -385,6 +428,7 @@ public final class VulkanContextImpl implements VulkanBridge {
                 .append(System.getProperty("vulkanmod112.geometryBudget", "0"))
                 .append(" (0 = auto), frames in flight setting ")
                 .append(System.getProperty("vulkanmod112.framesInFlight", "2")).append('\n');
+        appendMemoryBudget(sb);
         sb.append("  interop: ").append(interopCapable ? "external memory/semaphores enabled" : "UNAVAILABLE")
                 .append(", handles: ").append(Interop.WINDOWS ? "win32" : "fd").append('\n');
         sb.append("  mirror: ").append(chunkMirror != null ? chunkMirror.stats() : "not created").append('\n');
@@ -394,6 +438,52 @@ public final class VulkanContextImpl implements VulkanBridge {
             sb.append("  terrain: renderer not created\n");
         }
         return sb.toString();
+    }
+
+    /**
+     * Per-heap "how much is spoken for" against "how much you may have", as the
+     * driver sees it — which is not the same as what this process allocated,
+     * because everything else on the desktop shares the card.
+     *
+     * This exists to answer one question a frame breakdown cannot: a session
+     * dropped to 5 fps for half a minute on a scene that was not moving, with
+     * GPU time per frame rising tenfold, and eviction to system memory is a
+     * candidate we had no way to confirm or rule out. Usage crossing the budget
+     * is what that looks like from here.
+     */
+    private void appendMemoryBudget(StringBuilder sb) {
+        if (!memoryBudgetSupported) {
+            return;
+        }
+        try (MemoryStack stack = stackPush()) {
+            org.lwjgl.vulkan.VkPhysicalDeviceMemoryBudgetPropertiesEXT budget =
+                    org.lwjgl.vulkan.VkPhysicalDeviceMemoryBudgetPropertiesEXT.calloc(stack)
+                            .sType(org.lwjgl.vulkan.EXTMemoryBudget
+                                    .VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT);
+            org.lwjgl.vulkan.VkPhysicalDeviceMemoryProperties2 props2 =
+                    org.lwjgl.vulkan.VkPhysicalDeviceMemoryProperties2.calloc(stack)
+                            .sType(org.lwjgl.vulkan.VK11.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2)
+                            .pNext(budget.address());
+            org.lwjgl.vulkan.VK11.vkGetPhysicalDeviceMemoryProperties2(physicalDevice, props2);
+
+            VkPhysicalDeviceMemoryProperties memProps = props2.memoryProperties();
+            for (int i = 0; i < memProps.memoryHeapCount(); i++) {
+                if ((memProps.memoryHeaps(i).flags() & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) == 0) {
+                    continue;
+                }
+                long usedMiB = budget.heapUsage(i) / (1024 * 1024);
+                long budgetMiB = budget.heapBudget(i) / (1024 * 1024);
+                sb.append("  vram heap ").append(i).append(": ").append(usedMiB)
+                        .append(" MiB in use of ").append(budgetMiB).append(" MiB the driver allows");
+                if (budgetMiB > 0 && usedMiB > budgetMiB) {
+                    sb.append(" — OVER BUDGET, the driver may be evicting to system memory");
+                }
+                sb.append(" (whole system, not just this game)\n");
+            }
+        } catch (Throwable t) {
+            // A diagnostics line is never worth failing a report over.
+            sb.append("  vram heap: budget query failed (").append(t).append(")\n");
+        }
     }
 
     @Override

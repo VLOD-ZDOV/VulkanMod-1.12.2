@@ -170,6 +170,8 @@ final class VkTerrainRenderer {
             + (long) INITIAL_INDIRECT_DRAWS * DRAW_COMMAND_BYTES;
     /** Largest layer of the previous frame; the batch is grown to fit it. */
     private int peakDrawsNeeded;
+    /** Whether the indirect batches landed in BAR memory; diagnostics only. */
+    private boolean indirectMemoryIsDeviceLocal;
     /** Per-layer lookup results, reused across frames. */
     private VkChunkMirror.Entry[] lookupScratch = new VkChunkMirror.Entry[INITIAL_INDIRECT_DRAWS];
     private long pipelineLayout;
@@ -459,7 +461,8 @@ final class VkTerrainRenderer {
                 .append("; the game recomputes it once a tick, so ~20/s is expected\n");
         sb.append("  index buffer: ").append(quadIndexCapacityQuads).append(" quads")
                 .append(", draw batch ").append(indirectDrawCapacity)
-                .append(", frames in flight ").append(framesInFlight).append('\n');
+                .append(" in ").append(indirectMemoryIsDeviceLocal ? "BAR (device-local)" : "host")
+                .append(" memory, frames in flight ").append(framesInFlight).append('\n');
         if (glErrorLogged) {
             sb.append("  WARNING: a GL error was reported during composite (see the main log)\n");
         }
@@ -1155,6 +1158,25 @@ final class VkTerrainRenderer {
         descriptorSet = drawDescriptorSets[0];
     }
 
+    /**
+     * Allocates the per-frame, per-layer indirect batches.
+     *
+     * The GPU reads both halves of every batch on each frame: the vertex shader
+     * fetches a chunk origin per draw, and the command processor fetches the
+     * draw commands themselves. Left in ordinary host memory, that is thousands
+     * of small reads across PCIe every frame, and it competes with chunk
+     * geometry streaming over the same bus.
+     *
+     * So we ask for memory that is device-local *and* host-visible — the BAR
+     * window, present on any card with resizable BAR and on integrated GPUs by
+     * definition — and fall back to plain host-visible memory where the driver
+     * does not expose such a type. Both are written the same way, so the
+     * fallback costs nothing but the bandwidth it was going to cost anyway.
+     *
+     * What this memory is bad at is being read back: it is uncached on the CPU
+     * side. Nothing on the frame path reads it; {@code logDrawInputs} does, on
+     * two frames of a session, and that is why it stays a diagnostic.
+     */
     private void createDrawBatches(MemoryStack stack) {
         for (int i = 0; i < drawBatchBuffers.length; i++) {
             VkBufferCreateInfo info = VkBufferCreateInfo.calloc(stack)
@@ -1167,13 +1189,34 @@ final class VkTerrainRenderer {
             drawBatchBuffers[i] = pBuffer.get(0);
             VkMemoryRequirements req = VkMemoryRequirements.malloc(stack);
             vkGetBufferMemoryRequirements(device(), drawBatchBuffers[i], req);
-            VkMemoryAllocateInfo alloc = VkMemoryAllocateInfo.calloc(stack)
-                    .sType(VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO)
-                    .allocationSize(req.size())
-                    .memoryTypeIndex(findMemoryType(stack, req.memoryTypeBits(),
-                            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT));
+            int hostVisible = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+            int barType = findMemoryTypeOrNone(stack, req.memoryTypeBits(),
+                    hostVisible | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
             LongBuffer pMemory = stack.mallocLong(1);
-            check(vkAllocateMemory(device(), alloc, null, pMemory), "vkAllocateMemory(indirect terrain)");
+            boolean deviceLocal = false;
+            if (barType >= 0 && (i == 0 || indirectMemoryIsDeviceLocal)) {
+                VkMemoryAllocateInfo alloc = VkMemoryAllocateInfo.calloc(stack)
+                        .sType(VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO)
+                        .allocationSize(req.size())
+                        .memoryTypeIndex(barType);
+                // Without resizable BAR this window is 256 MiB for the whole
+                // system, so a driver saying no here is an ordinary outcome and
+                // not an error. Host memory still works; it is only slower.
+                deviceLocal = vkAllocateMemory(device(), alloc, null, pMemory) == VK_SUCCESS;
+                if (!deviceLocal && i == 0) {
+                    LOGGER.info("Indirect batches did not fit in BAR memory; using host memory");
+                }
+            }
+            if (!deviceLocal) {
+                VkMemoryAllocateInfo alloc = VkMemoryAllocateInfo.calloc(stack)
+                        .sType(VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO)
+                        .allocationSize(req.size())
+                        .memoryTypeIndex(findMemoryType(stack, req.memoryTypeBits(), hostVisible));
+                check(vkAllocateMemory(device(), alloc, null, pMemory), "vkAllocateMemory(indirect terrain)");
+            }
+            // One batch falling back means the window is full; report the whole
+            // set as host memory and stop asking for the rest.
+            indirectMemoryIsDeviceLocal = deviceLocal && (i == 0 || indirectMemoryIsDeviceLocal);
             drawBatchMemories[i] = pMemory.get(0);
             check(vkBindBufferMemory(device(), drawBatchBuffers[i], drawBatchMemories[i], 0),
                     "vkBindBufferMemory(indirect terrain)");
@@ -1236,9 +1279,9 @@ final class VkTerrainRenderer {
             }
             vkUpdateDescriptorSets(device(), writes, null);
         }
-        LOGGER.info("Indirect draw batches grown to {} draws ({} MiB across {} batches)",
+        LOGGER.info("Indirect draw batches grown to {} draws ({} MiB across {} batches, {} memory)",
                 target, String.format("%.1f", drawBatchBytes * drawBatchBuffers.length / (1024.0 * 1024.0)),
-                drawBatchBuffers.length);
+                drawBatchBuffers.length, indirectMemoryIsDeviceLocal ? "BAR" : "host");
     }
 
     private void updateDescriptors() {
@@ -2110,6 +2153,15 @@ final class VkTerrainRenderer {
     }
 
     private int findMemoryType(MemoryStack stack, int typeBits, int properties) {
+        int type = findMemoryTypeOrNone(stack, typeBits, properties);
+        if (type < 0) {
+            throw new IllegalStateException("No suitable memory type");
+        }
+        return type;
+    }
+
+    /** Same, but returns -1 instead of throwing, for properties that are a preference. */
+    private int findMemoryTypeOrNone(MemoryStack stack, int typeBits, int properties) {
         VkPhysicalDeviceMemoryProperties memProps = VkPhysicalDeviceMemoryProperties.malloc(stack);
         vkGetPhysicalDeviceMemoryProperties(device().getPhysicalDevice(), memProps);
         for (int i = 0; i < memProps.memoryTypeCount(); i++) {
@@ -2118,7 +2170,7 @@ final class VkTerrainRenderer {
                 return i;
             }
         }
-        throw new IllegalStateException("No suitable memory type");
+        return -1;
     }
 
     private long createShaderModule(MemoryStack stack, String resource) {
