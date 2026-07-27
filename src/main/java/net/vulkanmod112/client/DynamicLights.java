@@ -58,6 +58,31 @@ public final class DynamicLights {
     private static double originY;
     private static double originZ;
 
+    /**
+     * What the first-person light map hook actually did, recorded where it
+     * happens rather than inferred from somewhere else.
+     *
+     * The held torch model stays dark, and the number reached for as evidence
+     * was "level at camera", which is computed here by a separate call and says
+     * only that a source was found nearby. It cannot say whether the hook ran
+     * or what it returned, and treating it as if it could is how a wrong
+     * conclusion gets built on a real number.
+     */
+    private static long heldRaised;
+    private static long heldUnchanged;
+    private static int heldLastBefore = -1;
+    private static int heldLastAfter = -1;
+
+    public static void recordHeldItemLight(int before, int after) {
+        heldLastBefore = before;
+        heldLastAfter = after;
+        if (after != before) {
+            heldRaised++;
+        } else {
+            heldUnchanged++;
+        }
+    }
+
     private static long gathered;
     private static long scanned;
     private static long frames;
@@ -278,10 +303,17 @@ public final class DynamicLights {
                 "dynamic lights: %.1f sources per frame from %.0f entities scanned over %d frames, "
                         + "level at camera %d",
                 gathered / (double) frames, scanned / (double) frames, frames,
-                levelAt(originX, originY, originZ));
+                levelAt(originX, originY, originZ))
+                + String.format("; held item hook raised %d, unchanged %d, last %d -> %d "
+                        + "(block light %d -> %d)",
+                        heldRaised, heldUnchanged, heldLastBefore, heldLastAfter,
+                        heldLastBefore < 0 ? -1 : (heldLastBefore >> 4) & 0xF,
+                        heldLastAfter < 0 ? -1 : (heldLastAfter >> 4) & 0xF);
         gathered = 0L;
         scanned = 0L;
         frames = 0L;
+        heldRaised = 0L;
+        heldUnchanged = 0L;
         return line;
     }
 }

@@ -36,7 +36,11 @@ public abstract class HeldItemLightMixin {
         if (mc.player == null) {
             return packed;
         }
-        return DynamicLights.applyTo(packed, mc.player.posX,
+        int raised = DynamicLights.applyTo(packed, mc.player.posX,
                 mc.player.posY + mc.player.getEyeHeight(), mc.player.posZ);
+        // Recorded here, at the only place that knows both what the game asked
+        // for and what it was given.
+        DynamicLights.recordHeldItemLight(packed, raised);
+        return raised;
     }
 }
