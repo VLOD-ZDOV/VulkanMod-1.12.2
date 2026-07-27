@@ -15,6 +15,7 @@
     "ChunkBuildThreadsMixin",
     "ChunkUploadMixin",
     "VanillaFrameMixin",
-    "VisibilityWalkMixin"
+    "VisibilityWalkMixin",
+    "NearPlaneMixin"
   ]
 }

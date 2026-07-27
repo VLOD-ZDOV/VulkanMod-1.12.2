@@ -312,6 +312,31 @@ final class VulkanOptions {
                                         VulkanConfig.setVisibilityWalkInterval(value);
                                     }
                                 }),
+                        new VRangeOption("Near Clipping Plane",
+                                "How close to the eye the world starts being drawn, in hundredths of "
+                                        + "a block. Vanilla uses 5, and that is what makes distant "
+                                        + "snow speckle grey and sand through the white: the depth "
+                                        + "buffer's precision falls off with the square of distance "
+                                        + "divided by this number, and three hundred blocks out it "
+                                        + "can no longer separate a snow layer from the block under "
+                                        + "it, whose top face is still drawn. 20 puts the resolvable "
+                                        + "gap comfortably under that. The price is that anything "
+                                        + "closer to the eye than this is clipped away, so with your "
+                                        + "head inside a block a large value can open a hole in it. "
+                                        + "Vanilla is the default.",
+                                Cost.of(Level.NONE, Level.NONE, Level.NONE), null,
+                                0, 50, 1, "/100 block", "Vanilla (5)",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getNearPlaneHundredths();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setNearPlaneHundredths(value);
+                                    }
+                                }),
                         new VSwitchOption("Preload Offscreen Chunks",
                                 "Let chunks behind you be built too. Vanilla only ever schedules "
                                         + "chunks that are on screen right now, so at high render "

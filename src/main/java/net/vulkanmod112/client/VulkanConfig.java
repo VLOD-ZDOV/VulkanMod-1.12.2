@@ -64,6 +64,15 @@ public final class VulkanConfig {
      * building may wait up to this long before it is drawn.
      */
     static final int DEF_VISIBILITY_WALK_INTERVAL = 0;
+    /**
+     * Near clipping plane in hundredths of a block; 0 keeps vanilla's 0.05.
+     *
+     * Depth precision at a distance z is roughly {@code z² / (near · 2²⁴)} with
+     * the 24-bit buffer the game uses. At vanilla's 0.05 that is 0.107 blocks
+     * three hundred out — wider than the 0.125 a snow layer sits above what it
+     * covers, which is why distant snow speckles with the block underneath.
+     */
+    static final int DEF_NEAR_PLANE_HUNDREDTHS = 0;
     static final boolean DEF_FOG = true;
     static final boolean DEF_ZOOM = true;
     /** Stored as an integer so it fits the config and the slider; 4 = quarter FOV. */
@@ -87,6 +96,7 @@ public final class VulkanConfig {
     private static boolean chunkPreloadEnabled = DEF_CHUNK_PRELOAD;
     private static int chunkBuildThreads = DEF_CHUNK_BUILD_THREADS;
     private static int visibilityWalkInterval = DEF_VISIBILITY_WALK_INTERVAL;
+    private static int nearPlaneHundredths = DEF_NEAR_PLANE_HUNDREDTHS;
     private static boolean fogEnabled = DEF_FOG;
     private static boolean zoomEnabled = DEF_ZOOM;
     private static int zoomFactor = DEF_ZOOM_FACTOR;
@@ -140,6 +150,12 @@ public final class VulkanConfig {
                         + "the frame; while a world fills in, the game repeats it every frame even with "
                         + "the camera perfectly still. 0 leaves vanilla alone. A finished chunk may wait "
                         + "up to this long before it appears.");
+        nearPlaneHundredths = config.getInt("nearPlaneHundredths", CATEGORY_OPTIMIZATION,
+                DEF_NEAR_PLANE_HUNDREDTHS, 0, 50,
+                "Near clipping plane in hundredths of a block. 0 keeps vanilla's 0.05, which at long "
+                        + "render distances leaves the depth buffer unable to separate a snow layer "
+                        + "from the block under it. Larger values fix that and clip geometry very "
+                        + "close to the eye, which can open a hole when the head is inside a block.");
         fogEnabled = config.getBoolean("fog", CATEGORY_GENERAL, DEF_FOG,
                 "Fade Vulkan terrain into the distance the way the rest of the scene already does. "
                         + "Off leaves the world ending in a hard edge, which is a little faster.");
@@ -172,6 +188,7 @@ public final class VulkanConfig {
         setChunkPreloadEnabled(DEF_CHUNK_PRELOAD);
         setChunkBuildThreads(DEF_CHUNK_BUILD_THREADS);
         setVisibilityWalkInterval(DEF_VISIBILITY_WALK_INTERVAL);
+        setNearPlaneHundredths(DEF_NEAR_PLANE_HUNDREDTHS);
         setFogEnabled(DEF_FOG);
         setZoomEnabled(DEF_ZOOM);
         setZoomFactor(DEF_ZOOM_FACTOR);
@@ -194,6 +211,16 @@ public final class VulkanConfig {
     public static void setVisibilityWalkInterval(int value) {
         visibilityWalkInterval = value;
         store(CATEGORY_OPTIMIZATION, "visibilityWalkInterval", value);
+    }
+
+    /** Near plane in hundredths of a block; 0 leaves vanilla's 0.05 alone. */
+    public static int getNearPlaneHundredths() {
+        return nearPlaneHundredths;
+    }
+
+    public static void setNearPlaneHundredths(int value) {
+        nearPlaneHundredths = value;
+        store(CATEGORY_OPTIMIZATION, "nearPlaneHundredths", value);
     }
 
     /** Configured thread count, or 0 to leave vanilla's own choice alone. */
