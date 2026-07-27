@@ -1,11 +1,19 @@
 #version 450
 
-layout(push_constant) uniform PC {
+// Everything that is the same for a whole frame. Kept in a buffer rather than
+// in push constants, which the matrix and the fog between them had filled to
+// 96 of the 128 bytes Vulkan guarantees — with nothing left for anything else
+// to be given to the shaders at all.
+layout(set = 0, binding = 3, std140) uniform Frame {
     mat4 mvp;
-    vec4 offsetAndCutoff; // xyz = chunk origin - view pos, w = alpha cutoff
-    vec4 fogColor;        // rgb = colour, a = mode: 0 off, 1 linear, 2 exp, 3 exp2
-    vec4 fogParams;       // x = start, y = end, z = density
-} pc;
+    vec4 fogColor;  // rgb = colour, a = mode: 0 off, 1 linear, 2 exp, 3 exp2
+    vec4 fogParams; // x = start, y = end, z = density
+} frame;
+
+// What actually differs between draws.
+layout(push_constant) uniform Draw {
+    vec4 params; // x = alpha cutoff
+} draw;
 
 layout(location = 0) in vec3 inPos;
 layout(location = 1) in vec4 inColor;
@@ -18,6 +26,7 @@ layout(location = 0) out vec4 vColor;
 layout(location = 1) out vec2 vUV;
 layout(location = 2) out vec2 vLight;
 layout(location = 3) out float vDistance;
+layout(location = 4) out vec3 vRelative;
 
 void main() {
     // Every indirect command has exactly one instance; firstInstance is the
@@ -25,9 +34,12 @@ void main() {
     // That origin is already relative to the camera, so the sum below is the
     // position in eye space and its length is the distance fog needs.
     vec3 relative = inPos + chunkOffsets.origins[gl_InstanceIndex].xyz;
-    gl_Position = pc.mvp * vec4(relative, 1.0);
+    gl_Position = frame.mvp * vec4(relative, 1.0);
     vColor = inColor;
     vUV = inUV;
     vLight = (inLight + 8.0) / 256.0;
     vDistance = length(relative);
+    // Camera-relative world position, which is what anything positional in the
+    // fragment stage needs and what the fog distance is already derived from.
+    vRelative = relative;
 }

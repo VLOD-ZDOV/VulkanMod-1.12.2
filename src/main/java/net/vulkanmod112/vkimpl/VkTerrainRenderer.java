@@ -195,6 +195,27 @@ final class VkTerrainRenderer {
     private long lightmapImage;
     private long lightmapMemory;
     private long lightmapView;
+    /**
+     * Per-frame shader constants: the view-projection matrix and the fog the
+     * game set up, one buffer per frame in flight and permanently mapped.
+     *
+     * These used to be push constants, which put them at 96 of the 128 bytes
+     * Vulkan guarantees — with a 16-byte draw parameter on top, that was the
+     * room gone. Nothing further could be given to the shaders at all, and
+     * everything this version is meant to add needs exactly that. They are also
+     * per frame rather than per draw, so pushing them was work repeated for
+     * every layer to say the same thing.
+     *
+     * The write happens while recording the frame that will read it, and the
+     * slot's fence has already been waited on by then, so no frame still in
+     * flight can be reading the bytes being overwritten.
+     */
+    private final long[] frameUniformBuffers = new long[framesInFlight];
+    private final long[] frameUniformMemories = new long[framesInFlight];
+    private final long[] frameUniformMapped = new long[framesInFlight];
+    /** mat4 mvp + vec4 fogColor + vec4 fogParams, padded to a round size. */
+    private static final int FRAME_UNIFORM_BYTES = 256;
+
     private final long[] lightmapStagingBuffer = new long[framesInFlight];
     private final long[] lightmapStagingMemory = new long[framesInFlight];
     private final long[] lightmapStagingMapped = new long[framesInFlight];
@@ -618,21 +639,10 @@ final class VkTerrainRenderer {
                     0, stack.longs(descriptorSet), null);
             vkCmdBindIndexBuffer(commandBuffer, quadIndexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
-            // The MVP is identical for every chunk and layer: push it once
-            ByteBuffer mvpPush = stack.malloc(64);
-            for (int i = 0; i < 16; i++) {
-                mvpPush.putFloat(i * 4, mvp[i]);
-            }
-            vkCmdPushConstants(commandBuffer, pipelineLayout,
-                    VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, mvpPush);
-
-            // Fog is constant across the frame; push it once alongside the MVP.
-            ByteBuffer fogPush = stack.malloc(32);
-            for (int i = 0; i < 8; i++) {
-                fogPush.putFloat(i * 4, fogState[i]);
-            }
-            vkCmdPushConstants(commandBuffer, pipelineLayout,
-                    VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 80, fogPush);
+            // The matrix and the fog are the same for every chunk and every
+            // layer, so they live in this frame's uniform buffer rather than
+            // being pushed again for each of them.
+            writeFrameUniforms(mvp, fogState);
 
             // Standard (y-down) viewport: the GL-sourced matrices produce a
             // vertically flipped image in Vulkan's convention, which is
@@ -655,11 +665,12 @@ final class VkTerrainRenderer {
         try (MemoryStack stack = stackPush()) {
             vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                     pipelines[layerOrdinal == 0 ? 0 : 1]);
-            // Cutoff changes per layer; per-chunk origins are fetched by the vertex shader.
-            ByteBuffer cutoffPush = stack.malloc(4);
-            cutoffPush.putFloat(0, cutoff);
+            // The only thing left that changes between draws. Per-chunk origins
+            // are fetched by the vertex shader from the storage buffer.
+            ByteBuffer drawPush = stack.calloc(16);
+            drawPush.putFloat(0, cutoff);
             vkCmdPushConstants(commandBuffer, pipelineLayout,
-                    VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 76, cutoffPush);
+                    VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, drawPush);
             LongBuffer pBuffer = stack.longs(mirror.geometryBuffer());
             LongBuffer pOffset = stack.longs(0L);
             // All chunks are suballocations of this one device-local buffer.
@@ -1112,7 +1123,9 @@ final class VkTerrainRenderer {
         check(vkCreateSampler(device(), samplerInfo, null, pSampler), "vkCreateSampler(lightmap)");
         lightmapSampler = pSampler.get(0);
 
-        VkDescriptorSetLayoutBinding.Buffer bindings = VkDescriptorSetLayoutBinding.calloc(3, stack);
+        createFrameUniforms(stack);
+
+        VkDescriptorSetLayoutBinding.Buffer bindings = VkDescriptorSetLayoutBinding.calloc(4, stack);
         bindings.get(0).binding(0)
                 .descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
                 .descriptorCount(1)
@@ -1125,6 +1138,12 @@ final class VkTerrainRenderer {
                 .descriptorType(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
                 .descriptorCount(1)
                 .stageFlags(VK_SHADER_STAGE_VERTEX_BIT);
+        // The frame's matrix is wanted in the vertex stage and its fog in the
+        // fragment stage, so this one is visible to both.
+        bindings.get(3).binding(3)
+                .descriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
+                .descriptorCount(1)
+                .stageFlags(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
         VkDescriptorSetLayoutCreateInfo layoutInfo = VkDescriptorSetLayoutCreateInfo.calloc(stack)
                 .sType(VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO)
                 .pBindings(bindings);
@@ -1132,9 +1151,10 @@ final class VkTerrainRenderer {
         check(vkCreateDescriptorSetLayout(device(), layoutInfo, null, pLayout), "vkCreateDescriptorSetLayout");
         descriptorSetLayout = pLayout.get(0);
 
-        VkDescriptorPoolSize.Buffer poolSizes = VkDescriptorPoolSize.calloc(2, stack);
+        VkDescriptorPoolSize.Buffer poolSizes = VkDescriptorPoolSize.calloc(3, stack);
         poolSizes.get(0).type(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER).descriptorCount(drawDescriptorSets.length * 2);
         poolSizes.get(1).type(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER).descriptorCount(drawDescriptorSets.length);
+        poolSizes.get(2).type(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER).descriptorCount(drawDescriptorSets.length);
         VkDescriptorPoolCreateInfo poolInfo = VkDescriptorPoolCreateInfo.calloc(stack)
                 .sType(VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO)
                 .pPoolSizes(poolSizes)
@@ -1284,6 +1304,64 @@ final class VkTerrainRenderer {
                 drawBatchBuffers.length, indirectMemoryIsDeviceLocal ? "BAR" : "host");
     }
 
+    /**
+     * One permanently mapped uniform buffer per frame in flight.
+     *
+     * Host-visible and coherent rather than device-local: the contents are
+     * rewritten by the CPU every frame and read once by the GPU, which is the
+     * case staging would only add a copy to.
+     */
+    private void createFrameUniforms(MemoryStack stack) {
+        VkBufferCreateInfo bufferInfo = VkBufferCreateInfo.calloc(stack)
+                .sType(VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO)
+                .size(FRAME_UNIFORM_BYTES)
+                .usage(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT)
+                .sharingMode(VK_SHARING_MODE_EXCLUSIVE);
+        VkMemoryRequirements req = VkMemoryRequirements.calloc(stack);
+        LongBuffer pBuffer = stack.mallocLong(1);
+        LongBuffer pMemory = stack.mallocLong(1);
+        PointerBuffer ppData = stack.mallocPointer(1);
+        for (int i = 0; i < framesInFlight; i++) {
+            check(vkCreateBuffer(device(), bufferInfo, null, pBuffer), "vkCreateBuffer(frame uniforms)");
+            frameUniformBuffers[i] = pBuffer.get(0);
+            vkGetBufferMemoryRequirements(device(), frameUniformBuffers[i], req);
+            VkMemoryAllocateInfo alloc = VkMemoryAllocateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO)
+                    .allocationSize(req.size())
+                    .memoryTypeIndex(findMemoryType(stack, req.memoryTypeBits(),
+                            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT));
+            check(vkAllocateMemory(device(), alloc, null, pMemory), "vkAllocateMemory(frame uniforms)");
+            frameUniformMemories[i] = pMemory.get(0);
+            check(vkBindBufferMemory(device(), frameUniformBuffers[i], frameUniformMemories[i], 0),
+                    "vkBindBufferMemory(frame uniforms)");
+            check(vkMapMemory(device(), frameUniformMemories[i], 0, FRAME_UNIFORM_BYTES, 0, ppData),
+                    "vkMapMemory(frame uniforms)");
+            frameUniformMapped[i] = ppData.get(0);
+        }
+    }
+
+    /**
+     * Writes this frame's matrix and fog where the shaders read them.
+     *
+     * {@code fogState} is copied straight through, and its eight floats land on
+     * the two vec4s the shader declares: colour rgb, then the mode in the
+     * alpha, then start, end and density. That is the same order the push
+     * constants carried, so the shader reads the same bytes from a different
+     * place.
+     */
+    private void writeFrameUniforms(float[] mvp, float[] fogState) {
+        long base = frameUniformMapped[activeFrameSlot];
+        if (base == 0L) {
+            return;
+        }
+        for (int i = 0; i < 16; i++) {
+            MemoryUtil.memPutFloat(base + i * 4L, mvp[i]);
+        }
+        for (int i = 0; i < 8; i++) {
+            MemoryUtil.memPutFloat(base + 64 + i * 4L, fogState[i]);
+        }
+    }
+
     private void updateDescriptors() {
         if (descriptorSet == 0 || atlasImage == 0 || lightmapImage == 0) {
             return;
@@ -1301,11 +1379,15 @@ final class VkTerrainRenderer {
                     .imageView(lightmapView)
                     .imageLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
-            VkWriteDescriptorSet.Buffer writes = VkWriteDescriptorSet.calloc(drawDescriptorSets.length * 3, stack);
+            VkWriteDescriptorSet.Buffer writes = VkWriteDescriptorSet.calloc(drawDescriptorSets.length * 4, stack);
             for (int i = 0; i < drawDescriptorSets.length; i++) {
                 VkDescriptorBufferInfo.Buffer bufferInfo = VkDescriptorBufferInfo.calloc(1, stack);
                 bufferInfo.get(0).buffer(drawBatchBuffers[i]).offset(0).range(drawCommandOffset);
-                int write = i * 3;
+                // Three sets per frame in flight, one per layer, and they all
+                // read the same frame constants.
+                VkDescriptorBufferInfo.Buffer frameInfo = VkDescriptorBufferInfo.calloc(1, stack);
+                frameInfo.get(0).buffer(frameUniformBuffers[i / 3]).offset(0).range(FRAME_UNIFORM_BYTES);
+                int write = i * 4;
                 writes.get(write)
                         .sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET)
                         .dstSet(drawDescriptorSets[i]).dstBinding(0).descriptorCount(1)
@@ -1318,6 +1400,10 @@ final class VkTerrainRenderer {
                         .sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET)
                         .dstSet(drawDescriptorSets[i]).dstBinding(2).descriptorCount(1)
                         .descriptorType(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER).pBufferInfo(bufferInfo);
+                writes.get(write + 3)
+                        .sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET)
+                        .dstSet(drawDescriptorSets[i]).dstBinding(3).descriptorCount(1)
+                        .descriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER).pBufferInfo(frameInfo);
             }
             vkUpdateDescriptorSets(device(), writes, null);
         }
@@ -1431,10 +1517,11 @@ final class VkTerrainRenderer {
         pushRange.get(0)
                 .stageFlags(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
                 .offset(0)
-                // mat4 mvp | vec4 offsetAndCutoff | vec4 fogColor | vec4 fogParams.
-                // Vulkan guarantees 128 bytes, so this stays inside the floor
-                // every implementation has to provide.
-                .size(112);
+                // One vec4 of per-draw parameters, x = alpha cutoff. Everything
+                // that is the same for a whole frame moved into a uniform
+                // buffer; this used to be 112 of the 128 bytes Vulkan
+                // guarantees, which left nothing to grow into.
+                .size(16);
         VkPipelineLayoutCreateInfo layoutInfo = VkPipelineLayoutCreateInfo.calloc(stack)
                 .sType(VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO)
                 .pSetLayouts(stack.longs(descriptorSetLayout))
@@ -2111,6 +2198,16 @@ final class VkTerrainRenderer {
                     lightmapStagingBuffer[i] = 0;
                     lightmapStagingMemory[i] = 0;
                     lightmapStagingMapped[i] = 0;
+                }
+            }
+            for (int i = 0; i < framesInFlight; i++) {
+                if (frameUniformMemories[i] != 0) {
+                    vkUnmapMemory(device(), frameUniformMemories[i]);
+                    vkDestroyBuffer(device(), frameUniformBuffers[i], null);
+                    vkFreeMemory(device(), frameUniformMemories[i], null);
+                    frameUniformBuffers[i] = 0;
+                    frameUniformMemories[i] = 0;
+                    frameUniformMapped[i] = 0;
                 }
             }
             MemoryUtil.memFree(lightmapReadBuffer);

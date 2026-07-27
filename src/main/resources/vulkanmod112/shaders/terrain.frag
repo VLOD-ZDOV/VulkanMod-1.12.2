@@ -3,17 +3,22 @@
 layout(set = 0, binding = 0) uniform sampler2D atlas;
 layout(set = 0, binding = 1) uniform sampler2D lightmap;
 
-layout(push_constant) uniform PC {
+// Same block as the vertex stage; see terrain.vert for why it is a buffer.
+layout(set = 0, binding = 3, std140) uniform Frame {
     mat4 mvp;
-    vec4 offsetAndCutoff;
     vec4 fogColor;  // rgb = colour, a = mode: 0 off, 1 linear, 2 exp, 3 exp2
     vec4 fogParams; // x = start, y = end, z = density
-} pc;
+} frame;
+
+layout(push_constant) uniform Draw {
+    vec4 params; // x = alpha cutoff
+} draw;
 
 layout(location = 0) in vec4 vColor;
 layout(location = 1) in vec2 vUV;
 layout(location = 2) in vec2 vLight;
 layout(location = 3) in float vDistance;
+layout(location = 4) in vec3 vRelative;
 
 layout(location = 0) out vec4 outColor;
 
@@ -30,29 +35,29 @@ layout(constant_id = 0) const bool ALPHA_TEST = true;
 // them stay perfectly clear.
 float fogFactor(int mode) {
     if (mode == 1) {
-        return (pc.fogParams.y - vDistance) / (pc.fogParams.y - pc.fogParams.x);
+        return (frame.fogParams.y - vDistance) / (frame.fogParams.y - frame.fogParams.x);
     }
     if (mode == 2) {
-        return exp(-pc.fogParams.z * vDistance);
+        return exp(-frame.fogParams.z * vDistance);
     }
     // exp2
-    float scaled = pc.fogParams.z * vDistance;
+    float scaled = frame.fogParams.z * vDistance;
     return exp(-scaled * scaled);
 }
 
 void main() {
     vec4 tex = texture(atlas, vUV);
     if (ALPHA_TEST) {
-        if (tex.a < pc.offsetAndCutoff.w) {
+        if (tex.a < draw.params.x) {
             discard;
         }
     }
     vec3 light = texture(lightmap, vLight).rgb;
     vec3 shaded = tex.rgb * vColor.rgb * light;
 
-    int mode = int(pc.fogColor.a);
+    int mode = int(frame.fogColor.a);
     if (mode != 0) {
-        shaded = mix(pc.fogColor.rgb, shaded, clamp(fogFactor(mode), 0.0, 1.0));
+        shaded = mix(frame.fogColor.rgb, shaded, clamp(fogFactor(mode), 0.0, 1.0));
     }
     outColor = vec4(shaded, 1.0);
 }
