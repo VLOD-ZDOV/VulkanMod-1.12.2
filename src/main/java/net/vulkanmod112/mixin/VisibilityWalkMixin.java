@@ -5,6 +5,7 @@ import net.minecraft.client.renderer.culling.ICamera;
 import net.minecraft.entity.Entity;
 import net.vulkanmod112.client.VanillaFrame;
 import net.vulkanmod112.client.VulkanConfig;
+import net.vulkanmod112.client.WalkTimer;
 import org.objectweb.asm.Opcodes;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -66,7 +67,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * game's logic, not this mod's renderer.
  */
 @Mixin(RenderGlobal.class)
-public abstract class VisibilityWalkMixin {
+public abstract class VisibilityWalkMixin implements WalkTimer {
 
     @Shadow
     private boolean displayListEntitiesDirty;
@@ -126,10 +127,19 @@ public abstract class VisibilityWalkMixin {
                     target = "Lnet/minecraft/client/renderer/RenderGlobal;displayListEntitiesDirty:Z",
                     opcode = Opcodes.PUTFIELD, ordinal = 1))
     private void vulkanmod112$markWalkRan(RenderGlobal self, boolean value) {
+        vulkanmod112$noteWalkRan();
+        displayListEntitiesDirty = value;
+    }
+
+    /**
+     * The same stamp, for a walk that did not come from vanilla's own code.
+     * The replacement search never executes the instruction above.
+     */
+    @Override
+    public void vulkanmod112$noteWalkRan() {
         vulkanmod112$lastWalkNanos = System.nanoTime();
         vulkanmod112$armDeferred = false;
         VanillaFrame.countWalkRan();
-        displayListEntitiesDirty = value;
     }
 
     /** The rearm for any visible chunk that still needs rebuilding. */

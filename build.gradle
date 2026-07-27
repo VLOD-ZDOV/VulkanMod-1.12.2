@@ -426,6 +426,13 @@ idea.project.settings {
 tasks.matching { it.name in ['runClient', 'runObfClient'] }.configureEach {
     environment '__NV_PRIME_RENDER_OFFLOAD', '1'
     environment '__GLX_VENDOR_LIBRARY_NAME', 'nvidia'
+    // -PverifyWalk makes the replacement visibility search check every position
+    // it derives against the chunk that slot actually holds. It costs the very
+    // lookup the search exists to avoid, so it is for confirming correctness,
+    // never for timing.
+    if (project.hasProperty('verifyWalk')) {
+        jvmArgs '-Dvulkanmod112.verifyWalk=true'
+    }
 }
 
 apply from: 'gradle/scripts/publishing.gradle'

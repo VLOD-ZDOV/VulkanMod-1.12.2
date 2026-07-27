@@ -19,6 +19,7 @@
     "VisibilityWalkMixin",
     "NearPlaneMixin",
     "VisibilityWalkCostMixin",
+    "OwnVisibilityWalkMixin",
     "RenderInfoMixin",
     "FrustumTestMixin",
     "EntityBrightnessMixin",

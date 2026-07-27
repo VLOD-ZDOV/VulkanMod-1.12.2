@@ -15,6 +15,9 @@ rather than crashing.
   around it. Chunks are not rebuilt for it. Off by default.
 - **Vanilla chunk buffers can be dropped.** The world is then stored once in video memory instead
   of twice. Off by default.
+- **Own visibility search.** The game's own search for which chunks are on screen is a quarter to
+  a half of the whole frame at high render distances; this replaces it with one that does not
+  chase pointers. Off by default.
 - **Snow and slabs no longer speckle at a distance**, through a nearer clipping plane.
 - Faster on-screen test for chunks.
 - Chunk copies happen on the threads that build chunks, not on the one that draws.
@@ -67,10 +70,8 @@ rather than crashing.
 
 In the order they are likely to be worth doing.
 
-- **A faster search for which chunks are on screen.** The game's own profiler puts this at a
-  quarter to a half of the entire frame at high render distances — far more than drawing the
-  world costs. This is the single biggest thing left.
-- **Entities and block entities.** The second largest part of the frame after that search.
+- **Entities and block entities.** The largest part of the frame now that the visibility search
+  has been dealt with.
 - **Smart animated textures** — updating only the animated blocks actually in view, instead of
   the all-or-nothing switch that exists today.
 - **Connected glass textures.**

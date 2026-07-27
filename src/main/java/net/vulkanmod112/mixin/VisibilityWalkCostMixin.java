@@ -6,6 +6,7 @@ import net.minecraft.client.renderer.chunk.CompiledChunk;
 import net.minecraft.client.renderer.chunk.RenderChunk;
 import net.minecraft.util.EnumFacing;
 import net.minecraft.util.math.BlockPos;
+import net.vulkanmod112.client.SeedFacings;
 import net.vulkanmod112.client.VulkanConfig;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -13,6 +14,7 @@ import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Redirect;
 
+import java.util.EnumSet;
 import java.util.Set;
 
 /**
@@ -55,7 +57,7 @@ import java.util.Set;
  * class exposes it for exactly this reason. Nothing in the loop writes to it.
  */
 @Mixin(RenderGlobal.class)
-public abstract class VisibilityWalkCostMixin {
+public abstract class VisibilityWalkCostMixin implements SeedFacings {
 
     @Shadow
     private ViewFrustum viewFrustum;
@@ -86,6 +88,24 @@ public abstract class VisibilityWalkCostMixin {
                     target = "Lnet/minecraft/client/renderer/RenderGlobal;getVisibleFacings"
                             + "(Lnet/minecraft/util/math/BlockPos;)Ljava/util/Set;"))
     private Set<EnumFacing> vulkanmod112$cachedVisibleFacings(RenderGlobal self, BlockPos pos) {
+        return vulkanmod112$visibleFacings(pos);
+    }
+
+    /**
+     * Also reached directly by the replacement search, which never executes
+     * vanilla's call site.
+     *
+     * <b>What comes back is always a fresh set.</b> The caller removes an
+     * element from it — the face opposite the one being looked at, when only
+     * one face is reachable — and the first version of this cache handed out
+     * the set it had stored. Turning the camera while standing in a spot with a
+     * single reachable face would then have emptied the cached answer, and an
+     * empty answer means "sealed in", which draws the camera's own chunk and
+     * nothing else.
+     */
+    @Override
+    public Set<EnumFacing> vulkanmod112$visibleFacings(BlockPos pos) {
+        RenderGlobal self = (RenderGlobal) (Object) this;
         if (!VulkanConfig.isVisibilitySeedCacheEnabled()) {
             return vulkanmod112$callVanilla(self, pos);
         }
@@ -96,16 +116,16 @@ public abstract class VisibilityWalkCostMixin {
         if (vulkanmod112$seedFacings != null
                 && key == vulkanmod112$seedPos
                 && compiled == vulkanmod112$seedCompiled) {
-            return vulkanmod112$seedFacings;
+            return EnumSet.copyOf(vulkanmod112$seedFacings);
         }
         Set<EnumFacing> facings = vulkanmod112$callVanilla(self, pos);
         // Only cache when there is a compiled chunk to key on. Without one there
         // is no signal for when the answer goes stale, and a wrong seed hides
         // parts of the world.
-        if (compiled != null) {
+        if (compiled != null && !facings.isEmpty()) {
             vulkanmod112$seedPos = key;
             vulkanmod112$seedCompiled = compiled;
-            vulkanmod112$seedFacings = facings;
+            vulkanmod112$seedFacings = EnumSet.copyOf(facings);
         } else {
             vulkanmod112$seedFacings = null;
         }

@@ -259,6 +259,12 @@ public final class Diagnostics {
         out.println("  " + VanillaFrame.stats());
         out.println("  " + VanillaFrame.walkStats());
         out.println("  " + VanillaFrame.ownWalkStats());
+        // The two settings currently under A/B. Without them in the snapshot a
+        // run has to be matched to a configuration by memory, and the last two
+        // comparisons both turned on which of the two arms a number came from.
+        out.println(String.format("  under test: frames in flight %d, own visibility walk %s",
+                VulkanConfig.getFramesInFlight(),
+                VulkanConfig.isOwnVisibilityWalk() ? "on" : "off"));
         out.println("  " + DynamicLights.stats());
         writeVanillaCounters(out, mc);
         writeProfilerTree(out, mc);

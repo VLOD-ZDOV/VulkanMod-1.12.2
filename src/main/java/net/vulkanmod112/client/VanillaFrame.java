@@ -112,6 +112,30 @@ public final class VanillaFrame {
         ownWalkVisible += visible;
     }
 
+    /** Slots checked against the position their chunk actually holds. */
+    private static long derivationsChecked;
+    private static long derivationsWrong;
+    private static String derivationFirstWrong;
+
+    /**
+     * Confirms the one claim that could fail silently: that stepping 16 blocks
+     * and one grid slot lands on the chunk vanilla's lookup by world position
+     * would have returned. Only called when the verification switch is on,
+     * because the dereference it needs is exactly the one being avoided.
+     */
+    public static void countWalkDerivation(net.minecraft.client.renderer.chunk.RenderChunk chunk,
+                                           int x, int y, int z) {
+        derivationsChecked++;
+        net.minecraft.util.math.BlockPos held = chunk == null ? null : chunk.getPosition();
+        if (held != null && held.getX() == x && held.getY() == y && held.getZ() == z) {
+            return;
+        }
+        derivationsWrong++;
+        if (derivationFirstWrong == null) {
+            derivationFirstWrong = String.format("derived %d,%d,%d but slot holds %s", x, y, z, held);
+        }
+    }
+
     public static void countOwnWalkFallback() {
         ownWalkFellBack++;
     }
@@ -129,6 +153,13 @@ public final class VanillaFrame {
                                 + "per walk, fell back to vanilla %d times",
                         ownWalks, ownWalkNanos / 1_000_000.0 / ownWalks,
                         ownWalkVisited / ownWalks, ownWalkVisible / ownWalks, ownWalkFellBack);
+        if (derivationsChecked > 0) {
+            line += String.format(" | derivation checked %d, wrong %d%s",
+                    derivationsChecked, derivationsWrong,
+                    derivationFirstWrong == null ? "" : " (" + derivationFirstWrong + ")");
+            derivationsChecked = 0L;
+            derivationsWrong = 0L;
+        }
         ownWalks = 0L;
         ownWalkNanos = 0L;
         ownWalkVisited = 0L;
