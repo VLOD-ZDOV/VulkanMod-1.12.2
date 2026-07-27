@@ -73,6 +73,14 @@ public final class VulkanConfig {
      * covers, which is why distant snow speckles with the block underneath.
      */
     static final int DEF_NEAR_PLANE_HUNDREDTHS = 0;
+    /**
+     * Memoise the seed of the visibility walk. On by default: the key is exact
+     * (camera block position plus the identity of that section's CompiledChunk,
+     * which the game replaces on every rebuild), so the cached answer is the
+     * answer vanilla would have computed. The switch exists to rule it out if
+     * something ever looks wrong, not because it is a trade.
+     */
+    static final boolean DEF_VISIBILITY_SEED_CACHE = true;
     static final boolean DEF_FOG = true;
     static final boolean DEF_ZOOM = true;
     /** Stored as an integer so it fits the config and the slider; 4 = quarter FOV. */
@@ -97,6 +105,7 @@ public final class VulkanConfig {
     private static int chunkBuildThreads = DEF_CHUNK_BUILD_THREADS;
     private static int visibilityWalkInterval = DEF_VISIBILITY_WALK_INTERVAL;
     private static int nearPlaneHundredths = DEF_NEAR_PLANE_HUNDREDTHS;
+    private static boolean visibilitySeedCache = DEF_VISIBILITY_SEED_CACHE;
     private static boolean fogEnabled = DEF_FOG;
     private static boolean zoomEnabled = DEF_ZOOM;
     private static int zoomFactor = DEF_ZOOM_FACTOR;
@@ -156,6 +165,13 @@ public final class VulkanConfig {
                         + "render distances leaves the depth buffer unable to separate a snow layer "
                         + "from the block under it. Larger values fix that and clip geometry very "
                         + "close to the eye, which can open a hole when the head is inside a block.");
+        visibilitySeedCache = config.getBoolean("visibilitySeedCache", CATEGORY_OPTIMIZATION,
+                DEF_VISIBILITY_SEED_CACHE,
+                "Reuse the seed of the chunk visibility search while the camera stays in the same "
+                        + "block and that block's chunk has not been rebuilt. Vanilla reads all 4096 "
+                        + "block states of the camera's own chunk section every time it redoes the "
+                        + "search, which at long render distances is hundreds of thousands of reads a "
+                        + "second for an answer that did not change.");
         fogEnabled = config.getBoolean("fog", CATEGORY_GENERAL, DEF_FOG,
                 "Fade Vulkan terrain into the distance the way the rest of the scene already does. "
                         + "Off leaves the world ending in a hard edge, which is a little faster.");
@@ -189,6 +205,7 @@ public final class VulkanConfig {
         setChunkBuildThreads(DEF_CHUNK_BUILD_THREADS);
         setVisibilityWalkInterval(DEF_VISIBILITY_WALK_INTERVAL);
         setNearPlaneHundredths(DEF_NEAR_PLANE_HUNDREDTHS);
+        setVisibilitySeedCacheEnabled(DEF_VISIBILITY_SEED_CACHE);
         setFogEnabled(DEF_FOG);
         setZoomEnabled(DEF_ZOOM);
         setZoomFactor(DEF_ZOOM_FACTOR);
@@ -211,6 +228,15 @@ public final class VulkanConfig {
     public static void setVisibilityWalkInterval(int value) {
         visibilityWalkInterval = value;
         store(CATEGORY_OPTIMIZATION, "visibilityWalkInterval", value);
+    }
+
+    public static boolean isVisibilitySeedCacheEnabled() {
+        return visibilitySeedCache;
+    }
+
+    public static void setVisibilitySeedCacheEnabled(boolean value) {
+        visibilitySeedCache = value;
+        store(CATEGORY_OPTIMIZATION, "visibilitySeedCache", value);
     }
 
     /** Near plane in hundredths of a block; 0 leaves vanilla's 0.05 alone. */
