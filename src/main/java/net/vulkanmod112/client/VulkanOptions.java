@@ -320,10 +320,10 @@ final class VulkanOptions {
                                         + "divided by this number, and three hundred blocks out it "
                                         + "can no longer separate a snow layer from the block under "
                                         + "it, whose top face is still drawn. 20 puts the resolvable "
-                                        + "gap comfortably under that. The price is that anything "
-                                        + "closer to the eye than this is clipped away, so with your "
-                                        + "head inside a block a large value can open a hole in it. "
-                                        + "Vanilla is the default.",
+                                        + "gap comfortably under that, and it is the default here. "
+                                        + "The price is that anything closer to the eye than this is "
+                                        + "clipped away, so with your head inside a block a large "
+                                        + "value can open a hole in it. Set it to 0 for vanilla.",
                                 Cost.of(Level.NONE, Level.NONE, Level.NONE), null,
                                 0, 50, 1, "/100 block", "Vanilla (5)",
                                 new VRangeOption.Access() {

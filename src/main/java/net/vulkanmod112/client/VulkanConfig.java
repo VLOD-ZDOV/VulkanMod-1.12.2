@@ -72,7 +72,7 @@ public final class VulkanConfig {
      * three hundred out — wider than the 0.125 a snow layer sits above what it
      * covers, which is why distant snow speckles with the block underneath.
      */
-    static final int DEF_NEAR_PLANE_HUNDREDTHS = 0;
+    static final int DEF_NEAR_PLANE_HUNDREDTHS = 20;
     /**
      * Memoise the seed of the visibility walk. On by default: the key is exact
      * (camera block position plus the identity of that section's CompiledChunk,
@@ -164,7 +164,8 @@ public final class VulkanConfig {
                 "Near clipping plane in hundredths of a block. 0 keeps vanilla's 0.05, which at long "
                         + "render distances leaves the depth buffer unable to separate a snow layer "
                         + "from the block under it. Larger values fix that and clip geometry very "
-                        + "close to the eye, which can open a hole when the head is inside a block.");
+                        + "close to the eye, which can open a hole when the head is inside a block. "
+                        + "Costs nothing either way: it is one number in the projection matrix.");
         visibilitySeedCache = config.getBoolean("visibilitySeedCache", CATEGORY_OPTIMIZATION,
                 DEF_VISIBILITY_SEED_CACHE,
                 "Reuse the seed of the chunk visibility search while the camera stays in the same "

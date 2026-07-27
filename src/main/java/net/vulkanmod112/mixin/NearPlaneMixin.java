@@ -32,9 +32,11 @@ import org.spongepowered.asm.mixin.injection.ModifyConstant;
  * matrix. So this changes the game's projection, and everything downstream
  * follows automatically.
  *
- * The price, and the reason this is off by default: geometry closer to the eye
- * than the near plane is clipped away. Pressed against a wall, or with the head
- * inside a block, a larger value can open a hole into it.
+ * The price: geometry closer to the eye than the near plane is clipped away.
+ * Pressed against a wall, or with the head inside a block, a larger value can
+ * open a hole into it. At 0.2 that is four fifths of the way from the eye to the
+ * face of the block it is inside, which is why that value ships on and why the
+ * setting still goes back to vanilla.
  */
 @Mixin(EntityRenderer.class)
 public abstract class NearPlaneMixin {
@@ -53,6 +55,22 @@ public abstract class NearPlaneMixin {
      */
     @ModifyConstant(method = "renderWorldPass", constant = @Constant(floatValue = 0.05F))
     private float vulkanmod112$worldNearPlane(float vanilla) {
+        return vulkanmod112$nearPlane(vanilla);
+    }
+
+    /**
+     * Clouds set up a projection of their own and then put the world's back, and
+     * that restore carries its own copy of the constant. Below cloud height they
+     * are drawn <em>before</em> the terrain, so leaving this one alone silently
+     * undid the setting for everyone standing on the ground: the value only ever
+     * reached the terrain from above the clouds, where they are drawn last.
+     *
+     * Both constants in the method are moved, the clouds' own and the restore, so
+     * that clouds keep the same relationship to terrain depth that vanilla gives
+     * them — vanilla already draws them with a different far plane.
+     */
+    @ModifyConstant(method = "renderCloudsCheck", constant = @Constant(floatValue = 0.05F))
+    private float vulkanmod112$cloudsNearPlane(float vanilla) {
         return vulkanmod112$nearPlane(vanilla);
     }
 
