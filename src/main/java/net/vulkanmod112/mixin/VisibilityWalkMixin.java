@@ -98,6 +98,7 @@ public abstract class VisibilityWalkMixin {
     @Inject(method = "setupTerrain", at = @At("HEAD"))
     private void vulkanmod112$beginFrame(Entity viewEntity, double partialTicks, ICamera camera,
                                          int frameCount, boolean playerSpectator, CallbackInfo ci) {
+        VanillaFrame.countWalkFrame();
         vulkanmod112$cameraMovedThisFrame = viewEntity.posX != vulkanmod112$prevX
                 || viewEntity.posY != vulkanmod112$prevY
                 || viewEntity.posZ != vulkanmod112$prevZ
@@ -127,6 +128,7 @@ public abstract class VisibilityWalkMixin {
     private void vulkanmod112$markWalkRan(RenderGlobal self, boolean value) {
         vulkanmod112$lastWalkNanos = System.nanoTime();
         vulkanmod112$armDeferred = false;
+        VanillaFrame.countWalkRan();
         displayListEntitiesDirty = value;
     }
 

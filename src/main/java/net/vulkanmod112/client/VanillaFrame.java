@@ -47,6 +47,24 @@ public final class VanillaFrame {
      * "did not happen" from "was not looked at" is worse than none.
      */
     private static long walkDeferredPaid;
+    private static long walkRan;
+    /** Own frame count: {@link #stats()} runs first and resets the shared one. */
+    private static long walkFramesSeen;
+
+    public static void countWalkFrame() {
+        walkFramesSeen++;
+    }
+
+    /**
+     * How often the flood fill actually started, whatever triggered it.
+     *
+     * Without this the counters cannot tell "the walk runs every frame and the
+     * throttle is failing to catch it" from "the walk is already rare and there
+     * is nothing to catch" — and those call for opposite next moves.
+     */
+    public static void countWalkRan() {
+        walkRan++;
+    }
 
     /** A held-back walk being paid back; if this stays 0 the deferral never runs. */
     public static void countDeferredWalk() {
@@ -126,8 +144,12 @@ public final class VanillaFrame {
             return "visibility walk: never reached our check — the dirty flag was already set";
         }
         String line = String.format(
-                "visibility walk: %d arm requests — chunk churn %d, camera moved %d, deferred %d, paid back %d",
-                walkAsked, walkQueuePending, walkCameraMoved, walkSuppressed, walkDeferredPaid);
+                "visibility walk: RAN %d of %d frames — %d arm requests, churn %d, camera moved %d, "
+                        + "deferred %d, paid back %d",
+                walkRan, walkFramesSeen, walkAsked, walkQueuePending,
+                walkCameraMoved, walkSuppressed, walkDeferredPaid);
+        walkRan = 0L;
+        walkFramesSeen = 0L;
         walkAsked = 0L;
         walkQueuePending = 0L;
         walkCameraMoved = 0L;
