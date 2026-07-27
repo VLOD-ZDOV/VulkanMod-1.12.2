@@ -106,17 +106,32 @@ public final class TerrainHooks {
         vanillaLayerStart = 0L;
     }
 
+    /**
+     * Whether the translucent layer reached the Vulkan path, counted.
+     *
+     * The first attempt at moving it over changed nothing at all, because a
+     * leftover guard rejected layer 3 before the new branch could see it, and
+     * the only sign was that vanilla went on drawing water exactly as before.
+     * That is the failure mode worth a counter: not wrong output, no output.
+     */
+    private static long translucentTaken;
+    private static long translucentRefused;
+
     /** Milliseconds per frame vanilla spent on the translucent layer, and its chunk count. */
     public static String vanillaLayerStats() {
+        String taken = String.format("; translucent to Vulkan %d, refused %d",
+                translucentTaken, translucentRefused);
+        translucentTaken = 0L;
+        translucentRefused = 0L;
         if (vanillaLayerFrames == 0) {
-            return "vanilla translucent: not drawn";
+            return "vanilla translucent: not drawn" + taken;
         }
         double perFrame = vanillaLayerNanos / 1_000_000.0 / vanillaLayerFrames;
         String line = String.format("vanilla translucent: %.2f ms per frame over %d frames, %d chunks last frame",
                 perFrame, vanillaLayerFrames, vanillaLayerChunks);
         vanillaLayerNanos = 0L;
         vanillaLayerFrames = 0L;
-        return line;
+        return line + taken;
     }
 
     public static void setViewPosition(double x, double y, double z) {
@@ -145,12 +160,11 @@ public final class TerrainHooks {
 
     /** Returns true when the Vulkan side took the layer and GL must skip it. */
     public static boolean renderChunkLayer(BlockRenderLayer layer, List<RenderChunk> chunks) {
-        // TRANSLUCENT stays on the vanilla path, and the Vulkan side rejects it
-        // outright. Leaving before packChunks matters: water and glass make a
-        // long chunk list at high render distances, and every frame it was
-        // walked, packed and thrown away. It also kept the drawn-chunk counter
-        // reporting chunks nothing ever drew.
-        if (layer == BlockRenderLayer.TRANSLUCENT) {
+        // Leaving before packChunks matters when the layer is not taken: water
+        // and glass make a long chunk list at high render distances, and every
+        // frame of it was walked, packed and thrown away. It also kept the
+        // drawn-chunk counter reporting chunks nothing ever drew.
+        if (layer == BlockRenderLayer.TRANSLUCENT && !VulkanConfig.isVulkanTranslucent()) {
             return false;
         }
         if (!terrainEnabled() || broken) {
@@ -179,6 +193,13 @@ public final class TerrainHooks {
             }
             boolean taken = bridge.renderTerrainLayer(layer.ordinal(), chunkData, count, MVP,
                     viewX, viewY, viewZ, mc.displayWidth, mc.displayHeight);
+            if (layer == BlockRenderLayer.TRANSLUCENT) {
+                if (taken) {
+                    translucentTaken++;
+                } else {
+                    translucentRefused++;
+                }
+            }
             if (taken && layer == BlockRenderLayer.CUTOUT) {
                 framesDrawn++;
             }

@@ -29,6 +29,18 @@ layout(location = 0) out vec4 outColor;
 // for that pipeline, the depth test runs before shading again.
 layout(constant_id = 0) const bool ALPHA_TEST = true;
 
+// Set for the translucent pipeline. Opaque layers write an alpha of 1 because
+// their result replaces what is under it; water and glass have to carry how
+// much of what is behind them shows through, and that lives in the texture's
+// alpha times the vertex colour's.
+//
+// The value is written premultiplied — colour already scaled by alpha. Two
+// blends happen to this fragment, one into the translucent target here and one
+// compositing that target over the game's frame, and "over" only survives being
+// split in two that way when the colour carries its coverage with it.
+// Straight alpha would darken every overlap.
+layout(constant_id = 1) const bool BLEND = false;
+
 // Mirrors the fixed-function fog the game sets up for everything OpenGL still
 // draws. Without it the terrain is the one thing in the scene with no fog:
 // underwater, entities turn the colour of the water while the blocks behind
@@ -59,5 +71,10 @@ void main() {
     if (mode != 0) {
         shaded = mix(frame.fogColor.rgb, shaded, clamp(fogFactor(mode), 0.0, 1.0));
     }
-    outColor = vec4(shaded, 1.0);
+    if (BLEND) {
+        float alpha = tex.a * vColor.a;
+        outColor = vec4(shaded * alpha, alpha);
+    } else {
+        outColor = vec4(shaded, 1.0);
+    }
 }

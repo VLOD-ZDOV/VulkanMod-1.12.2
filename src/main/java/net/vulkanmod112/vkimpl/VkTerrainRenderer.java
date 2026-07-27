@@ -155,14 +155,41 @@ final class VkTerrainRenderer {
     private long vkWaitSemaphore;
     private int glWaitSemaphore;
     private int glSignalSemaphore;
+
+    /**
+     * A second hand-off, for the translucent pass, and it has to be its own.
+     *
+     * The pair above is spent by the time the translucent layer is asked for:
+     * OpenGL signals it at the end of the opaque composite, which happens
+     * before the game draws entities. The translucent pass needs to wait for
+     * something signalled <em>after</em> that — after the depth OpenGL now owns
+     * has been copied back — and reusing a semaphore already signalled would
+     * let the pass read a depth buffer that is still being written. A race of
+     * exactly that kind cost a lost device and a revert on the upload ring.
+     */
+    private long vkTranslucentSignalSemaphore;
+    private long vkTranslucentWaitSemaphore;
+    private int glTranslucentWaitSemaphore;
+    private int glTranslucentSignalSemaphore;
+    private VkCommandBuffer[] translucentCommandBuffers;
+    private long[] translucentFences;
+    private int translucentCompositeProgram;
+    private int translucentInvSizeUniform = -1;
     private long renderPass;
     private long descriptorSetLayout;
     private long descriptorPool;
     private long descriptorSet;
-    private final long[] drawBatchBuffers = new long[framesInFlight * 3];
-    private final long[] drawBatchMemories = new long[framesInFlight * 3];
-    private final long[] drawBatchMapped = new long[framesInFlight * 3];
-    private final long[] drawDescriptorSets = new long[framesInFlight * 3];
+    /**
+     * Indirect batches and descriptor sets per frame in flight: one for every
+     * layer this renderer can draw, translucent included. It was three, which
+     * is what {@code activeFrameSlot * 3 + layerOrdinal} indexed by — an
+     * arrangement that stops working the moment a fourth layer arrives.
+     */
+    private static final int BATCHES_PER_FRAME = 4;
+    private final long[] drawBatchBuffers = new long[framesInFlight * BATCHES_PER_FRAME];
+    private final long[] drawBatchMemories = new long[framesInFlight * BATCHES_PER_FRAME];
+    private final long[] drawBatchMapped = new long[framesInFlight * BATCHES_PER_FRAME];
+    private final long[] drawDescriptorSets = new long[framesInFlight * BATCHES_PER_FRAME];
     /** Draws each batch buffer can hold; grown to fit the scene, never shrunk. */
     private int indirectDrawCapacity = INITIAL_INDIRECT_DRAWS;
     private long drawCommandOffset = (long) INITIAL_INDIRECT_DRAWS * DRAW_ORIGIN_BYTES;
@@ -471,11 +498,23 @@ final class VkTerrainRenderer {
     synchronized boolean renderLayer(int layerOrdinal, int[] chunks, int chunkCount, float[] mvp,
                                      double viewX, double viewY, double viewZ,
                                      int fbWidth, int fbHeight, VkChunkMirror mirror) {
-        if (layerOrdinal == 3 || mirror == null || atlasImage == 0 || lightmapGlId == -1) {
+        if (mirror == null || atlasImage == 0 || lightmapGlId == -1) {
             return false;
         }
         ctx.ensureGlCapabilities();
         ensureBaseResources();
+        if (layerOrdinal == LAYER_TRANSLUCENT) {
+            // Its own pass, its own submission, and it runs after the opaque
+            // frame has already been composited — so none of the state machine
+            // below applies to it.
+            if (frameOpen || colorImage == 0) {
+                return false;
+            }
+            long t = System.nanoTime();
+            boolean taken = renderTranslucent(chunks, chunkCount, mvp, viewX, viewY, viewZ, mirror);
+            recordNanos += System.nanoTime() - t;
+            return taken;
+        }
         if (layerOrdinal == 0) {
             ensureTargets(fbWidth, fbHeight);
             // Sized from the previous frame's largest layer as well, so a growth
@@ -752,7 +791,7 @@ final class VkTerrainRenderer {
             vkCmdBindVertexBuffers(commandBuffer, 0, pBuffer, pOffset);
             boolean logInputs = layerOrdinal == 0 && (frameCounter == 0 || frameCounter == 119);
 
-            int batchIndex = activeFrameSlot * 3 + layerOrdinal;
+            int batchIndex = activeFrameSlot * BATCHES_PER_FRAME + layerOrdinal;
             long mapped = drawBatchMapped[batchIndex];
             int drawCount = 0;
             if (lookupScratch.length < chunkCount) {
@@ -847,6 +886,169 @@ final class VkTerrainRenderer {
             firstFrame = false;
             check(vkQueueSubmit(ctx.getGraphicsQueue(), submit, fence), "vkQueueSubmit(terrain)");
             frameOpen = false;
+        }
+    }
+
+    /**
+     * Draws the translucent layer, after the game has drawn everything that
+     * belongs behind it.
+     *
+     * The order matters more than the drawing does. Vanilla asks for this layer
+     * once entities, particles and weather are already in its framebuffer, and
+     * draws it depth-tested against them with depth writes off. This renderer
+     * composited its opaque terrain long before that, so the depth image here
+     * still holds terrain alone — which is why the first thing that happens is
+     * copying the game's depth back into it. Skip that and water is drawn over
+     * anything swimming behind it.
+     *
+     * @return true when the layer was taken and OpenGL should not draw it
+     */
+    private boolean renderTranslucent(int[] chunks, int chunkCount, float[] mvp,
+                                      double viewX, double viewY, double viewZ,
+                                      VkChunkMirror mirror) {
+        if (translucentFramebuffer == 0 || !depthBlit || chunkCount == 0) {
+            // Without the depth blit there is no way to get the game's depth
+            // back, and drawing the layer without it would be worse than
+            // leaving it where it is.
+            return false;
+        }
+        int slot = activeFrameSlot;
+        try (MemoryStack stack = stackPush()) {
+            check(vkWaitForFences(device(), translucentFences[slot], true, Long.MAX_VALUE),
+                    "vkWaitForFences(translucent)");
+            check(vkResetFences(device(), translucentFences[slot]), "vkResetFences(translucent)");
+
+            importGlDepth();
+
+            VkCommandBuffer cmd = translucentCommandBuffers[slot];
+            check(vkResetCommandBuffer(cmd, 0), "vkResetCommandBuffer(translucent)");
+            VkCommandBufferBeginInfo begin = VkCommandBufferBeginInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO)
+                    .flags(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+            check(vkBeginCommandBuffer(cmd, begin), "vkBeginCommandBuffer(translucent)");
+
+            // One clear value only: the depth attachment is loaded, not cleared.
+            VkClearValue.Buffer clears = VkClearValue.calloc(1, stack);
+            clears.get(0).color().float32(0, 0.0f).float32(1, 0.0f).float32(2, 0.0f).float32(3, 0.0f);
+            VkRenderPassBeginInfo rpBegin = VkRenderPassBeginInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO)
+                    .renderPass(translucentRenderPass)
+                    .framebuffer(translucentFramebuffer)
+                    .renderArea(VkRect2D.calloc(stack)
+                            .extent(VkExtent2D.calloc(stack).width(width).height(height)))
+                    .pClearValues(clears);
+            vkCmdBeginRenderPass(cmd, rpBegin, VK_SUBPASS_CONTENTS_INLINE);
+
+            vkCmdBindIndexBuffer(cmd, quadIndexBuffer, 0, VK_INDEX_TYPE_UINT32);
+            org.lwjgl.vulkan.VkViewport.Buffer viewport = org.lwjgl.vulkan.VkViewport.calloc(1, stack);
+            viewport.get(0).x(0).y(0).width(width).height(height).minDepth(0.0f).maxDepth(1.0f);
+            vkCmdSetViewport(cmd, 0, viewport);
+            VkRect2D.Buffer scissor = VkRect2D.calloc(1, stack);
+            scissor.get(0).extent(VkExtent2D.calloc(stack).width(width).height(height));
+            vkCmdSetScissor(cmd, 0, scissor);
+
+            VkCommandBuffer previous = commandBuffer;
+            commandBuffer = cmd;
+            try {
+                drawChunks(LAYER_TRANSLUCENT, chunks, chunkCount, mvp, viewX, viewY, viewZ, mirror);
+            } finally {
+                commandBuffer = previous;
+            }
+
+            vkCmdEndRenderPass(cmd);
+            check(vkEndCommandBuffer(cmd), "vkEndCommandBuffer(translucent)");
+
+            VkSubmitInfo submit = VkSubmitInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_SUBMIT_INFO)
+                    .pCommandBuffers(stack.pointers(cmd))
+                    .waitSemaphoreCount(1)
+                    .pWaitSemaphores(stack.longs(vkTranslucentWaitSemaphore))
+                    .pWaitDstStageMask(stack.ints(VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT))
+                    .pSignalSemaphores(stack.longs(vkTranslucentSignalSemaphore));
+            check(vkQueueSubmit(ctx.getGraphicsQueue(), submit, translucentFences[slot]),
+                    "vkQueueSubmit(translucent)");
+        }
+        compositeTranslucent();
+        return true;
+    }
+
+    /**
+     * Copies the depth the game now owns into the shared image, then tells
+     * Vulkan it may read it.
+     *
+     * This is the mirror of {@link #blitDepth}, which sends depth the other
+     * way after the opaque pass. Between the two, OpenGL has drawn entities,
+     * and their depth is exactly what the translucent layer has to be tested
+     * against.
+     */
+    private void importGlDepth() {
+        GL11C.glGetError();
+        int prevDraw = GL11C.glGetInteger(GL30C.GL_DRAW_FRAMEBUFFER_BINDING);
+        GL30C.glBindFramebuffer(GL30C.GL_DRAW_FRAMEBUFFER, glDepthBlitFbo);
+        GL30C.glBlitFramebuffer(0, 0, width, height, 0, 0, width, height,
+                GL11C.GL_DEPTH_BUFFER_BIT, GL11C.GL_NEAREST);
+        GL30C.glBindFramebuffer(GL30C.GL_DRAW_FRAMEBUFFER, prevDraw);
+        int error = GL11C.glGetError();
+        if (error != 0 && !glErrorLogged) {
+            glErrorLogged = true;
+            LOGGER.error("glBlitFramebuffer(depth back into Vulkan) failed with 0x{}",
+                    Integer.toHexString(error));
+        }
+        try (MemoryStack stack = stackPush()) {
+            IntBuffer noBuffers = stack.mallocInt(0);
+            IntBuffer textures = stack.ints(glDepthTexture);
+            IntBuffer layouts = stack.ints(EXTSemaphore.GL_LAYOUT_DEPTH_STENCIL_ATTACHMENT_EXT);
+            EXTSemaphore.glSignalSemaphoreEXT(glTranslucentSignalSemaphore, noBuffers, textures, layouts);
+        }
+        // Without this the signal can sit in the GL command stream while the
+        // Vulkan queue is already waiting on it, and neither side moves.
+        GL11C.glFlush();
+    }
+
+    /** Blends the translucent target over the game's frame. */
+    private void compositeTranslucent() {
+        try (MemoryStack stack = stackPush()) {
+            IntBuffer noBuffers = stack.mallocInt(0);
+            IntBuffer textures = stack.ints(glTranslucentTexture);
+            IntBuffer layouts = stack.ints(EXTSemaphore.GL_LAYOUT_SHADER_READ_ONLY_EXT);
+            EXTSemaphore.glWaitSemaphoreEXT(glTranslucentWaitSemaphore, noBuffers, textures, layouts);
+
+            int prevProgram = GL11C.glGetInteger(GL20C.GL_CURRENT_PROGRAM);
+            int prevActive = GL11C.glGetInteger(GL13C.GL_ACTIVE_TEXTURE);
+            org.lwjgl.opengl.GL11.glPushAttrib(org.lwjgl.opengl.GL11.GL_ENABLE_BIT
+                    | org.lwjgl.opengl.GL11.GL_DEPTH_BUFFER_BIT
+                    | org.lwjgl.opengl.GL11.GL_COLOR_BUFFER_BIT
+                    | org.lwjgl.opengl.GL11.GL_TEXTURE_BIT
+                    | org.lwjgl.opengl.GL11.GL_CURRENT_BIT
+                    | org.lwjgl.opengl.GL11.GL_POLYGON_BIT);
+
+            GL11C.glDisable(org.lwjgl.opengl.GL11.GL_ALPHA_TEST);
+            GL11C.glDisable(GL11C.GL_CULL_FACE);
+            GL11C.glDisable(GL11C.GL_SCISSOR_TEST);
+            // Occlusion was settled by the depth test in the Vulkan pass, so
+            // this only has to put the colour down in the right proportion.
+            GL11C.glDisable(GL11C.GL_DEPTH_TEST);
+            GL11C.glDepthMask(false);
+            GL11C.glEnable(GL11C.GL_BLEND);
+            // The target holds premultiplied colour, so the source is added as
+            // it is rather than being scaled by its alpha a second time.
+            GL11C.glBlendFunc(GL11C.GL_ONE, GL11C.GL_ONE_MINUS_SRC_ALPHA);
+
+            GL20C.glUseProgram(translucentCompositeProgram);
+            GL13C.glActiveTexture(GL13C.GL_TEXTURE0);
+            GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, glTranslucentTexture);
+
+            org.lwjgl.opengl.GL11.glBegin(org.lwjgl.opengl.GL11.GL_QUADS);
+            org.lwjgl.opengl.GL11.glVertex2f(-1.0f, -1.0f);
+            org.lwjgl.opengl.GL11.glVertex2f(1.0f, -1.0f);
+            org.lwjgl.opengl.GL11.glVertex2f(1.0f, 1.0f);
+            org.lwjgl.opengl.GL11.glVertex2f(-1.0f, 1.0f);
+            org.lwjgl.opengl.GL11.glEnd();
+
+            org.lwjgl.opengl.GL11.glPopAttrib();
+            GL20C.glUseProgram(prevProgram);
+            GL13C.glActiveTexture(prevActive);
+            GL11C.glFlush();
         }
     }
 
@@ -1151,6 +1353,20 @@ final class VkTerrainRenderer {
             commandBuffer = commandBuffers[0];
             fence = fences[0];
 
+            // The translucent pass is a submission of its own, so it needs a
+            // command buffer of its own per frame in flight — the opaque one is
+            // already submitted and cannot be added to.
+            PointerBuffer pTranslucentCmd = stack.mallocPointer(framesInFlight);
+            check(vkAllocateCommandBuffers(device(), allocInfo, pTranslucentCmd),
+                    "vkAllocateCommandBuffers(translucent)");
+            translucentCommandBuffers = new VkCommandBuffer[framesInFlight];
+            translucentFences = new long[framesInFlight];
+            for (int i = 0; i < framesInFlight; i++) {
+                translucentCommandBuffers[i] = new VkCommandBuffer(pTranslucentCmd.get(i), device());
+                check(vkCreateFence(device(), fenceInfo, null, pFence), "vkCreateFence(translucent)");
+                translucentFences[i] = pFence.get(0);
+            }
+
             VkExportSemaphoreCreateInfo export = VkExportSemaphoreCreateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO)
                     .handleTypes(Interop.SEMAPHORE_HANDLE_TYPE);
@@ -1164,6 +1380,12 @@ final class VkTerrainRenderer {
             vkWaitSemaphore = pSem.get(0);
             glWaitSemaphore = importSemaphore(stack, vkSignalSemaphore);
             glSignalSemaphore = importSemaphore(stack, vkWaitSemaphore);
+            check(vkCreateSemaphore(device(), semInfo, null, pSem), "vkCreateSemaphore(translucent)");
+            vkTranslucentSignalSemaphore = pSem.get(0);
+            check(vkCreateSemaphore(device(), semInfo, null, pSem), "vkCreateSemaphore(translucent)");
+            vkTranslucentWaitSemaphore = pSem.get(0);
+            glTranslucentWaitSemaphore = importSemaphore(stack, vkTranslucentSignalSemaphore);
+            glTranslucentSignalSemaphore = importSemaphore(stack, vkTranslucentWaitSemaphore);
 
             createDescriptorInfrastructure(stack);
             createDrawBatches(stack);
@@ -1461,7 +1683,7 @@ final class VkTerrainRenderer {
                 // Three sets per frame in flight, one per layer, and they all
                 // read the same frame constants.
                 VkDescriptorBufferInfo.Buffer frameInfo = VkDescriptorBufferInfo.calloc(1, stack);
-                frameInfo.get(0).buffer(frameUniformBuffers[i / 3]).offset(0).range(FRAME_UNIFORM_BYTES);
+                frameInfo.get(0).buffer(frameUniformBuffers[i / BATCHES_PER_FRAME]).offset(0).range(FRAME_UNIFORM_BYTES);
                 int write = i * 4;
                 writes.get(write)
                         .sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET)
@@ -1665,8 +1887,9 @@ final class VkTerrainRenderer {
 
         // ALPHA_TEST (constant_id 0) off for SOLID, on for the CUTOUT layers.
         // Booleans travel as a 32-bit value, like VkBool32.
-        VkSpecializationMapEntry.Buffer specEntry = VkSpecializationMapEntry.calloc(1, stack);
+        VkSpecializationMapEntry.Buffer specEntry = VkSpecializationMapEntry.calloc(2, stack);
         specEntry.get(0).constantID(0).offset(0).size(4);
+        specEntry.get(1).constantID(1).offset(4).size(4);
 
         VkGraphicsPipelineCreateInfo.Buffer pipelineInfo =
                 VkGraphicsPipelineCreateInfo.calloc(TERRAIN_PIPELINES.length, stack);
@@ -1674,7 +1897,9 @@ final class VkTerrainRenderer {
             TerrainPipeline spec = TERRAIN_PIPELINES[variant];
             VkSpecializationInfo specInfo = VkSpecializationInfo.calloc(stack)
                     .pMapEntries(specEntry)
-                    .pData(stack.bytes((byte) (spec.alphaTest ? 1 : 0), (byte) 0, (byte) 0, (byte) 0));
+                    .pData(stack.bytes(
+                            (byte) (spec.alphaTest ? 1 : 0), (byte) 0, (byte) 0, (byte) 0,
+                            (byte) (spec.blend ? 1 : 0), (byte) 0, (byte) 0, (byte) 0));
 
             VkPipelineDepthStencilStateCreateInfo depthState =
                     VkPipelineDepthStencilStateCreateInfo.calloc(stack)
@@ -1690,17 +1915,22 @@ final class VkTerrainRenderer {
                     .colorWriteMask(VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT
                             | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT);
             if (spec.blend) {
-                // Copied from what the game asks OpenGL for before its own
-                // translucent pass, EntityRenderer.renderWorldPass:
-                // tryBlendFuncSeparate(SRC_ALPHA, ONE_MINUS_SRC_ALPHA, ONE, ZERO).
-                // The alpha channel is replaced rather than accumulated, which
-                // is what lets the result be composited over the game's frame.
+                // Premultiplied "over", not the SRC_ALPHA form the game uses.
+                //
+                // Vanilla blends water straight onto its finished frame, once.
+                // Here it happens twice — into a target of its own, and then
+                // compositing that target over the frame — and "over" only
+                // survives being split like that if the colour carries its
+                // coverage. With straight alpha, two overlapping water surfaces
+                // would each be scaled by their alpha again at composite time
+                // and the overlap would come out too dark. The shader writes
+                // colour already multiplied by alpha; see BLEND in terrain.frag.
                 blendAttachment.get(0)
-                        .srcColorBlendFactor(VK_BLEND_FACTOR_SRC_ALPHA)
+                        .srcColorBlendFactor(VK_BLEND_FACTOR_ONE)
                         .dstColorBlendFactor(VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA)
                         .colorBlendOp(VK_BLEND_OP_ADD)
                         .srcAlphaBlendFactor(VK_BLEND_FACTOR_ONE)
-                        .dstAlphaBlendFactor(VK_BLEND_FACTOR_ZERO)
+                        .dstAlphaBlendFactor(VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA)
                         .alphaBlendOp(VK_BLEND_OP_ADD);
             }
             VkPipelineColorBlendStateCreateInfo blend = VkPipelineColorBlendStateCreateInfo.calloc(stack)
@@ -1748,6 +1978,44 @@ final class VkTerrainRenderer {
     private void createCompositeProgram() {
         compositePrograms[0] = buildCompositeProgram(true);
         compositePrograms[1] = buildCompositeProgram(false);
+        translucentCompositeProgram = buildTranslucentCompositeProgram();
+    }
+
+    /**
+     * Composite for the translucent target, which differs in one thing that
+     * matters: it keeps the alpha it sampled instead of forcing it to 1. The
+     * opaque composite replaces what is underneath, this one is blended over
+     * it, and the proportion is carried in that channel.
+     */
+    private int buildTranslucentCompositeProgram() {
+        String vertSrc = "#version 120\n"
+                + "void main() { gl_Position = vec4(gl_Vertex.xy, 0.0, 1.0); }\n";
+        String fragSrc = "#version 120\n"
+                + "uniform sampler2D uColor;\n"
+                + "uniform vec2 uInvSize;\n"
+                + "void main() {\n"
+                + "    vec4 c = texture2D(uColor, gl_FragCoord.xy * uInvSize);\n"
+                + "    if (c.a < 0.004) discard;\n"
+                + "    gl_FragColor = c;\n"
+                + "}\n";
+        int vert = compileGlShader(GL20C.GL_VERTEX_SHADER, vertSrc);
+        int frag = compileGlShader(GL20C.GL_FRAGMENT_SHADER, fragSrc);
+        int program = GL20C.glCreateProgram();
+        GL20C.glAttachShader(program, vert);
+        GL20C.glAttachShader(program, frag);
+        GL20C.glLinkProgram(program);
+        if (GL20C.glGetProgrami(program, GL20C.GL_LINK_STATUS) == 0) {
+            throw new IllegalStateException("Translucent composite link failed: "
+                    + GL20C.glGetProgramInfoLog(program));
+        }
+        GL20C.glDeleteShader(vert);
+        GL20C.glDeleteShader(frag);
+        int prev = GL11C.glGetInteger(GL20C.GL_CURRENT_PROGRAM);
+        GL20C.glUseProgram(program);
+        GL20C.glUniform1i(GL20C.glGetUniformLocation(program, "uColor"), 0);
+        translucentInvSizeUniform = GL20C.glGetUniformLocation(program, "uInvSize");
+        GL20C.glUseProgram(prev);
+        return program;
     }
 
     /**
@@ -1875,6 +2143,10 @@ final class VkTerrainRenderer {
             for (int i = 0; i < compositePrograms.length; i++) {
                 GL20C.glUseProgram(compositePrograms[i]);
                 GL20C.glUniform2f(compositeInvSizeUniforms[i], 1.0f / width, 1.0f / height);
+            }
+            if (translucentCompositeProgram != 0 && translucentInvSizeUniform != -1) {
+                GL20C.glUseProgram(translucentCompositeProgram);
+                GL20C.glUniform2f(translucentInvSizeUniform, 1.0f / width, 1.0f / height);
             }
             GL20C.glUseProgram(prev);
 
@@ -2442,11 +2714,23 @@ final class VkTerrainRenderer {
         vkDestroySampler(device(), lightmapSampler, null);
         vkDestroySemaphore(device(), vkSignalSemaphore, null);
         vkDestroySemaphore(device(), vkWaitSemaphore, null);
+        if (vkTranslucentSignalSemaphore != 0) {
+            vkDestroySemaphore(device(), vkTranslucentSignalSemaphore, null);
+            vkDestroySemaphore(device(), vkTranslucentWaitSemaphore, null);
+            vkTranslucentSignalSemaphore = 0;
+            vkTranslucentWaitSemaphore = 0;
+        }
         if (fences != null) {
             for (long frameFence : fences) {
                 vkDestroyFence(device(), frameFence, null);
             }
             fences = null;
+        }
+        if (translucentFences != null) {
+            for (long frameFence : translucentFences) {
+                vkDestroyFence(device(), frameFence, null);
+            }
+            translucentFences = null;
         }
         if (queryPool != 0) {
             vkDestroyQueryPool(device(), queryPool, null);

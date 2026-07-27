@@ -337,6 +337,30 @@ final class VulkanOptions {
                                         VulkanConfig.setNearPlaneHundredths(value);
                                     }
                                 }),
+                        new VSwitchOption("Vulkan Water and Glass",
+                                "Draw the translucent layer in Vulkan instead of leaving it to "
+                                        + "OpenGL. Not a speed setting — measured, that layer is "
+                                        + "2.6% of a frame either way. What it changes is that fog "
+                                        + "reaches all of the terrain: everything this mod draws "
+                                        + "fades into the distance, and water, being the one "
+                                        + "surface still drawn the old way, stays clear while the "
+                                        + "blocks around it do not. It also has to happen before "
+                                        + "the game's own chunk buffers can be dropped, which is "
+                                        + "where the video memory saving lives. Off by default "
+                                        + "while it is new; turn it off again if water looks "
+                                        + "wrong against entities.",
+                                Cost.of(Level.NONE, Level.LOW, Level.LOW), null,
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return VulkanConfig.isVulkanTranslucent();
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        VulkanConfig.setVulkanTranslucent(value);
+                                    }
+                                }),
                         new VSwitchOption("Fast Frustum Test",
                                 "Decide whether something is off screen from its far corner "
                                         + "instead of from all eight. It is the same answer by the "

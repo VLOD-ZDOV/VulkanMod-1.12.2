@@ -71,8 +71,14 @@ public final class VulkanConfig {
      * the 24-bit buffer the game uses. At vanilla's 0.05 that is 0.107 blocks
      * three hundred out — wider than the 0.125 a snow layer sits above what it
      * covers, which is why distant snow speckles with the block underneath.
+     *
+     * 0.1 rather than the 0.2 first shipped. The plane clips whatever is nearer
+     * to the eye than itself, and at 0.2 standing against a wall could open a
+     * view straight through it. Halving it halves that reach while leaving the
+     * resolvable gap at 0.054 blocks, still less than half of the 0.125 the
+     * ripple needs — the fix keeps its margin and the side effect does not.
      */
-    static final int DEF_NEAR_PLANE_HUNDREDTHS = 20;
+    static final int DEF_NEAR_PLANE_HUNDREDTHS = 10;
     /**
      * Memoise the seed of the visibility walk. On by default: the key is exact
      * (camera block position plus the identity of that section's CompiledChunk,
@@ -100,6 +106,20 @@ public final class VulkanConfig {
      * and the switch is here to rule it out rather than to choose.
      */
     static final boolean DEF_FAST_FRUSTUM_TEST = true;
+    /**
+     * Draw water and glass in Vulkan instead of leaving them to OpenGL.
+     *
+     * On, once water, glass and mobs seen through them were checked by eye and
+     * the layer was confirmed to reach this renderer at all — 201 snapshots
+     * where vanilla drew none of it, no refusals, no Vulkan errors.
+     *
+     * Measured, it is not a speed setting: the layer costs 2.6% of a frame
+     * either way, and recording the extra pass adds about 0.15 ms of CPU. What
+     * it buys is that the terrain finally has fog on all of it, and that the
+     * vanilla chunk buffers stop being needed for anything, which is what D6
+     * waits on.
+     */
+    static final boolean DEF_VULKAN_TRANSLUCENT = true;
     static final boolean DEF_FOG = true;
     static final boolean DEF_ZOOM = true;
     /** Stored as an integer so it fits the config and the slider; 4 = quarter FOV. */
@@ -127,6 +147,7 @@ public final class VulkanConfig {
     private static boolean visibilitySeedCache = DEF_VISIBILITY_SEED_CACHE;
     private static boolean ownVisibilityWalk = DEF_OWN_VISIBILITY_WALK;
     private static boolean fastFrustumTest = DEF_FAST_FRUSTUM_TEST;
+    private static boolean vulkanTranslucent = DEF_VULKAN_TRANSLUCENT;
     private static boolean fogEnabled = DEF_FOG;
     private static boolean zoomEnabled = DEF_ZOOM;
     private static int zoomFactor = DEF_ZOOM_FACTOR;
@@ -211,6 +232,13 @@ public final class VulkanConfig {
                         + "positions to reject one box, and the chunk visibility search does this "
                         + "once for every chunk it reaches. On by default; the switch is for "
                         + "ruling it out, not for choosing.");
+        vulkanTranslucent = config.getBoolean("vulkanTranslucent", CATEGORY_OPTIMIZATION,
+                DEF_VULKAN_TRANSLUCENT,
+                "Draw water and glass in Vulkan rather than leaving them on the OpenGL path. Not "
+                        + "a speed setting: the layer measures 2.6% of a frame either way. It is "
+                        + "here because the Vulkan terrain has fog and the OpenGL leftovers do "
+                        + "not, so water is currently the one surface that stays clear when "
+                        + "everything around it fades. Off by default while it is new.");
         fogEnabled = config.getBoolean("fog", CATEGORY_GENERAL, DEF_FOG,
                 "Fade Vulkan terrain into the distance the way the rest of the scene already does. "
                         + "Off leaves the world ending in a hard edge, which is a little faster.");
@@ -247,6 +275,7 @@ public final class VulkanConfig {
         setVisibilitySeedCacheEnabled(DEF_VISIBILITY_SEED_CACHE);
         setOwnVisibilityWalk(DEF_OWN_VISIBILITY_WALK);
         setFastFrustumTest(DEF_FAST_FRUSTUM_TEST);
+        setVulkanTranslucent(DEF_VULKAN_TRANSLUCENT);
         setFogEnabled(DEF_FOG);
         setZoomEnabled(DEF_ZOOM);
         setZoomFactor(DEF_ZOOM_FACTOR);
@@ -297,6 +326,15 @@ public final class VulkanConfig {
     public static void setOwnVisibilityWalk(boolean value) {
         ownVisibilityWalk = value;
         store(CATEGORY_OPTIMIZATION, "ownVisibilityWalk", value);
+    }
+
+    public static boolean isVulkanTranslucent() {
+        return vulkanTranslucent;
+    }
+
+    public static void setVulkanTranslucent(boolean value) {
+        vulkanTranslucent = value;
+        store(CATEGORY_OPTIMIZATION, "vulkanTranslucent", value);
     }
 
     public static boolean isFastFrustumTest() {
