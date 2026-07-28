@@ -67,6 +67,9 @@ public final class FrameGraph {
 
     private static final int COLOUR_MIN = 0x55C355;
     private static final int COLOUR_MAX = 0xE0A040;
+    private static final int COLOUR_BACKGROUND = 0xE0000000;
+    private static final int COLOUR_TRACE = 0xFFFFFFFF;
+    private static final int COLOUR_BASELINE = 0x60FFFFFF;
 
     private static final int[] frameMicros = new int[SAMPLES];
     private static int writeIndex;
@@ -80,8 +83,17 @@ public final class FrameGraph {
     private static int statAverage;
     private static int statOnePercentLow;
 
-    /** Self-measurement, so the overlay's own cost is reported rather than claimed. */
+    /**
+     * Self-measurement, so the overlay's own cost is reported rather than
+     * claimed — and the first thing it reported was that the claim was wrong.
+     * "One draw call, so it costs nothing" measured at 0.2 to 0.5 ms a frame,
+     * which is what the entire Vulkan terrain pass costs. Split in two here
+     * because the fix depends on which half it is, and guessing that has cost
+     * this project a day more than once.
+     */
     private static long drawNanos;
+    private static long barNanos;
+    private static long textNanos;
     private static long drawFrames;
 
     private FrameGraph() {
@@ -126,28 +138,42 @@ public final class FrameGraph {
         int bottom = resolution.getScaledHeight() - MARGIN;
         int top = bottom - HEIGHT;
 
-        // The bars are scaled against the worst frame in the window rather than
-        // a fixed ceiling, so the shape stays readable at any framerate. A
-        // floor keeps a perfectly steady scene from drawing full-height noise.
-        int scaleMicros = Math.max(statMax, 4000);
+        // Drawn as deviation from the middle rather than as bars standing on
+        // the floor. A frame quicker than the window's average goes down, a
+        // slower one goes up, and a perfectly even scene is a flat line — which
+        // is the thing worth seeing at a glance. Bars from the floor spend most
+        // of their height saying "the framerate is roughly what the number
+        // above already said", and the interesting part is the wobble on top.
+        int centre = top + HEIGHT / 2;
+        int baseline = Math.max(statAverage, 1);
+        int spread = Math.max(Math.max(statMax - baseline, baseline - statMin), 500);
 
-        Gui.drawRect(left - 1, top - 1, left + WIDTH + 1, bottom + 1, 0x90000000);
+        long barsStarted = System.nanoTime();
+        Gui.drawRect(left - 1, top - 1, left + WIDTH + 1, bottom + 1, COLOUR_BACKGROUND);
 
         GlStateManager.disableTexture2D();
         GlStateManager.enableBlend();
         Tessellator tessellator = Tessellator.getInstance();
         BufferBuilder buffer = tessellator.getBuffer();
         buffer.begin(7, DefaultVertexFormats.POSITION_COLOR);
+        quad(buffer, left, centre, left + WIDTH, centre + 1, COLOUR_BASELINE);
         for (int i = 0; i < filled; i++) {
             int micros = frameMicros[(writeIndex - filled + i + SAMPLES * 2) % SAMPLES];
-            int barHeight = Math.max(1, Math.min(HEIGHT, micros * HEIGHT / scaleMicros));
+            int offset = (micros - baseline) * (HEIGHT / 2) / spread;
+            offset = Math.max(-HEIGHT / 2, Math.min(HEIGHT / 2, offset));
             int x = left + i * WIDTH / SAMPLES;
-            int colour = barColour(micros);
-            quad(buffer, x, bottom - barHeight, x + 1, bottom, colour);
+            if (offset >= 0) {
+                quad(buffer, x, centre - offset, x + 1, centre + 1, COLOUR_TRACE);
+            } else {
+                quad(buffer, x, centre, x + 1, centre - offset + 1, COLOUR_TRACE);
+            }
         }
         tessellator.draw();
         GlStateManager.disableBlend();
         GlStateManager.enableTexture2D();
+        barNanos += System.nanoTime() - barsStarted;
+
+        long textStarted = System.nanoTime();
 
         // Laid out the way DXVK lays its frame-time readout out: the best and
         // the worst frame of the window named and coloured, sitting on the two
@@ -169,26 +195,9 @@ public final class FrameGraph {
         mc.fontRenderer.drawStringWithShadow(low,
                 left + WIDTH - mc.fontRenderer.getStringWidth(low), top - 21, 0xB0B0B0);
 
+        textNanos += System.nanoTime() - textStarted;
         drawNanos += System.nanoTime() - started;
         drawFrames++;
-    }
-
-    /**
-     * Green while frames are quick, red once they are slow enough to feel.
-     * The thresholds are frame times rather than framerates because that is
-     * what a bar's height is.
-     */
-    private static int barColour(int micros) {
-        if (micros <= 8_333) {          // 120 fps and better
-            return 0xFF55C355;
-        }
-        if (micros <= 16_667) {         // down to 60
-            return 0xFFC3C355;
-        }
-        if (micros <= 33_333) {         // down to 30
-            return 0xFFE0A040;
-        }
-        return 0xFFE06060;
     }
 
     private static void refreshStats(long now) {
@@ -235,9 +244,13 @@ public final class FrameGraph {
         if (drawFrames == 0) {
             return "frame graph: off";
         }
-        String line = String.format("frame graph: %.3f ms per frame to draw over %d frames",
-                drawNanos / 1_000_000.0 / drawFrames, drawFrames);
+        String line = String.format(
+                "frame graph: %.3f ms per frame (bars %.3f, text %.3f) over %d frames",
+                drawNanos / 1_000_000.0 / drawFrames, barNanos / 1_000_000.0 / drawFrames,
+                textNanos / 1_000_000.0 / drawFrames, drawFrames);
         drawNanos = 0L;
+        barNanos = 0L;
+        textNanos = 0L;
         drawFrames = 0L;
         return line;
     }
