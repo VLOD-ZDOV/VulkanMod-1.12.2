@@ -93,6 +93,11 @@ final class VkChunkMirror {
         return largestEntrySize;
     }
 
+    /** 0 while no chunk has ever carried materials; see {@link #materialBuffer}. */
+    synchronized long materialBuffer() {
+        return materialBuffer;
+    }
+
     synchronized long geometryBuffer() {
         return geometryBuffer;
     }
@@ -288,6 +293,42 @@ final class VkChunkMirror {
     private long geometryBudget;
     private long initialGeometryCapacity;
 
+    /**
+     * One byte per vertex saying what that vertex is made of, in a buffer that
+     * runs alongside the geometry rather than inside it.
+     *
+     * The vertex is the game's own 28 bytes and is mirrored unchanged, so there
+     * is nowhere in it to put this. A second buffer indexed by the same vertex
+     * number costs no allocator of its own: every suballocation in the geometry
+     * buffer begins on a vertex boundary, so a chunk's materials live at its
+     * offset divided by the stride, and the indirect draw's vertexOffset — which
+     * Vulkan applies to every bound vertex buffer, not just the first — lands on
+     * them without anything being told twice where the chunk is.
+     *
+     * It exists only once materials are actually being recorded. Nothing is
+     * allocated for a feature that is switched off, and while it is missing the
+     * shaders are told so and read nothing.
+     */
+    private long materialBuffer;
+    private long materialMemory;
+    private long materialCapacity;
+
+    /**
+     * Material runs handed over by the thread that built a chunk, waiting for
+     * the geometry they describe.
+     *
+     * They arrive first: the game hands a finished chunk to the render thread,
+     * and the layer's buffer is uploaded some time after the loop that produced
+     * it has moved on. Indexed by slot, like the epochs, because slots are dense
+     * and this is read for every upload.
+     */
+    private final Object materialLock = new Object();
+    private int[][] slotRuns = new int[1024][];
+    private int[] slotRunCount = new int[1024];
+    private long materialsStaged;
+    private long materialsApplied;
+    private long materialsMissing;
+
     private long uploadCommandPool;
     private VkCommandBuffer uploadCommandBuffer;
     private long uploadFence;
@@ -359,13 +400,40 @@ final class VkChunkMirror {
      * every queued region names offsets in whatever is current right now.
      */
     private void emitPendingCopies() {
-        if (pendingCopyCount == 0) {
-            return;
+        if (pendingCopyCount != 0) {
+            pendingCopies.position(0).limit(pendingCopyCount);
+            vkCmdCopyBuffer(uploadCommandBuffer, stagingBuffer, geometryBuffer, pendingCopies);
+            pendingCopies.limit(pendingCopies.capacity());
+            pendingCopyCount = 0;
         }
-        pendingCopies.position(0).limit(pendingCopyCount);
-        vkCmdCopyBuffer(uploadCommandBuffer, stagingBuffer, geometryBuffer, pendingCopies);
-        pendingCopies.limit(pendingCopies.capacity());
-        pendingCopyCount = 0;
+        if (pendingMaterialCopyCount != 0) {
+            // A separate call because the destination is a different buffer,
+            // not because the regions are different in kind: they come from the
+            // same ring and are queued in the same breath as the geometry.
+            pendingMaterialCopies.position(0).limit(pendingMaterialCopyCount);
+            vkCmdCopyBuffer(uploadCommandBuffer, stagingBuffer, materialBuffer, pendingMaterialCopies);
+            pendingMaterialCopies.limit(pendingMaterialCopies.capacity());
+            pendingMaterialCopyCount = 0;
+        }
+    }
+
+    private VkBufferCopy.Buffer pendingMaterialCopies;
+    private int pendingMaterialCopyCount;
+
+    private void queueMaterialCopy(long srcOffset, long dstOffset, int size) {
+        if (pendingMaterialCopies == null) {
+            pendingMaterialCopies = VkBufferCopy.calloc(256);
+        } else if (pendingMaterialCopyCount == pendingMaterialCopies.capacity()) {
+            VkBufferCopy.Buffer grown = VkBufferCopy.calloc(pendingMaterialCopies.capacity() * 2);
+            MemoryUtil.memCopy(MemoryUtil.memAddress(pendingMaterialCopies),
+                    MemoryUtil.memAddress(grown),
+                    (long) pendingMaterialCopyCount * VkBufferCopy.SIZEOF);
+            pendingMaterialCopies.free();
+            pendingMaterialCopies = grown;
+        }
+        pendingMaterialCopies.get(pendingMaterialCopyCount)
+                .srcOffset(srcOffset).dstOffset(dstOffset).size(size);
+        pendingMaterialCopyCount++;
     }
 
     /** Called by the terrain renderer at the start of each frame. */
@@ -467,6 +535,90 @@ final class VkChunkMirror {
         slotEpoch[slot]++;
     }
 
+    /**
+     * Takes the material runs for a chunk layer, before its geometry arrives.
+     *
+     * The array belongs to the caller and is reused, so it is copied here. Runs
+     * are pairs — one past the last vertex, and what that stretch is made of —
+     * and there are eight or so of them for a chunk layer, so the copy is a few
+     * dozen bytes on a path that already moves tens of kilobytes.
+     */
+    void stageMaterials(int slot, int[] runs, int runCount) {
+        if (slot < 0 || runCount <= 0) {
+            return;
+        }
+        synchronized (materialLock) {
+            if (slot >= slotRuns.length) {
+                int length = slotRuns.length;
+                while (slot >= length) {
+                    length *= 2;
+                }
+                int[][] grownRuns = new int[length][];
+                System.arraycopy(slotRuns, 0, grownRuns, 0, slotRuns.length);
+                int[] grownCount = new int[length];
+                System.arraycopy(slotRunCount, 0, grownCount, 0, slotRunCount.length);
+                slotRuns = grownRuns;
+                slotRunCount = grownCount;
+            }
+            int[] stored = slotRuns[slot];
+            if (stored == null || stored.length < runCount * 2) {
+                stored = new int[Math.max(32, runCount * 2)];
+                slotRuns[slot] = stored;
+            }
+            System.arraycopy(runs, 0, stored, 0, runCount * 2);
+            slotRunCount[slot] = runCount;
+            materialsStaged++;
+        }
+    }
+
+    /**
+     * Expands this slot's runs into one byte per vertex, and consumes them.
+     *
+     * Everything not covered by a run is left plain, which is also what a chunk
+     * with no runs at all gets. That is the safe direction: an unknown material
+     * draws exactly as the terrain has always drawn.
+     */
+    private void writeMaterials(int slot, int vertexCount, long address) {
+        int[] runs = null;
+        int count = 0;
+        synchronized (materialLock) {
+            if (slot < slotRunCount.length) {
+                count = slotRunCount[slot];
+                runs = slotRuns[slot];
+                slotRunCount[slot] = 0;
+            }
+        }
+        if (count == 0 || runs == null) {
+            MemoryUtil.memSet(address, 0, vertexCount);
+            materialsMissing++;
+            return;
+        }
+        int written = 0;
+        for (int r = 0; r < count && written < vertexCount; r++) {
+            int end = Math.min(runs[r * 2], vertexCount);
+            if (end > written) {
+                MemoryUtil.memSet(address + written, runs[r * 2 + 1], end - written);
+                written = end;
+            }
+        }
+        if (written < vertexCount) {
+            // The runs described fewer vertices than arrived. Not expected —
+            // they are counted off the same buffer — but the tail is filled
+            // rather than left as whatever the last chunk in this range was.
+            MemoryUtil.memSet(address + written, 0, vertexCount - written);
+        }
+        materialsApplied++;
+    }
+
+    /** Forgets any runs waiting for a slot that is being reused or freed. */
+    private void dropMaterials(int slot) {
+        synchronized (materialLock) {
+            if (slot < slotRunCount.length) {
+                slotRunCount[slot] = 0;
+            }
+        }
+    }
+
     /** The staged copy for this slot if it still matches, else -1. */
     private long takeStaged(int slot, int size) {
         synchronized (workerLock) {
@@ -493,19 +645,43 @@ final class VkChunkMirror {
             entry = createEntry(alignVertexCapacity(Math.max(size, 4096)));
             entries.put(slot, entry);
         }
+        if (materialsStaged > 0 && geometryBuffer != 0) {
+            // After the entry, never before: allocating it is what may grow the
+            // geometry buffer, and this buffer is sized from that one. First use
+            // and growth are both rare and both stop the GPU, which is why this
+            // asks rather than being checked on every upload.
+            ensureMaterialBuffer();
+        }
         if (size > 0) {
+            int vertexCount = size / BLOCK_VERTEX_STRIDE;
+            boolean materials = materialBuffer != 0 && vertexCount > 0;
             // Before taking the staged copy: growing the ring reallocates the
             // memory it points into, and discards the staged records with it.
-            ensureStagingRing(size);
+            ensureStagingRing(size + (materials ? vertexCount : 0));
             beginUploads();
             long src = takeStaged(slot, size);
+            long materialSrc = -1L;
             if (src < 0) {
                 // May submit and wait before returning 0, so it has to come
                 // before the copy is recorded but after the buffer is open.
-                src = allocateStagingRange(size);
+                // Both ranges are taken at once so there is only one such point.
+                long range = allocateStagingRange(size + (materials ? vertexCount : 0));
+                src = range;
+                materialSrc = range + size;
                 MemoryUtil.memCopy(MemoryUtil.memAddress(data), stagingMappedAddress + src, size);
+            } else if (materials) {
+                // The geometry is already in the ring's builder region, which
+                // this cannot disturb: it only ever rewinds the render thread's
+                // own half.
+                materialSrc = allocateStagingRange(vertexCount);
             }
             queueCopy(src, entry.offset, size);
+            if (materials) {
+                writeMaterials(slot, vertexCount, stagingMappedAddress + materialSrc);
+                queueMaterialCopy(materialSrc, entry.offset / BLOCK_VERTEX_STRIDE, vertexCount);
+            } else {
+                dropMaterials(slot);
+            }
         }
         totalBytes += size - entry.size;
         entry.size = size;
@@ -525,6 +701,7 @@ final class VkChunkMirror {
             staged.remove(slot);
             bumpEpoch(slot);
         }
+        dropMaterials(slot);
         Entry entry = entries.remove(slot);
         if (entry != null) {
             totalBytes -= entry.size;
@@ -587,12 +764,26 @@ final class VkChunkMirror {
             offThread = workerStaged;
             onThread = workerRejected;
         }
-        return String.format("mirrored VBOs: %d (%.1f MiB VRAM of %.1f MiB buffer, %d uploads, "
+        String line = String.format("mirrored VBOs: %d (%.1f MiB VRAM of %.1f MiB buffer, %d uploads, "
                         + "staging ring %d MiB, %d wraps, %d copies off the render thread, "
                         + "%d refused)",
                 entries.size(), totalBytes / (1024.0 * 1024.0),
                 geometryCapacity / (1024.0 * 1024.0), uploadCount,
                 stagingCapacity / (1024 * 1024), stagingWraps, offThread, onThread);
+        if (materialsStaged == 0 && materialBuffer == 0) {
+            return line;
+        }
+        long applied;
+        long missing;
+        long staged;
+        synchronized (materialLock) {
+            applied = materialsApplied;
+            missing = materialsMissing;
+            staged = materialsStaged;
+        }
+        return line + String.format("; materials: %.1f MiB buffer, %d run tables handed over, "
+                        + "%d applied, %d uploads with none",
+                materialCapacity / (1024.0 * 1024.0), staged, applied, missing);
     }
 
     private Entry createEntry(int capacity) {
@@ -725,6 +916,18 @@ final class VkChunkMirror {
             geometryCapacity = 0;
             nextGeometryOffset = 0;
             freeRanges.clear();
+        }
+        if (materialBuffer != 0) {
+            vkDestroyBuffer(device(), materialBuffer, null);
+            vkFreeMemory(device(), materialMemory, null);
+            materialBuffer = 0;
+            materialMemory = 0;
+            materialCapacity = 0;
+        }
+        if (pendingMaterialCopies != null) {
+            pendingMaterialCopies.free();
+            pendingMaterialCopies = null;
+            pendingMaterialCopyCount = 0;
         }
         if (pendingCopies != null) {
             pendingCopies.free();
@@ -988,6 +1191,75 @@ final class VkChunkMirror {
             retiredBuffers.add(new RetiredBuffer(oldBuffer, oldMemory, frameStamp));
         }
         LOGGER.info("Shared Vulkan chunk geometry buffer sized to {} MiB", capacity / (1024 * 1024));
+    }
+
+    /**
+     * Brings the material buffer up to one byte per vertex the geometry buffer
+     * can hold, keeping what is already in it.
+     *
+     * Called on first use rather than alongside the geometry buffer, so a
+     * session that never records materials never allocates for them. On growth
+     * it follows the geometry buffer exactly: fill the new one with plain,
+     * copy the used part across, retire the old one for the frames that still
+     * name it.
+     */
+    private void ensureMaterialBuffer() {
+        long required = geometryCapacity / BLOCK_VERTEX_STRIDE;
+        // vkCmdFillBuffer works in whole words, and a buffer sized to a
+        // multiple of four is the simplest way to be allowed to fill all of it.
+        required = (required + 3L) & ~3L;
+        if (materialBuffer != 0 && required <= materialCapacity) {
+            return;
+        }
+        if (uploadsRecording) {
+            flushUploads();
+        }
+        waitForUploads();
+        long oldBuffer = materialBuffer;
+        long oldMemory = materialMemory;
+        long keep = oldBuffer == 0 ? 0L : (nextGeometryOffset / BLOCK_VERTEX_STRIDE) & ~3L;
+        try (MemoryStack stack = stackPush()) {
+            VkBufferCreateInfo info = VkBufferCreateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO)
+                    .size(required)
+                    .usage(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT
+                            | VK_BUFFER_USAGE_TRANSFER_SRC_BIT)
+                    .sharingMode(VK_SHARING_MODE_EXCLUSIVE);
+            LongBuffer pBuffer = stack.mallocLong(1);
+            check(vkCreateBuffer(device(), info, null, pBuffer), "vkCreateBuffer(chunk materials)");
+            materialBuffer = pBuffer.get(0);
+            VkMemoryRequirements req = VkMemoryRequirements.malloc(stack);
+            vkGetBufferMemoryRequirements(device(), materialBuffer, req);
+            VkMemoryAllocateInfo alloc = VkMemoryAllocateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO)
+                    .allocationSize(req.size())
+                    .memoryTypeIndex(findMemoryType(stack, req.memoryTypeBits(),
+                            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT));
+            LongBuffer pMemory = stack.mallocLong(1);
+            check(vkAllocateMemory(device(), alloc, null, pMemory), "vkAllocateMemory(chunk materials)");
+            materialMemory = pMemory.get(0);
+            check(vkBindBufferMemory(device(), materialBuffer, materialMemory, 0),
+                    "vkBindBufferMemory(chunk materials)");
+        }
+        materialCapacity = required;
+        beginUploads();
+        // Plain everywhere first. A chunk uploaded before this feature was
+        // switched on has no runs of its own, and reading whatever the memory
+        // came with would make a hillside water.
+        vkCmdFillBuffer(uploadCommandBuffer, materialBuffer, 0, VK_WHOLE_SIZE, 0);
+        if (oldBuffer != 0 && keep > 0) {
+            try (MemoryStack stack = stackPush()) {
+                VkBufferCopy.Buffer copy = VkBufferCopy.calloc(1, stack);
+                copy.get(0).srcOffset(0).dstOffset(0).size(keep);
+                vkCmdCopyBuffer(uploadCommandBuffer, oldBuffer, materialBuffer, copy);
+            }
+        }
+        flushUploads();
+        waitForUploads();
+        if (oldBuffer != 0) {
+            retiredBuffers.add(new RetiredBuffer(oldBuffer, oldMemory, frameStamp));
+        }
+        LOGGER.info("Chunk material buffer sized to {} KiB", required / 1024);
     }
 
     private int findMemoryType(MemoryStack stack, int typeBits, int properties) {

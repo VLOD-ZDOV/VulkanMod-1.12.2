@@ -129,6 +129,17 @@ public final class VulkanConfig {
      */
     static final boolean DEF_MATERIAL_TAGS = false;
     /**
+     * Paint the terrain by what it is made of instead of by its texture.
+     *
+     * A diagnostic, off by default. The material of a vertex is decided on the
+     * game side, carried to the GPU in a buffer of its own and read back in the
+     * shader, and every step of that is invisible when it works and just as
+     * invisible when it is off by a chunk. This makes the answer something you
+     * can look at: water blue, foliage green, glass yellow, lava orange,
+     * everything else grey.
+     */
+    static final boolean DEF_SHOW_MATERIALS = false;
+    /**
      * Queue a chunk that changed near the camera instead of rebuilding it on
      * the render thread.
      *
@@ -285,6 +296,7 @@ public final class VulkanConfig {
     private static boolean ownVisibilityWalk = DEF_OWN_VISIBILITY_WALK;
     private static boolean fastRebuildNear = DEF_FAST_REBUILD_NEAR;
     private static boolean materialTags = DEF_MATERIAL_TAGS;
+    private static boolean showMaterials = DEF_SHOW_MATERIALS;
     private static boolean buildNearOffThread = DEF_BUILD_NEAR_OFF_THREAD;
     private static boolean fastFrustumTest = DEF_FAST_FRUSTUM_TEST;
     private static boolean vulkanTranslucent = DEF_VULKAN_TRANSLUCENT;
@@ -399,6 +411,11 @@ public final class VulkanConfig {
                         + "place the answer exists is the rebuild loop, for the length of one "
                         + "call. Costs a branch and a counter read per block rendered, on the "
                         + "build threads. The diagnostics report says what that measured.");
+        showMaterials = config.getBoolean("showMaterials", CATEGORY_ADVANCED, DEF_SHOW_MATERIALS,
+                "Paint the terrain by what it is made of instead of by its texture: water blue, "
+                        + "foliage green, glass yellow, lava orange, everything else grey. A "
+                        + "diagnostic for the material buffer, which is invisible whether it is "
+                        + "right or wrong. Needs Material Tags on and a chunk rebuild to fill in.");
         buildNearOffThread = config.getBoolean("buildNearOffThread", CATEGORY_OPTIMIZATION,
                 DEF_BUILD_NEAR_OFF_THREAD,
                 "Queue a chunk that changed close to you for a builder thread instead of "
@@ -526,6 +543,7 @@ public final class VulkanConfig {
         setOwnVisibilityWalk(DEF_OWN_VISIBILITY_WALK);
         setFastRebuildNear(DEF_FAST_REBUILD_NEAR);
         setMaterialTags(DEF_MATERIAL_TAGS);
+        setShowMaterials(DEF_SHOW_MATERIALS);
         setBuildNearOffThread(DEF_BUILD_NEAR_OFF_THREAD);
         setFastFrustumTest(DEF_FAST_FRUSTUM_TEST);
         setVulkanTranslucent(DEF_VULKAN_TRANSLUCENT);
@@ -606,6 +624,16 @@ public final class VulkanConfig {
     public static void setMaterialTags(boolean value) {
         materialTags = value;
         store(CATEGORY_OPTIMIZATION, "materialTags", value);
+    }
+
+    public static boolean isShowMaterials() {
+        return showMaterials;
+    }
+
+    public static void setShowMaterials(boolean value) {
+        showMaterials = value;
+        store(CATEGORY_ADVANCED, "showMaterials", value);
+        applySystemProperties();
     }
 
     public static boolean isBuildNearOffThread() {
@@ -893,6 +921,7 @@ public final class VulkanConfig {
         System.setProperty("vulkanmod112.directionalLight", Integer.toString(directionalLight));
         System.setProperty("vulkanmod112.heightFog", Integer.toString(heightFog));
         System.setProperty("vulkanmod112.heightFogDepth", Integer.toString(heightFogDepth));
+        System.setProperty("vulkanmod112.showMaterials", Boolean.toString(showMaterials));
     }
 
     private static void store(String category, String key, int value) {

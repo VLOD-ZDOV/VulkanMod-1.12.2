@@ -136,6 +136,8 @@ public final class MaterialRuns {
     private static final AtomicLong tables = new AtomicLong();
     private static final AtomicLong runsTotal = new AtomicLong();
     private static final AtomicLong plainTables = new AtomicLong();
+    private static final AtomicLong published = new AtomicLong();
+    private static final AtomicLong reordered = new AtomicLong();
 
     private MaterialRuns() {
     }
@@ -192,14 +194,37 @@ public final class MaterialRuns {
     }
 
     /**
-     * The table recorded for a finished buffer.
+     * Sends a finished layer's runs to the renderer, keyed by the slot its
+     * geometry will arrive under.
      *
-     * @return null when nothing was recorded, which is every chunk while the
-     *         setting is off and every empty layer while it is on
+     * @param sorted whether the game is about to reorder this layer's quads.
+     *               It does that to the translucent layer, and only to that
+     *               one, so that water draws back to front — and the runs are
+     *               numbered by vertex, so after the reordering they describe
+     *               the wrong vertices. A layer made of a single material
+     *               survives it untouched, because there is nothing to permute
+     *               between; anything else is dropped rather than sent wrong.
+     *               That covers most water, since a chunk's translucent layer
+     *               is usually water and nothing else, and it leaves the mixed
+     *               ones plain until there is a real answer for them.
      */
-    public static Table take(BufferBuilder builder) {
+    public static void publish(int slot, BufferBuilder builder, boolean sorted) {
         Table table = TABLES.get(builder);
-        return table == null || table.count == 0 ? null : table;
+        if (table == null || table.count == 0) {
+            return;
+        }
+        if (sorted && table.count > 1) {
+            reordered.incrementAndGet();
+            return;
+        }
+        if (table.plain()) {
+            // Nothing to say: the whole layer is ordinary, and the buffer is
+            // already plain wherever nobody wrote anything else. Six layers in
+            // ten come out this way, so this is most of them.
+            return;
+        }
+        published.incrementAndGet();
+        ChunkMirror.onMaterials(slot, table.runs, table.count);
     }
 
     /**
@@ -258,9 +283,11 @@ public final class MaterialRuns {
         // times, with one clock pair per forty thousand blocks instead of two.
         return String.format(
                 "material tags: %d blocks recorded, %d chunk layers averaging %.1f runs, "
-                        + "%.0f%% of them one plain run",
+                        + "%.0f%% of them one plain run; %d layers sent to the renderer, "
+                        + "%d dropped as reordered translucent",
                 blockCount, tableCount,
                 tableCount == 0 ? 0.0 : runs / (double) tableCount,
-                tableCount == 0 ? 0.0 : 100.0 * plain / tableCount);
+                tableCount == 0 ? 0.0 : 100.0 * plain / tableCount,
+                published.getAndSet(0L), reordered.getAndSet(0L));
     }
 }

@@ -394,6 +394,20 @@ public final class VulkanContextImpl implements VulkanBridge {
     }
 
     @Override
+    public void stageChunkMaterials(int slot, int[] runs, int runCount) {
+        // Not synchronized, for the same reason as stageChunkBuffer below: this
+        // arrives from the chunk builder threads, and the mirror has a lock of
+        // its own for exactly this.
+        if (!initialized) {
+            return;
+        }
+        VkChunkMirror mirror = chunkMirror;
+        if (mirror != null) {
+            mirror.stageMaterials(slot, runs, runCount);
+        }
+    }
+
+    @Override
     public boolean stageChunkBuffer(int slot, java.nio.ByteBuffer data) {
         // Deliberately not synchronized: this runs on the game's chunk builder
         // threads, and taking the context monitor would serialise them against

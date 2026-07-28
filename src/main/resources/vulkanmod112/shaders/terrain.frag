@@ -10,7 +10,9 @@ layout(set = 0, binding = 3, std140) uniform Frame {
     vec4 fogParams;  // x = start, y = end, z = density
     vec4 lightInfo;  // x = how many of lights[] are in use
     vec4 lights[32]; // xyz = position relative to the camera, w = light level
-    vec4 frameInfo;  // x = seconds, y = directional light strength (0 = off)
+    // x = seconds, y = directional light strength (0 = off),
+    // z = 1 when vMaterial is real, w = 1 to paint the world by material
+    vec4 frameInfo;
     vec4 heightFog;  // x = strength (0 = off), y = thickening per block
 } frame;
 
@@ -23,8 +25,40 @@ layout(location = 1) in vec2 vUV;
 layout(location = 2) in vec2 vLight;
 layout(location = 3) in float vDistance;
 layout(location = 4) in vec3 vRelative;
+layout(location = 5) flat in uint vMaterial;
 
 layout(location = 0) out vec4 outColor;
+
+const uint MATERIAL_PLAIN = 0u;
+const uint MATERIAL_WATER = 1u;
+const uint MATERIAL_FOLIAGE = 2u;
+const uint MATERIAL_GLASS = 3u;
+const uint MATERIAL_LAVA = 4u;
+
+/**
+ * Diagnostic colours for the material of a surface.
+ *
+ * Nothing in the finished renderer uses this. It exists because the material
+ * of a vertex is worked out on the game side, carried through a buffer of its
+ * own and read back here, and every step of that is invisible when it works
+ * and equally invisible when it is off by one chunk — this makes the answer
+ * something you can look at.
+ */
+vec3 materialColor(uint material) {
+    if (material == MATERIAL_WATER) {
+        return vec3(0.2, 0.4, 1.0);
+    }
+    if (material == MATERIAL_FOLIAGE) {
+        return vec3(0.2, 1.0, 0.2);
+    }
+    if (material == MATERIAL_GLASS) {
+        return vec3(1.0, 1.0, 0.3);
+    }
+    if (material == MATERIAL_LAVA) {
+        return vec3(1.0, 0.3, 0.1);
+    }
+    return vec3(0.5);
+}
 
 // Specialised per pipeline. SOLID has a cutoff of 0.0, so its discard could
 // never fire — but the mere presence of discard in the module makes the
@@ -174,6 +208,9 @@ void main() {
     }
     vec3 light = texture(lightmap, vec2(blockLight, vLight.y)).rgb;
     vec3 shaded = tex.rgb * vColor.rgb * light;
+    if (frame.frameInfo.w > 0.5) {
+        shaded = materialColor(vMaterial) * light;
+    }
 
     int mode = int(frame.fogColor.a);
     if (mode != 0) {

@@ -334,6 +334,10 @@ final class VkTerrainRenderer {
     private final long startedNanos = System.nanoTime();
     /** 0 leaves dynamic light exactly as vanilla has it; 1 is the full effect. */
     private float directionalDynamicLight = 1.0f;
+    /** Whether this frame has a material buffer bound; see writeFrameUniforms. */
+    private boolean materialsBound;
+    /** Diagnostic: paint the terrain by material instead of by texture. */
+    private boolean showMaterials;
     private float heightFogStrength;
     private float heightFogFalloff = 2.0f / 24.0f;
 
@@ -791,6 +795,11 @@ final class VkTerrainRenderer {
             // layer, so they live in this frame's uniform buffer rather than
             // being pushed again for each of them.
             refreshShaderSettings();
+            // Asked here rather than remembered from last frame: the buffer
+            // appears the first time a chunk carries materials, and a shader
+            // told about it a frame late would read the one frame where the
+            // second binding is still the geometry buffer.
+            materialsBound = mirror != null && mirror.materialBuffer() != 0;
             writeFrameUniforms(mvp, fogState);
 
             // Standard (y-down) viewport: the GL-sourced matrices produce a
@@ -823,10 +832,20 @@ final class VkTerrainRenderer {
             drawPush.putFloat(0, cutoff);
             vkCmdPushConstants(commandBuffer, pipelineLayout,
                     VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, drawPush);
-            LongBuffer pBuffer = stack.longs(mirror.geometryBuffer());
-            LongBuffer pOffset = stack.longs(0L);
+            long geometry = mirror.geometryBuffer();
+            long materials = mirror.materialBuffer();
             // All chunks are suballocations of this one device-local buffer.
-            vkCmdBindVertexBuffers(commandBuffer, 0, pBuffer, pOffset);
+            //
+            // The second binding is the materials, and when there are none the
+            // geometry buffer is bound in its place. Something has to be bound
+            // — the pipeline declares the binding — and this is in bounds by
+            // construction: read at stride one, the furthest vertex of the
+            // furthest chunk lands at a twenty-eighth of the buffer it is
+            // reading from. What comes back is meaningless, and the shader is
+            // told so and never looks.
+            vkCmdBindVertexBuffers(commandBuffer, 0,
+                    stack.longs(geometry, materials == 0 ? geometry : materials),
+                    stack.longs(0L, 0L));
             boolean logInputs = STARTUP_READBACK && layerOrdinal == 0
                     && (frameCounter == 0 || frameCounter == 119);
 
@@ -1723,8 +1742,11 @@ final class VkTerrainRenderer {
                 / 1000.0f;
         MemoryUtil.memPutFloat(base + 624, seconds);
         MemoryUtil.memPutFloat(base + 628, directionalDynamicLight);
-        MemoryUtil.memPutFloat(base + 632, 0.0f);
-        MemoryUtil.memPutFloat(base + 636, 0.0f);
+        // z: whether the material buffer is bound at all. When it is not, the
+        // second vertex binding is the geometry buffer read at stride one, and
+        // what it hands back is meaningless.
+        MemoryUtil.memPutFloat(base + 632, materialsBound ? 1.0f : 0.0f);
+        MemoryUtil.memPutFloat(base + 636, showMaterials ? 1.0f : 0.0f);
         // vec4 heightFog at 640.
         MemoryUtil.memPutFloat(base + 640, heightFogStrength);
         MemoryUtil.memPutFloat(base + 644, heightFogFalloff);
@@ -1751,6 +1773,7 @@ final class VkTerrainRenderer {
         // eye, which is how the slider is going to be used.
         int depth = Math.max(1, intProperty("vulkanmod112.heightFogDepth", 24));
         heightFogFalloff = 2.0f / depth;
+        showMaterials = "true".equals(System.getProperty("vulkanmod112.showMaterials"));
     }
 
     private static float clampPercent(int value) {
@@ -1943,13 +1966,20 @@ final class VkTerrainRenderer {
         ByteBuffer entryPoint = stack.UTF8("main");
 
         // Vanilla BLOCK vertex format: pos 3f | color 4ub | uv 2f | lightmap 2s = 28 bytes
-        VkVertexInputBindingDescription.Buffer binding = VkVertexInputBindingDescription.calloc(1, stack);
+        VkVertexInputBindingDescription.Buffer binding = VkVertexInputBindingDescription.calloc(2, stack);
         binding.get(0).binding(0).stride(BLOCK_VERTEX_STRIDE).inputRate(VK_VERTEX_INPUT_RATE_VERTEX);
-        VkVertexInputAttributeDescription.Buffer attrs = VkVertexInputAttributeDescription.calloc(4, stack);
+        // One byte per vertex, in a buffer of its own. The game's vertex is 28
+        // bytes and is mirrored unchanged, so a fifth attribute cannot live in
+        // it; a second binding costs nothing here because the indirect draw's
+        // vertexOffset applies to every bound buffer, so the same per-chunk
+        // number already lands on the right materials.
+        binding.get(1).binding(1).stride(1).inputRate(VK_VERTEX_INPUT_RATE_VERTEX);
+        VkVertexInputAttributeDescription.Buffer attrs = VkVertexInputAttributeDescription.calloc(5, stack);
         attrs.get(0).location(0).binding(0).format(VK_FORMAT_R32G32B32_SFLOAT).offset(0);
         attrs.get(1).location(1).binding(0).format(VK_FORMAT_R8G8B8A8_UNORM).offset(12);
         attrs.get(2).location(2).binding(0).format(VK_FORMAT_R32G32_SFLOAT).offset(16);
         attrs.get(3).location(3).binding(0).format(VK_FORMAT_R16G16_SSCALED).offset(24);
+        attrs.get(4).location(4).binding(1).format(VK_FORMAT_R8_UINT).offset(0);
         VkPipelineVertexInputStateCreateInfo vertexInput = VkPipelineVertexInputStateCreateInfo.calloc(stack)
                 .sType(VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO)
                 .pVertexBindingDescriptions(binding)

@@ -39,6 +39,20 @@ public final class ChunkMirror {
         return bridge != null && bridge.isInitialized() && bridge.stageChunkBuffer(slot, data);
     }
 
+    /**
+     * Hands over what a chunk layer is made of, before its geometry follows.
+     *
+     * Silently does nothing when the bridge is not up, which is the same answer
+     * the geometry paths give: materials are an extra, and a chunk without them
+     * draws exactly as terrain always has.
+     */
+    public static void onMaterials(int slot, int[] runs, int runCount) {
+        VulkanBridge bridge = VulkanLoader.bridgeIfReady();
+        if (bridge != null && bridge.isInitialized()) {
+            bridge.stageChunkMaterials(slot, runs, runCount);
+        }
+    }
+
     public static void onBufferDelete(int slot) {
         VulkanBridge bridge = VulkanLoader.bridgeIfReady();
         if (bridge != null && bridge.isInitialized()) {

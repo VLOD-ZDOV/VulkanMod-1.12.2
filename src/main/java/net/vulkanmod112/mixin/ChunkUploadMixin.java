@@ -8,7 +8,9 @@ import net.minecraft.client.renderer.chunk.RenderChunk;
 import net.minecraft.client.renderer.vertex.VertexBuffer;
 import net.minecraft.util.BlockRenderLayer;
 import net.vulkanmod112.client.ChunkMirror;
+import net.vulkanmod112.client.MaterialRuns;
 import net.vulkanmod112.client.VertexBufferSlot;
+import net.vulkanmod112.client.VulkanConfig;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -50,17 +52,22 @@ public abstract class ChunkUploadMixin {
                                               RenderChunk chunk, CompiledChunk compiled,
                                               double distanceSq,
                                               CallbackInfoReturnable<ListenableFuture<Object>> cir) {
+        VertexBuffer vertexBuffer = chunk.getVertexBufferByLayer(layer.ordinal());
+        if (vertexBuffer == null) {
+            return;
+        }
+        int slot = ((VertexBufferSlot) (Object) vertexBuffer).vulkanmod112$slotOrAssign();
+        // On both threads, and before the geometry either way: this is the last
+        // place that still knows which BufferBuilder holds the chunk, and the
+        // runs recorded against it are keyed by nothing else.
+        if (VulkanConfig.isMaterialTags()) {
+            MaterialRuns.publish(slot, builder, layer == BlockRenderLayer.TRANSLUCENT);
+        }
         if (Minecraft.getMinecraft().isCallingFromMinecraftThread()) {
             // Vanilla uploads inline on this path, so the ordinary mirror hook
             // is about to run anyway; doing it here too would only copy twice.
             return;
         }
-        VertexBuffer vertexBuffer = chunk.getVertexBufferByLayer(layer.ordinal());
-        if (vertexBuffer == null) {
-            return;
-        }
-        ChunkMirror.onWorkerBuild(
-                ((VertexBufferSlot) (Object) vertexBuffer).vulkanmod112$slotOrAssign(),
-                builder.getByteBuffer());
+        ChunkMirror.onWorkerBuild(slot, builder.getByteBuffer());
     }
 }

@@ -82,6 +82,19 @@ public interface VulkanBridge {
      */
     boolean stageChunkBuffer(int slot, java.nio.ByteBuffer data);
 
+    /**
+     * Says what a chunk layer's vertices are made of, ahead of the geometry.
+     *
+     * {@code runs} is pairs of ints — one past the last vertex of a stretch,
+     * and the material of that stretch — of which {@code runCount} are in use.
+     * The array belongs to the caller and is copied here; only primitives cross
+     * the bridge, which is what keeps the two class loaders apart.
+     *
+     * Called before the geometry it describes, from whichever thread built the
+     * chunk. Sending nothing for a slot is always allowed and means "plain".
+     */
+    void stageChunkMaterials(int slot, int[] runs, int runCount);
+
     /** One-line mirror statistics for the F3 screen. */
     String chunkMirrorStats();
 

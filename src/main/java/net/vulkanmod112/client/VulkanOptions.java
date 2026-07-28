@@ -1037,6 +1037,29 @@ final class VulkanOptions {
                                     public void set(boolean value) {
                                         VulkanConfig.setOverlayEnabled(value);
                                     }
+                                }),
+                        new VSwitchOption("Show Materials",
+                                "Paint the world by what it is made of instead of by its texture: "
+                                        + "water blue, foliage green, glass yellow, lava orange, "
+                                        + "everything else grey. What a block is made of is decided "
+                                        + "while the chunk is built, carried to the card in a "
+                                        + "buffer of its own and read back in the shader, and every "
+                                        + "step of that looks the same whether it is right or a "
+                                        + "chunk out of place. This is how you look at it. Needs "
+                                        + "Material Tags on, and the chunks in view rebuilt — "
+                                        + "F3+A does that — before there is anything to show.",
+                                Cost.of(Level.NONE, Level.NONE, Level.NONE),
+                                "Needs Material Tags on.",
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return VulkanConfig.isShowMaterials();
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        VulkanConfig.setShowMaterials(value);
+                                    }
                                 })));
     }
 
