@@ -120,7 +120,6 @@ public final class MaterialRuns {
     private static final Map<BufferBuilder, Table> TABLES = new ConcurrentHashMap<>();
 
     private static final AtomicLong blocks = new AtomicLong();
-    private static final AtomicLong nanos = new AtomicLong();
     private static final AtomicLong tables = new AtomicLong();
     private static final AtomicLong runsTotal = new AtomicLong();
     private static final AtomicLong plainTables = new AtomicLong();
@@ -136,7 +135,6 @@ public final class MaterialRuns {
      * all, and the buffer is the only thing that knows.
      */
     public static void record(IBlockState state, BufferBuilder builder, int endVertex) {
-        long started = System.nanoTime();
         Table table = TABLES.get(builder);
         if (table == null) {
             table = new Table();
@@ -147,7 +145,6 @@ public final class MaterialRuns {
         }
         table.extend(endVertex, materialOf(state));
         blocks.incrementAndGet();
-        nanos.addAndGet(System.nanoTime() - started);
     }
 
     /**
@@ -161,7 +158,23 @@ public final class MaterialRuns {
     public static void begin(BufferBuilder builder) {
         Table table = TABLES.get(builder);
         if (table != null) {
+            // Whatever is in it belongs to the chunk layer that just finished,
+            // so this is where a completed table can be counted. The first
+            // version counted them in take() instead — which nothing calls yet,
+            // so the one number the next slice actually needs came out as zero.
+            measure(table);
             table.reset();
+        }
+    }
+
+    private static void measure(Table table) {
+        if (table.count == 0) {
+            return;
+        }
+        tables.incrementAndGet();
+        runsTotal.addAndGet(table.count);
+        if (table.plain()) {
+            plainTables.incrementAndGet();
         }
     }
 
@@ -173,15 +186,7 @@ public final class MaterialRuns {
      */
     public static Table take(BufferBuilder builder) {
         Table table = TABLES.get(builder);
-        if (table == null || table.count == 0) {
-            return null;
-        }
-        tables.incrementAndGet();
-        runsTotal.addAndGet(table.count);
-        if (table.plain()) {
-            plainTables.incrementAndGet();
-        }
-        return table;
+        return table == null || table.count == 0 ? null : table;
     }
 
     /**
@@ -230,14 +235,19 @@ public final class MaterialRuns {
         if (blockCount == 0L) {
             return "material tags: on, nothing built yet";
         }
-        long ns = nanos.getAndSet(0L);
         long runs = runsTotal.getAndSet(0L);
         long plain = plainTables.getAndSet(0L);
+        // No time here on purpose. This runs once per block, and two calls to
+        // the clock around a map lookup and an array write cost more than the
+        // work between them — the first version reported 24 ns a block and most
+        // of that was the reading of it. What the cost of this actually is has
+        // to be read off the whole chunk rebuild, which is what ChunkBuildStats
+        // times, with one clock pair per forty thousand blocks instead of two.
         return String.format(
-                "material tags: %d blocks recorded at %.1f ns each (%.1f ms total), "
-                        + "%d chunk layers averaging %.1f runs, %.0f%% of them one plain run",
-                blockCount, ns / (double) blockCount, ns / 1_000_000.0,
-                tableCount, tableCount == 0 ? 0.0 : runs / (double) tableCount,
+                "material tags: %d blocks recorded, %d chunk layers averaging %.1f runs, "
+                        + "%.0f%% of them one plain run",
+                blockCount, tableCount,
+                tableCount == 0 ? 0.0 : runs / (double) tableCount,
                 tableCount == 0 ? 0.0 : 100.0 * plain / tableCount);
     }
 }

@@ -3,9 +3,11 @@ package net.vulkanmod112.mixin;
 import net.minecraft.block.state.IBlockState;
 import net.minecraft.client.renderer.BlockRendererDispatcher;
 import net.minecraft.client.renderer.BufferBuilder;
+import net.minecraft.client.renderer.chunk.ChunkCompileTaskGenerator;
 import net.minecraft.client.renderer.chunk.RenderChunk;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.IBlockAccess;
+import net.vulkanmod112.client.ChunkBuildStats;
 import net.vulkanmod112.client.MaterialRuns;
 import net.vulkanmod112.client.VulkanConfig;
 import org.spongepowered.asm.mixin.Mixin;
@@ -56,5 +58,25 @@ public abstract class MaterialTagMixin {
         if (VulkanConfig.isMaterialTags()) {
             MaterialRuns.begin(builder);
         }
+    }
+
+    /**
+     * Times the whole rebuild, on both sides of the switch.
+     *
+     * This is the number that answers whether the recording costs anything:
+     * fly the same ground with the setting on and off and compare what a chunk
+     * takes to build. Timing the recording itself per block was tried and
+     * measured mostly the clock.
+     */
+    @Inject(method = "rebuildChunk", at = @At("HEAD"))
+    private void vulkanmod112$beginRebuild(float x, float y, float z,
+                                           ChunkCompileTaskGenerator generator, CallbackInfo ci) {
+        ChunkBuildStats.begin();
+    }
+
+    @Inject(method = "rebuildChunk", at = @At("RETURN"))
+    private void vulkanmod112$endRebuild(float x, float y, float z,
+                                         ChunkCompileTaskGenerator generator, CallbackInfo ci) {
+        ChunkBuildStats.end();
     }
 }
