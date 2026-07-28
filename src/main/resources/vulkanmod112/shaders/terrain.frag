@@ -161,6 +161,14 @@ const float SOURCE_RADIUS = 0.6;
 // nothing else in this game.
 const float BACK_FACE_LIGHT = 0.35;
 
+// The same for foliage, which keeps far more: a leaf is thin enough to be lit
+// from behind, and a torch on the far side of a bush lights the whole bush.
+const float BACK_FACE_LIGHT_FOLIAGE = 0.6;
+
+// How far a blade of grass is treated as facing up rather than facing the way
+// its quad happens to face. See foliageNormal.
+const float FOLIAGE_UPRIGHT = 0.65;
+
 /**
  * How much of a source's light a face turned this way receives.
  *
@@ -178,11 +186,41 @@ const float BACK_FACE_LIGHT = 0.35;
  * you are standing next to it, almost nothing across the room — which is also
  * where a hard edge is what the eye expects.
  */
-float directionalTerm(vec3 normal, vec3 toSource, float distance) {
+float directionalTerm(vec3 normal, vec3 toSource, float distance, float backFace) {
     float lambert = dot(normal, toSource / max(distance, 0.0001));
     float wrap = SOURCE_RADIUS / max(distance, SOURCE_RADIUS);
     float shaped = clamp((lambert + wrap) / (1.0 + wrap), 0.0, 1.0);
-    return mix(BACK_FACE_LIGHT, 1.0, shaped);
+    return mix(backFace, 1.0, shaped);
+}
+
+/**
+ * The normal to light a blade of grass or a leaf by.
+ *
+ * Grass, flowers and saplings are drawn as two flat quads crossing each other,
+ * both standing straight up. Lighting that geometry the way it is written down
+ * gives an answer that is exactly wrong in the case you notice: raise a torch
+ * over a patch of grass and nothing happens, because the light arriving from
+ * above is arriving edge-on to a vertical surface, while the ground beside it
+ * brightens as it should. Reported as grass not reacting to a jump when the
+ * ground under it did.
+ *
+ * Vanilla sidesteps this by not shading those quads at all — cross models are
+ * drawn unshaded, so that plants are not black. That is the same admission in
+ * a different form: the plane is not what the plant is.
+ *
+ * A tuft of grass is a small volume of scattering material, and what light
+ * does to it depends far more on where the light is than on which way any one
+ * blade happens to be turned. So the normal is bent most of the way towards
+ * standing up: a torch above brightens it, a torch below leaves it dim, a
+ * torch beside it lights it, and none of that depends on which of the two
+ * crossed quads you are looking at.
+ */
+vec3 foliageNormal(vec3 geometric) {
+    vec3 bent = mix(geometric, vec3(0.0, 1.0, 0.0), FOLIAGE_UPRIGHT);
+    // Bending past a quad facing straight down could cancel to nothing at some
+    // other value of the constant; normalising that is a NaN across the whole
+    // surface rather than a wrong shade on one of them.
+    return length(bent) < 0.001 ? vec3(0.0, 1.0, 0.0) : normalize(bent);
 }
 
 /**
@@ -214,11 +252,25 @@ void main() {
     // like a torch; adding white would look like a flashlight.
     float blockLight = vLight.x;
     int lightCount = int(frame.lightInfo.x);
+    // The translucent pipeline is the only one that asks the atlas, and it only
+    // asks where the vertex had nothing to say — which for that layer is
+    // everywhere, because its labels are dropped rather than sent wrong.
+    uint material = vMaterial;
+    if (BLEND && material == MATERIAL_PLAIN) {
+        material = spriteMaterial(vUV);
+    }
+    bool foliage = material == MATERIAL_FOLIAGE;
     // Both of these come from the frame's uniform buffer, so every fragment in
     // the draw takes the same branch — which is what makes it safe to ask for
     // derivatives inside it.
     float directional = frame.frameInfo.y;
     vec3 normal = (lightCount > 0 && directional > 0.0) ? faceNormal() : vec3(0.0, 1.0, 0.0);
+    // After the derivatives and outside their branch: this is arithmetic on the
+    // answer, not another question about the neighbourhood.
+    if (foliage) {
+        normal = foliageNormal(normal);
+    }
+    float backFace = foliage ? BACK_FACE_LIGHT_FOLIAGE : BACK_FACE_LIGHT;
     for (int i = 0; i < lightCount; ++i) {
         vec4 source = frame.lights[i];
         vec3 toSource = source.xyz - vRelative;
@@ -233,7 +285,7 @@ void main() {
             // points — so a dropped torch lights the underside of the floor it
             // sits on exactly as brightly as the top. The strength is how far
             // to go from vanilla's answer towards this one.
-            level *= mix(1.0, directionalTerm(normal, toSource, distance), directional);
+            level *= mix(1.0, directionalTerm(normal, toSource, distance, backFace), directional);
         }
         if (level > 0.0) {
             // The light map is sampled at (level * 16 + 8) / 256, which is the
@@ -243,13 +295,6 @@ void main() {
     }
     vec3 light = texture(lightmap, vec2(blockLight, vLight.y)).rgb;
     vec3 shaded = tex.rgb * vColor.rgb * light;
-    // The translucent pipeline is the only one that asks the atlas, and it only
-    // asks where the vertex had nothing to say — which for that layer is
-    // everywhere, because its labels are dropped rather than sent wrong.
-    uint material = vMaterial;
-    if (BLEND && material == MATERIAL_PLAIN) {
-        material = spriteMaterial(vUV);
-    }
     if (frame.frameInfo.w > 0.5) {
         shaded = materialColor(material) * light;
     }
