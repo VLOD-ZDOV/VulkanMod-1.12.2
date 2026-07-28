@@ -138,6 +138,7 @@ public final class MaterialRuns {
     private static final AtomicLong plainTables = new AtomicLong();
     private static final AtomicLong published = new AtomicLong();
     private static final AtomicLong reordered = new AtomicLong();
+    private static final AtomicLong resorted = new AtomicLong();
 
     private MaterialRuns() {
     }
@@ -211,21 +212,48 @@ public final class MaterialRuns {
     public static void publish(int slot, BufferBuilder builder, boolean sorted) {
         Table table = TABLES.get(builder);
         if (table == null || table.count == 0) {
-            return;
-        }
-        if (sorted && table.count > 1) {
-            reordered.incrementAndGet();
-            return;
-        }
-        if (table.plain()) {
-            // Nothing to say: the whole layer is ordinary, and the buffer is
-            // already plain wherever nobody wrote anything else. Six layers in
-            // ten come out this way, so this is most of them.
+            // Nothing was recorded into this buffer, so no chunk was built into
+            // it: this is the game re-sorting the translucent layer, which it
+            // does as the camera moves so that water draws back to front. It
+            // walks no blocks — it takes the quads that are already there,
+            // permutes them and uploads them again.
+            //
+            // Saying nothing is the whole point. The renderer then leaves the
+            // materials it already has, which describe these same vertices. The
+            // first version had no way to say nothing, and the silence read as
+            // "plain": water turned grey a chunk at a time as you moved.
+            resorted.incrementAndGet();
             return;
         }
         published.incrementAndGet();
+        if (table.plain() || (sorted && table.count > 1)) {
+            // Said rather than left unsaid. A chunk whose water somebody just
+            // drained is plain now, and its old runs are still in the buffer;
+            // only an explicit answer clears them.
+            //
+            // The second case is the translucent layer with more than one
+            // material in it. The runs are numbered by vertex and the sort is
+            // about to permute them, so they would describe the wrong
+            // surfaces. A layer of a single material has nothing to permute
+            // between and goes through untouched, which covers most water,
+            // since a chunk's translucent layer is usually water and nothing
+            // else. The mixed ones stay plain until there is a real answer.
+            if (sorted && table.count > 1) {
+                reordered.incrementAndGet();
+            }
+            ChunkMirror.onMaterials(slot, ALL_PLAIN, 1);
+            return;
+        }
         ChunkMirror.onMaterials(slot, table.runs, table.count);
     }
+
+    /**
+     * One run covering everything, made of nothing in particular.
+     *
+     * The end is past any vertex count there could be; the renderer clamps it
+     * to what actually arrived.
+     */
+    private static final int[] ALL_PLAIN = {Integer.MAX_VALUE, PLAIN};
 
     /**
      * What a block is, for the purposes of drawing it.
@@ -284,10 +312,11 @@ public final class MaterialRuns {
         return String.format(
                 "material tags: %d blocks recorded, %d chunk layers averaging %.1f runs, "
                         + "%.0f%% of them one plain run; %d layers sent to the renderer, "
-                        + "%d dropped as reordered translucent",
+                        + "%d of those flattened as reordered translucent, "
+                        + "%d re-sorts left alone",
                 blockCount, tableCount,
                 tableCount == 0 ? 0.0 : runs / (double) tableCount,
                 tableCount == 0 ? 0.0 : 100.0 * plain / tableCount,
-                published.getAndSet(0L), reordered.getAndSet(0L));
+                published.getAndSet(0L), reordered.getAndSet(0L), resorted.getAndSet(0L));
     }
 }

@@ -328,6 +328,7 @@ final class VkChunkMirror {
     private long materialsStaged;
     private long materialsApplied;
     private long materialsMissing;
+    private long materialsKept;
 
     private long uploadCommandPool;
     private VkCommandBuffer uploadCommandBuffer;
@@ -619,6 +620,12 @@ final class VkChunkMirror {
         }
     }
 
+    private boolean hasStagedMaterials(int slot) {
+        synchronized (materialLock) {
+            return slot < slotRunCount.length && slotRunCount[slot] > 0;
+        }
+    }
+
     /** The staged copy for this slot if it still matches, else -1. */
     private long takeStaged(int slot, int size) {
         synchronized (workerLock) {
@@ -638,12 +645,14 @@ final class VkChunkMirror {
             entries.remove(slot);
             entry = null;
         }
+        boolean freshRange = false;
         if (entry == null) {
             // Every suballocation must begin on a vertex boundary. A 4096 B
             // reserve is not divisible by 28; without this alignment the VBO
             // following an empty/small one reads shifted UV/color attributes.
             entry = createEntry(alignVertexCapacity(Math.max(size, 4096)));
             entries.put(slot, entry);
+            freshRange = true;
         }
         if (materialsStaged > 0 && geometryBuffer != 0) {
             // After the entry, never before: allocating it is what may grow the
@@ -654,7 +663,13 @@ final class VkChunkMirror {
         }
         if (size > 0) {
             int vertexCount = size / BLOCK_VERTEX_STRIDE;
-            boolean materials = materialBuffer != 0 && vertexCount > 0;
+            // Nothing said about this slot means leave the materials alone: the
+            // upload is the game re-sorting a translucent layer it did not
+            // rebuild, and what is in the buffer already describes these very
+            // vertices. The exception is a range used for the first time, where
+            // "already there" is whatever chunk had it last.
+            boolean materials = materialBuffer != 0 && vertexCount > 0
+                    && (freshRange || hasStagedMaterials(slot));
             // Before taking the staged copy: growing the ring reallocates the
             // memory it points into, and discards the staged records with it.
             ensureStagingRing(size + (materials ? vertexCount : 0));
@@ -679,9 +694,13 @@ final class VkChunkMirror {
             if (materials) {
                 writeMaterials(slot, vertexCount, stagingMappedAddress + materialSrc);
                 queueMaterialCopy(materialSrc, entry.offset / BLOCK_VERTEX_STRIDE, vertexCount);
-            } else {
-                dropMaterials(slot);
+            } else if (materialBuffer != 0) {
+                materialsKept++;
             }
+        } else {
+            // An empty layer: there is nothing to describe, and runs left
+            // waiting would be picked up by whatever this slot holds next.
+            dropMaterials(slot);
         }
         totalBytes += size - entry.size;
         entry.size = size;
@@ -776,14 +795,16 @@ final class VkChunkMirror {
         long applied;
         long missing;
         long staged;
+        long kept;
         synchronized (materialLock) {
             applied = materialsApplied;
             missing = materialsMissing;
             staged = materialsStaged;
+            kept = materialsKept;
         }
         return line + String.format("; materials: %.1f MiB buffer, %d run tables handed over, "
-                        + "%d applied, %d uploads with none",
-                materialCapacity / (1024.0 * 1024.0), staged, applied, missing);
+                        + "%d written, %d uploads left as they were, %d filled plain",
+                materialCapacity / (1024.0 * 1024.0), staged, applied, kept, missing);
     }
 
     private Entry createEntry(int capacity) {
