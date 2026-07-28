@@ -12,18 +12,32 @@ public abstract class VOption {
 
     /** One resource's share of an option's cost. */
     public enum Level {
-        NONE("none", 0x707070, 0),
-        LOW("low", 0x55C355, 1),
-        MEDIUM("medium", 0xE0C040, 2),
-        HIGH("high", 0xE06060, 3);
+        NONE("none", 0x707070, "\u00a77", 0),
+        LOW("low", 0x55C355, "\u00a7a", 1),
+        MEDIUM("medium", 0xE0C040, "\u00a7e", 2),
+        HIGH("high", 0xE06060, "\u00a7c", 3);
 
         public final String label;
         public final int color;
+        /**
+         * The nearest formatting code to {@link #color}.
+         *
+         * The panel beside the option list draws cost as coloured bars, but
+         * that panel is dropped when the window is too narrow in interface
+         * units for it to fit — which happens at the automatic interface scale
+         * on a large display, where the game picks a very high multiplier and
+         * leaves only a few hundred units of width. What is left in that case
+         * is a plain hovering tooltip, and a cost with no colour in it says
+         * much less at a glance. Tooltips take formatting codes, so it keeps
+         * its colour there too.
+         */
+        public final String format;
         /** Filled segments in the bar drawn next to the name. */
         public final int bars;
 
-        Level(String label, int color, int bars) {
+        Level(String label, int color, String format, int bars) {
             this.label = label;
+            this.format = format;
             this.color = color;
             this.bars = bars;
         }

@@ -209,9 +209,8 @@ public final class GuiVulkanSettings extends GuiScreen {
             lines.addAll(this.fontRenderer.listFormattedStringToWidth(this.hovered.tooltip(), 220));
             VOption.Cost cost = this.hovered.cost();
             if (!cost.isFree()) {
-                lines.add(Lang.tr(Lang.UI, "CPU") + ": " + costLabel(cost.cpu)
-                        + "   " + Lang.tr(Lang.UI, "GPU") + ": " + costLabel(cost.gpu)
-                        + "   " + Lang.tr(Lang.UI, "VRAM") + ": " + costLabel(cost.vram));
+                lines.add(costText("CPU", cost.cpu) + "   " + costText("GPU", cost.gpu)
+                        + "   " + costText("VRAM", cost.vram));
             }
             drawHoveringText(lines, mouseX, mouseY);
             return;
@@ -381,5 +380,11 @@ public final class GuiVulkanSettings extends GuiScreen {
             // Never let a development aid take the settings screen down.
             net.vulkanmod112.VulkanMod112.LOGGER.warn("Could not write language keys", e);
         }
+    }
+
+    /** One cost for the hovering tooltip, carrying the same colour as the bars. */
+    private static String costText(String resource, VOption.Level level) {
+        return "\u00a77" + Lang.tr(Lang.UI, resource) + ": " + level.format
+                + costLabel(level) + "\u00a7r";
     }
 }
