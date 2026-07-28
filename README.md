@@ -76,8 +76,10 @@ every active renderer path, the frame cost breakdown and resource counts.
 
 ## Compatibility and diagnostics
 
-OptiFine and legacy shader mods replace the same renderer classes this mod rewrites. When one of them is installed, the terrain mixins are not registered at all, so the game boots on that renderer while this mod's settings screen and game-side optimisations stay active. Sharing terrain rendering between the two is not possible: the vertex format and pass order differ, and with a shader pack loaded the format changes again.
+OptiFine, legacy shader mods and Sodium-derived renderers for 1.12.2 — Celeritas, and Actinium which ships it — replace the same renderer classes this mod rewrites. When one of them is installed, the terrain mixins are not registered at all, so the game boots on that renderer while this mod's settings screen and game-side optimisations stay active. Sharing terrain rendering between the two is not possible: the vertex format and pass order differ, and with a shader pack loaded the format changes again.
 
 Any Forge build for 1.12.2 works; the only hard dependency is MixinBooter 10.7 or newer, which Forge now reports itself if missing.
+
+A renderer replacement this build has not heard of can be named without waiting for a release: `-Dvulkanmod112.extraRendererMarkers=part-of-its-jar-name` makes this mod stand aside for it.
 
 The F3 overlay reports GPU selection, VBO mirror statistics, active terrain mode and chunk count. Periodic log entries report fence wait, command recording, submit/composite and GPU timings. For anything more detailed, turn on Ultra Logging and attach `logs/vulkanmod112-diagnostics.log`. Start with `validation=true` when debugging a driver or synchronisation issue.

@@ -33,7 +33,21 @@ public class VulkanCorePlugin implements IFMLLoadingPlugin, IEarlyMixinLoader {
             "shadersmod.client.Shaders",
             "shadersmodcore.transform.SMCClassTransformer"
     };
-    private static final String[] RENDERER_JAR_MARKERS = {"optifine", "shadersmod"};
+    /**
+     * Jar-name fragments of mods that replace the terrain renderer.
+     *
+     * Celeritas is a Sodium port for 1.12.2 and Actinium ships it, so both
+     * rewrite the same classes this mod's renderer config does. That was
+     * reported from the field rather than found here: 0.6.0 added three
+     * injections into {@code RenderGlobal.setupTerrain} where 0.5.0 had one,
+     * and the renderer config is marked required, so an injection that cannot
+     * be applied stops the game instead of degrading. Whatever the exact clash,
+     * two renderers cannot both own the terrain, and the answer is the same one
+     * OptiFine gets: this mod's renderer stands aside and everything else stays.
+     */
+    private static final String[] RENDERER_JAR_MARKERS = {
+            "optifine", "shadersmod", "celeritas", "actinium",
+    };
     /**
      * Comma-separated extra jar-name fragments, for renderer replacements that
      * appear after this version ships: -Dvulkanmod112.extraRendererMarkers=foo,bar
@@ -44,11 +58,14 @@ public class VulkanCorePlugin implements IFMLLoadingPlugin, IEarlyMixinLoader {
     public List<String> getMixinConfigs() {
         List<String> configs = new ArrayList<String>();
         configs.add("mixins.vulkanmod112.json");
-        if (rendererReplacementPresent()) {
-            System.out.println("[VulkanMod112] A renderer replacement (OptiFine or a shader mod) is "
-                    + "installed; Vulkan terrain is not loaded. Settings and the game-side "
-                    + "optimisations stay available. Set -Dvulkanmod112.allowIncompatibleRenderer=true "
-                    + "to load it anyway (unsupported).");
+        String replacement = rendererReplacement();
+        if (replacement != null) {
+            System.out.println("[VulkanMod112] Another renderer (" + replacement + ") is installed; "
+                    + "Vulkan terrain is not loaded. Settings and the game-side optimisations stay "
+                    + "available. If a renderer this build does not know about is crashing the game, "
+                    + "name its jar with -Dvulkanmod112.extraRendererMarkers=part-of-its-filename. "
+                    + "Set -Dvulkanmod112.allowIncompatibleRenderer=true to load ours anyway "
+                    + "(unsupported).");
         } else {
             configs.add("mixins.vulkanmod112.renderer.json");
         }
@@ -60,26 +77,27 @@ public class VulkanCorePlugin implements IFMLLoadingPlugin, IEarlyMixinLoader {
      * the launch classloader and, because coremod load order is not guaranteed,
      * also for the jar itself in the mods folder.
      */
-    private static boolean rendererReplacementPresent() {
+    private static String rendererReplacement() {
         if (Boolean.getBoolean("vulkanmod112.allowIncompatibleRenderer")) {
-            return false;
+            return null;
         }
         for (String className : RENDERER_CLASSES) {
             if (Launch.classLoader.getResource(className.replace('.', '/') + ".class") != null) {
-                return true;
+                return className;
             }
         }
-        return modsFolderContainsRenderer();
+        return rendererJarInModsFolder();
     }
 
-    private static boolean modsFolderContainsRenderer() {
+    /** @return the offending jar's name, or null if there is none. */
+    private static String rendererJarInModsFolder() {
         File home = Launch.minecraftHome;
         if (home == null) {
-            return false;
+            return null;
         }
         File[] entries = new File(home, "mods").listFiles();
         if (entries == null) {
-            return false;
+            return null;
         }
         for (File entry : entries) {
             String name = entry.getName().toLowerCase(Locale.ROOT);
@@ -88,17 +106,17 @@ public class VulkanCorePlugin implements IFMLLoadingPlugin, IEarlyMixinLoader {
             }
             for (String marker : RENDERER_JAR_MARKERS) {
                 if (name.contains(marker)) {
-                    return true;
+                    return entry.getName();
                 }
             }
             for (String marker : System.getProperty(EXTRA_MARKERS_PROPERTY, "").split(",")) {
                 String trimmed = marker.trim().toLowerCase(Locale.ROOT);
                 if (!trimmed.isEmpty() && name.contains(trimmed)) {
-                    return true;
+                    return entry.getName();
                 }
             }
         }
-        return false;
+        return null;
     }
 
     @Override
