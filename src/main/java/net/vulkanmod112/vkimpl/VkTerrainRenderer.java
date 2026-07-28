@@ -203,6 +203,12 @@ final class VkTerrainRenderer {
     private VkChunkMirror.Entry[] lookupScratch = new VkChunkMirror.Entry[INITIAL_INDIRECT_DRAWS];
     private long pipelineLayout;
     /**
+     * Remembers compiled pipelines between runs. Buys startup time only; see
+     * {@link VkPipelineCacheStore} for why every failure in it is silent.
+     */
+    private final VkPipelineCacheStore pipelineCache = new VkPipelineCacheStore();
+    private long pipelineCacheHandle = VK_NULL_HANDLE;
+    /**
      * Two specialisations of the same shader modules: index 0 has the alpha
      * test compiled out for SOLID, index 1 keeps it for the CUTOUT layers.
      * Index with {@code layerOrdinal == 0 ? 0 : 1}.
@@ -385,6 +391,24 @@ final class VkTerrainRenderer {
     private boolean baseReady;
     private boolean firstFrame = true;
     private boolean frameOpen;
+
+    /**
+     * The startup coverage readback, off unless asked for.
+     *
+     * On the second and hundred-and-twentieth frame this used to stall the
+     * pipeline with {@code glFinish} and pull the whole colour attachment back
+     * across the bus — at 4K that is some thirty megabytes and a full stop of
+     * both processors, twice, in the seconds where the world is being built and
+     * the frame budget matters most. It answered one question, once: whether
+     * this renderer was putting anything on screen at all. That question has
+     * been answered, and the check for it sat in the per-draw path of every
+     * frame ever since.
+     *
+     * {@code -Dvulkanmod112.startupReadback=true} brings it back for the next
+     * time something is drawing nothing.
+     */
+    private static final boolean STARTUP_READBACK =
+            Boolean.getBoolean("vulkanmod112.startupReadback");
 
     // Diagnostics (first frames are logged with a coverage readback)
     private long frameCounter;
@@ -796,7 +820,8 @@ final class VkTerrainRenderer {
             LongBuffer pOffset = stack.longs(0L);
             // All chunks are suballocations of this one device-local buffer.
             vkCmdBindVertexBuffers(commandBuffer, 0, pBuffer, pOffset);
-            boolean logInputs = layerOrdinal == 0 && (frameCounter == 0 || frameCounter == 119);
+            boolean logInputs = STARTUP_READBACK && layerOrdinal == 0
+                    && (frameCounter == 0 || frameCounter == 119);
 
             int batchIndex = activeFrameSlot * BATCHES_PER_FRAME + layerOrdinal;
             long mapped = drawBatchMapped[batchIndex];
@@ -872,7 +897,7 @@ final class VkTerrainRenderer {
     private void submitFrame() {
         try (MemoryStack stack = stackPush()) {
             vkCmdEndRenderPass(commandBuffer);
-            if (frameCounter == 0 || frameCounter == 119) {
+            if (STARTUP_READBACK && (frameCounter == 0 || frameCounter == 119)) {
                 recordColorReadback(stack);
             }
             if (timestampsSupported) {
@@ -1193,7 +1218,12 @@ final class VkTerrainRenderer {
      * reads it back. Separates "Vulkan drew nothing" from "composite failed".
      */
     private void logFrameDiagnostics() {
-        if (frameCounter != 1 && frameCounter != 120) {
+        // The GL half of this stops the world with glFinish and pulls the whole
+        // colour attachment back over the bus, which at 4K is around thirty
+        // megabytes. Twice a session is not much, but it lands in the seconds
+        // where the world is being built, and it is answering a question that
+        // was answered a long time ago.
+        if (!STARTUP_READBACK || (frameCounter != 1 && frameCounter != 120)) {
             return;
         }
         double vkCoverage = -1.0;
@@ -1397,6 +1427,8 @@ final class VkTerrainRenderer {
             createDescriptorInfrastructure(stack);
             createDrawBatches(stack);
             createRenderPass(stack);
+            pipelineCacheHandle = pipelineCache.create(
+                    device(), System.getProperty("vulkanmod112.pipelineCache"));
             createPipeline(stack);
             createCompositeProgram();
         }
@@ -1991,8 +2023,8 @@ final class VkTerrainRenderer {
                     .subpass(0);
         }
         LongBuffer pPipeline = stack.mallocLong(TERRAIN_PIPELINES.length);
-        check(vkCreateGraphicsPipelines(device(), VK_NULL_HANDLE, pipelineInfo, null, pPipeline),
-                "vkCreateGraphicsPipelines(terrain)");
+        check(vkCreateGraphicsPipelines(device(), pipelineCacheHandle, pipelineInfo, null,
+                pPipeline), "vkCreateGraphicsPipelines(terrain)");
         for (int variant = 0; variant < TERRAIN_PIPELINES.length; variant++) {
             pipelines[variant] = pPipeline.get(variant);
         }
@@ -2728,6 +2760,10 @@ final class VkTerrainRenderer {
                 pipelines[i] = 0;
             }
         }
+        // Saved here rather than at exit: the device is still alive, and this
+        // is the last point at which the driver can be asked for the blob.
+        pipelineCache.destroy(device());
+        pipelineCacheHandle = VK_NULL_HANDLE;
         vkDestroyPipelineLayout(device(), pipelineLayout, null);
         if (translucentRenderPass != 0) {
             vkDestroyRenderPass(device(), translucentRenderPass, null);

@@ -243,6 +243,13 @@ public final class VulkanConfig {
 
     public static void load(File configDirectory) {
         config = new Configuration(new File(configDirectory, "vulkanmod112.cfg"));
+        // Where the driver may keep its compiled pipelines between runs. It
+        // travels as a property because the Vulkan half runs under its own
+        // class loader and cannot see the game, so a string is the whole of the
+        // interface. Nothing reads it but that half, and nothing breaks if the
+        // file is missing, stale or unwritable.
+        System.setProperty("vulkanmod112.pipelineCache",
+                new File(configDirectory, "vulkanmod112-pipelines.bin").getAbsolutePath());
         config.load();
         terrainEnabled = config.getBoolean("terrainEnabled", CATEGORY_GENERAL, DEF_TERRAIN,
                 "Render supported terrain layers through Vulkan. Disabling immediately returns terrain to vanilla OpenGL.");
