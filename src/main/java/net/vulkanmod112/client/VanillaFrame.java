@@ -315,6 +315,28 @@ public final class VanillaFrame {
         }
     }
 
+    /**
+     * The block-entity half of {@code renderEntities}, split out of the whole.
+     *
+     * Both are inside the entity timer, and 6.2% against 16% is not something to
+     * read off one number. This runs twice a frame, because Forge renders pass 0
+     * and pass 1, so the total is what a frame spends on it rather than what one
+     * call costs.
+     */
+    private static long blockEntityStart;
+    private static long blockEntityNanos;
+
+    public static void beginBlockEntities() {
+        blockEntityStart = System.nanoTime();
+    }
+
+    public static void endBlockEntities() {
+        if (blockEntityStart != 0L) {
+            blockEntityNanos += System.nanoTime() - blockEntityStart;
+            blockEntityStart = 0L;
+        }
+    }
+
     /** {@code firstLayer} marks the frame boundary: SOLID is drawn once per frame. */
     public static void beginLayer(boolean firstLayer) {
         if (firstLayer) {
@@ -336,11 +358,14 @@ public final class VanillaFrame {
             return "vanilla frame: not rendered";
         }
         String line = String.format(
-                "vanilla frame: renderEntities %.2f ms, renderBlockLayer (all 4) %.2f ms per frame "
+                "vanilla frame: renderEntities %.2f ms (block entities %.2f of it), "
+                        + "renderBlockLayer (all 4) %.2f ms per frame "
                         + "over %d frames, %d frustum tests per frame (%s)",
-                entityNanos / 1_000_000.0 / frames, layerNanos / 1_000_000.0 / frames, frames,
+                entityNanos / 1_000_000.0 / frames, blockEntityNanos / 1_000_000.0 / frames,
+                layerNanos / 1_000_000.0 / frames, frames,
                 frustumTests / frames,
                 VulkanConfig.isFastFrustumTest() ? "far corner" : "vanilla eight corners");
+        blockEntityNanos = 0L;
         entityNanos = 0L;
         layerNanos = 0L;
         frames = 0L;
