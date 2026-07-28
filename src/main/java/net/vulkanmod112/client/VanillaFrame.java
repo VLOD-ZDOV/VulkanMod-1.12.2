@@ -153,9 +153,9 @@ public final class VanillaFrame {
      */
     private static long rebuildFrames;
     private static long rebuildNanos;
+    private static long rebuildScanned;
     private static long filterRuns;
     private static long filterNanos;
-    private static long filterScanned;
     private static long filterKept;
     private static long filterPending;
     private static long buildNearCount;
@@ -166,12 +166,21 @@ public final class VanillaFrame {
         rebuildNanos += nanos;
     }
 
-    public static void countRebuildFilter(int scanned, int kept, int pending, long nanos) {
+    /**
+     * The size of the list the pass is about to walk, and of the rebuild queue
+     * it will be asked about. Recorded whether or not the filter is on, because
+     * these two are the pass's input and the only honest way to compare two
+     * flights over different ground is to divide by them.
+     */
+    public static void countRebuildScan(int listSize, int pending) {
+        rebuildScanned += listSize;
+        filterPending += pending;
+    }
+
+    public static void countRebuildFilter(int kept, long nanos) {
         filterRuns++;
         filterNanos += nanos;
-        filterScanned += scanned;
         filterKept += kept;
-        filterPending += pending;
     }
 
     public static void countBuildNear(long nanos) {
@@ -184,25 +193,31 @@ public final class VanillaFrame {
         if (rebuildFrames == 0) {
             return "rebuild near: no frames";
         }
-        StringBuilder line = new StringBuilder(160);
-        line.append(String.format("rebuild near: %.3f ms per frame over %d frames",
-                rebuildNanos / 1_000_000.0 / rebuildFrames, rebuildFrames));
+        StringBuilder line = new StringBuilder(200);
+        long perFrame = rebuildScanned / rebuildFrames;
+        // Nanoseconds per chunk on the list is the figure that survives a
+        // different route: two flights never cover the same ground, but they can
+        // be divided by how much was on screen.
+        line.append(String.format("rebuild near: %.3f ms per frame over %d frames, "
+                        + "%d on the list, %d queued, %.1f ns each",
+                rebuildNanos / 1_000_000.0 / rebuildFrames, rebuildFrames, perFrame,
+                filterPending / rebuildFrames,
+                perFrame == 0 ? 0.0 : (double) rebuildNanos / rebuildFrames / perFrame));
         if (buildNearCount > 0) {
             line.append(String.format(" | %.3f ms of it building %d chunks on the spot",
                     buildNearNanos / 1_000_000.0 / rebuildFrames, buildNearCount));
         }
         if (filterRuns > 0) {
-            line.append(String.format(" | filter %.3f ms, %d scanned → %d kept, %d queued",
-                    filterNanos / 1_000_000.0 / filterRuns, filterScanned / filterRuns,
-                    filterKept / filterRuns, filterPending / filterRuns));
+            line.append(String.format(" | filter %.3f ms → %d kept",
+                    filterNanos / 1_000_000.0 / filterRuns, filterKept / filterRuns));
         } else {
             line.append(" | filter off");
         }
         rebuildFrames = 0L;
         rebuildNanos = 0L;
+        rebuildScanned = 0L;
         filterRuns = 0L;
         filterNanos = 0L;
-        filterScanned = 0L;
         filterKept = 0L;
         filterPending = 0L;
         buildNearCount = 0L;

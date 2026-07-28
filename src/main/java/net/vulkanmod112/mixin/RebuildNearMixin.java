@@ -130,10 +130,17 @@ public abstract class RebuildNearMixin {
                     ordinal = 0))
     @SuppressWarnings({"rawtypes", "unchecked"})
     private Iterator vulkanmod112$shortlistRebuilds(List list) {
+        int size = list == this.renderInfos ? list.size() : 0;
+        // Counted on both sides of the switch and before any of the bail-outs.
+        // Without it the arm with the filter off has no denominator, and two
+        // flights over different ground cannot be compared at all — which is
+        // exactly what happened the first time this was measured.
+        VanillaFrame.countRebuildScan(size, this.vulkanmod112$pending == null
+                ? 0 : this.vulkanmod112$pending.size());
+
         if (list != this.renderInfos || !VulkanConfig.isFastRebuildNear() || !DirtyChunks.ready()) {
             return list.iterator();
         }
-        int size = list.size();
         if (size == 0) {
             return list.iterator();
         }
@@ -174,8 +181,7 @@ public abstract class RebuildNearMixin {
                 DirtyChunks.clearPending(((GridSlot) chunk).vulkanmod112$gridSlot());
             }
         }
-        VanillaFrame.countRebuildFilter(size, shortlist.size(), pendingSize,
-                System.nanoTime() - started);
+        VanillaFrame.countRebuildFilter(shortlist.size(), System.nanoTime() - started);
         return shortlist.iterator();
     }
 
