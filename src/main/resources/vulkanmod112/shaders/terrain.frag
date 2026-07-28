@@ -10,7 +10,7 @@ layout(set = 0, binding = 3, std140) uniform Frame {
     vec4 fogParams;  // x = start, y = end, z = density
     vec4 lightInfo;  // x = how many of lights[] are in use
     vec4 lights[32]; // xyz = position relative to the camera, w = light level
-    vec4 frameInfo;  // x = seconds, y = 1 for directional dynamic light
+    vec4 frameInfo;  // x = seconds, y = directional light strength (0 = off)
     vec4 heightFog;  // x = strength (0 = off), y = thickening per block
 } frame;
 
@@ -81,6 +81,41 @@ vec3 faceNormal() {
     return dot(n, vRelative) > 0.0 ? -n : n;
 }
 
+// Roughly half the width of a torch flame, in blocks. What it controls is how
+// far light bends past the horizon of a surface: see directionalTerm.
+const float SOURCE_RADIUS = 0.6;
+
+// What a face turned right away from a source keeps of its light. Vanilla's
+// own face shading never reaches zero either — the underside of a block is
+// drawn at 0.5 of the top, not black — so a face out of the light here dims
+// rather than dropping out of the scene, which is a thing that happens to
+// nothing else in this game.
+const float BACK_FACE_LIGHT = 0.35;
+
+/**
+ * How much of a source's light a face turned this way receives.
+ *
+ * Not max(dot(n, l), 0). That is the right answer for a point light and the
+ * wrong one here, and one test showed both halves of why: a torch dropped
+ * beside a one-block wall left the top of the wall completely black, and
+ * jumping with a torch in hand lit that same face up at once. Both are the
+ * same edge — the source crossing the plane of the face — and a clipped dot
+ * product has nothing to say on either side of it.
+ *
+ * A flame is not a point. It has width, and a face level with a flame a step
+ * away still sees half of it; that is what softens the edge of a shadow on a
+ * real surface. So the source is a sphere here, and how far its light wraps
+ * past the geometric horizon is its radius over the distance to it: a lot when
+ * you are standing next to it, almost nothing across the room — which is also
+ * where a hard edge is what the eye expects.
+ */
+float directionalTerm(vec3 normal, vec3 toSource, float distance) {
+    float lambert = dot(normal, toSource / max(distance, 0.0001));
+    float wrap = SOURCE_RADIUS / max(distance, SOURCE_RADIUS);
+    float shaped = clamp((lambert + wrap) / (1.0 + wrap), 0.0, 1.0);
+    return mix(BACK_FACE_LIGHT, 1.0, shaped);
+}
+
 /**
  * Thickens the fog towards the ground below the camera.
  *
@@ -113,8 +148,8 @@ void main() {
     // Both of these come from the frame's uniform buffer, so every fragment in
     // the draw takes the same branch — which is what makes it safe to ask for
     // derivatives inside it.
-    bool directional = frame.frameInfo.y > 0.5;
-    vec3 normal = (lightCount > 0 && directional) ? faceNormal() : vec3(0.0, 1.0, 0.0);
+    float directional = frame.frameInfo.y;
+    vec3 normal = (lightCount > 0 && directional > 0.0) ? faceNormal() : vec3(0.0, 1.0, 0.0);
     for (int i = 0; i < lightCount; ++i) {
         vec4 source = frame.lights[i];
         vec3 toSource = source.xyz - vRelative;
@@ -122,12 +157,14 @@ void main() {
         // Vanilla propagates block light one level per block, so a source of
         // level L reaches L blocks. The same falloff, in a straight line.
         float level = source.w - distance;
-        if (directional && level > 0.0) {
-            // A face turned away from a torch should not be lit by it. Vanilla
-            // cannot express this — its light is a per-block value with no idea
-            // which way a surface points — so a dropped torch used to light the
-            // underside of the floor it sits on exactly as brightly as the top.
-            level *= max(dot(normal, toSource / max(distance, 0.0001)), 0.0);
+        if (directional > 0.0 && level > 0.0) {
+            // A face turned away from a torch should not be lit by it as
+            // brightly as one facing it. Vanilla cannot express this at all —
+            // its light is a per-block value with no idea which way a surface
+            // points — so a dropped torch lights the underside of the floor it
+            // sits on exactly as brightly as the top. The strength is how far
+            // to go from vanilla's answer towards this one.
+            level *= mix(1.0, directionalTerm(normal, toSource, distance), directional);
         }
         if (level > 0.0) {
             // The light map is sampled at (level * 16 + 8) / 256, which is the

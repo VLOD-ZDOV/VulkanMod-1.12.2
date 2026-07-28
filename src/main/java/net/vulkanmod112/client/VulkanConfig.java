@@ -199,9 +199,10 @@ public final class VulkanConfig {
      */
     static final boolean DEF_EXTREME_RENDER_DISTANCE = false;
     /**
-     * Let a torch care which way a surface is turned.
+     * How far dynamic light goes towards caring which way a surface is turned,
+     * in percent.
      *
-     * On by default. Vanilla's light is a number per block with no idea of
+     * Full by default. Vanilla's light is a number per block with no idea of
      * orientation, so a dropped torch lit the underside of the floor it was
      * lying on exactly as brightly as the top of it. This renderer can work the
      * face normal out from how the world position changes across the screen —
@@ -209,8 +210,13 @@ public final class VulkanConfig {
      * than an approximation — and dim a face that is turned away. It costs a
      * cross product per lit fragment and nothing at all when dynamic lights are
      * off.
+     *
+     * A percentage rather than a switch because the right amount is a matter of
+     * taste against a game whose own shading is a fixed number per face
+     * direction, and because the difference between the two ends is a thing you
+     * judge by standing in a lit room rather than by reading about it.
      */
-    static final boolean DEF_DIRECTIONAL_LIGHT = true;
+    static final int DEF_DIRECTIONAL_LIGHT = 100;
     /**
      * How much colour the ground below the camera gives up to fog, in percent.
      *
@@ -223,6 +229,17 @@ public final class VulkanConfig {
      * ground it is on.
      */
     static final int DEF_HEIGHT_FOG = 0;
+    /**
+     * The drop below the camera, in blocks, over which the fog reaches nearly
+     * all of the strength above.
+     *
+     * Twenty-four blocks is about the floor of a ravine seen from its lip, and
+     * that was the shape this started with. It is the other half of the
+     * setting: the strength says how much colour the low ground gives up in the
+     * end, and this says how far down you have to look before it does. A lower
+     * number is a valley that turns to haze a few blocks under your feet.
+     */
+    static final int DEF_HEIGHT_FOG_DEPTH = 24;
     static final boolean DEF_FOG = true;
     static final boolean DEF_ZOOM = true;
     /** Stored as an integer so it fits the config and the slider; 4 = quarter FOV. */
@@ -259,8 +276,9 @@ public final class VulkanConfig {
     private static int dynamicLightDistance = DEF_DYNAMIC_LIGHT_DISTANCE;
     private static boolean dropVanillaBuffers = DEF_DROP_VANILLA_BUFFERS;
     private static boolean extremeRenderDistance = DEF_EXTREME_RENDER_DISTANCE;
-    private static boolean directionalLight = DEF_DIRECTIONAL_LIGHT;
+    private static int directionalLight = DEF_DIRECTIONAL_LIGHT;
     private static int heightFog = DEF_HEIGHT_FOG;
+    private static int heightFogDepth = DEF_HEIGHT_FOG_DEPTH;
     private static boolean fogEnabled = DEF_FOG;
     private static boolean zoomEnabled = DEF_ZOOM;
     private static int zoomFactor = DEF_ZOOM_FACTOR;
@@ -423,20 +441,26 @@ public final class VulkanConfig {
                         + "objects and four times the memory, whether or not there is a world out "
                         + "there to put in them. Turning this off again pulls the distance back to "
                         + "64 if it is above it.");
-        directionalLight = config.getBoolean("directionalLight", CATEGORY_GENERAL,
-                DEF_DIRECTIONAL_LIGHT,
-                "Let dynamic light care which way a surface is turned. The game's own light is "
-                        + "one number per block and knows nothing about orientation, so a dropped "
-                        + "torch lights the underside of the floor it lies on as brightly as the "
-                        + "top. This works the face out from the shape of the surface on screen "
-                        + "and dims what is turned away. Costs nothing while dynamic lights are "
-                        + "off.");
+        directionalLight = config.getInt("directionalLightStrength", CATEGORY_GENERAL,
+                DEF_DIRECTIONAL_LIGHT, 0, 100,
+                "How far dynamic light goes towards caring which way a surface is turned, in "
+                        + "percent. 0 is off. The game's own light is one number per block and "
+                        + "knows nothing about orientation, so a dropped torch lights the "
+                        + "underside of the floor it lies on as brightly as the top. This works "
+                        + "the face out from the shape of the surface on screen and dims what is "
+                        + "turned away. Costs nothing while dynamic lights are off.");
         heightFog = config.getInt("heightFog", CATEGORY_GENERAL, DEF_HEIGHT_FOG, 0, 100,
                 "How much colour the ground below you gives up to fog, in percent. 0 is off. It "
                         + "fades towards the game's own fog colour and only where the game "
                         + "already has fog, so it cannot invent a haze the sky disagrees with. It "
                         + "reaches only what this renderer draws: entities and particles are "
                         + "fogged by OpenGL, which knows nothing about height.");
+        heightFogDepth = config.getInt("heightFogDepth", CATEGORY_GENERAL, DEF_HEIGHT_FOG_DEPTH,
+                4, 96,
+                "The drop below the camera, in blocks, over which height fog reaches nearly all "
+                        + "of its strength. The strength setting says how much colour the low "
+                        + "ground gives up in the end; this says how far down you have to look "
+                        + "before it does.");
         fogEnabled = config.getBoolean("fog", CATEGORY_GENERAL, DEF_FOG,
                 "Fade Vulkan terrain into the distance the way the rest of the scene already does. "
                         + "Off leaves the world ending in a hard edge, which is a little faster.");
@@ -484,6 +508,7 @@ public final class VulkanConfig {
         setExtremeRenderDistance(DEF_EXTREME_RENDER_DISTANCE);
         setDirectionalLight(DEF_DIRECTIONAL_LIGHT);
         setHeightFog(DEF_HEIGHT_FOG);
+        setHeightFogDepth(DEF_HEIGHT_FOG_DEPTH);
         setFogEnabled(DEF_FOG);
         setZoomEnabled(DEF_ZOOM);
         setZoomFactor(DEF_ZOOM_FACTOR);
@@ -600,13 +625,13 @@ public final class VulkanConfig {
         store(CATEGORY_GENERAL, "extremeRenderDistance", value);
     }
 
-    public static boolean isDirectionalLight() {
+    public static int getDirectionalLight() {
         return directionalLight;
     }
 
-    public static void setDirectionalLight(boolean value) {
+    public static void setDirectionalLight(int value) {
         directionalLight = value;
-        store(CATEGORY_GENERAL, "directionalLight", value);
+        store(CATEGORY_GENERAL, "directionalLightStrength", value);
         applySystemProperties();
     }
 
@@ -617,6 +642,16 @@ public final class VulkanConfig {
     public static void setHeightFog(int value) {
         heightFog = value;
         store(CATEGORY_GENERAL, "heightFog", value);
+        applySystemProperties();
+    }
+
+    public static int getHeightFogDepth() {
+        return heightFogDepth;
+    }
+
+    public static void setHeightFogDepth(int value) {
+        heightFogDepth = value;
+        store(CATEGORY_GENERAL, "heightFogDepth", value);
         applySystemProperties();
     }
 
@@ -817,8 +852,9 @@ public final class VulkanConfig {
         System.setProperty("vulkanmod112.cull", Boolean.toString(cullingEnabled));
         System.setProperty("vulkanmod112.geometryBudget", Integer.toString(geometryBudgetMiB));
         System.setProperty("vulkanmod112.framesInFlight", Integer.toString(framesInFlight));
-        System.setProperty("vulkanmod112.directionalLight", Boolean.toString(directionalLight));
+        System.setProperty("vulkanmod112.directionalLight", Integer.toString(directionalLight));
         System.setProperty("vulkanmod112.heightFog", Integer.toString(heightFog));
+        System.setProperty("vulkanmod112.heightFogDepth", Integer.toString(heightFogDepth));
     }
 
     private static void store(String category, String key, int value) {

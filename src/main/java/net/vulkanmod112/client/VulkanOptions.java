@@ -244,27 +244,32 @@ final class VulkanOptions {
                                         VulkanConfig.setDynamicLights(value);
                                     }
                                 }),
-                        new VSwitchOption("Directional Light",
-                                "Let dynamic light care which way a surface is turned. The game's "
-                                        + "own light is one number per block and knows nothing "
-                                        + "about orientation, so a dropped torch lights the "
-                                        + "underside of the floor it is lying on exactly as "
-                                        + "brightly as the top of it. This renderer can work the "
-                                        + "face out from how the surface changes across the "
-                                        + "screen — every quad in a block model is flat, so that "
-                                        + "is the real face rather than a guess — and dim what is "
-                                        + "turned away from the light. Costs nothing at all while "
-                                        + "dynamic lights are off.",
+                        new VRangeOption("Directional Light",
+                                "How far dynamic light goes towards caring which way a surface is "
+                                        + "turned. The game's own light is one number per block "
+                                        + "and knows nothing about orientation, so a dropped torch "
+                                        + "lights the underside of the floor it is lying on "
+                                        + "exactly as brightly as the top of it. This renderer can "
+                                        + "work the face out from how the surface changes across "
+                                        + "the screen — every quad in a block model is flat, so "
+                                        + "that is the real face rather than a guess — and dim "
+                                        + "what is turned away from the light. Nothing goes fully "
+                                        + "dark and nothing switches on at once: the flame is "
+                                        + "treated as having width, so its light wraps around a "
+                                        + "corner you are standing next to and stops at one across "
+                                        + "the room. Costs nothing at all while dynamic lights are "
+                                        + "off.",
                                 Cost.of(Level.NONE, Level.LOW, Level.NONE),
                                 "Only does anything while Dynamic Lights is on.",
-                                new VSwitchOption.Access() {
+                                0, 100, 5, "%", "OFF",
+                                new VRangeOption.Access() {
                                     @Override
-                                    public boolean get() {
-                                        return VulkanConfig.isDirectionalLight();
+                                    public int get() {
+                                        return VulkanConfig.getDirectionalLight();
                                     }
 
                                     @Override
-                                    public void set(boolean value) {
+                                    public void set(int value) {
                                         VulkanConfig.setDirectionalLight(value);
                                     }
                                 }),
@@ -294,6 +299,27 @@ final class VulkanOptions {
                                     @Override
                                     public void set(int value) {
                                         VulkanConfig.setHeightFog(value);
+                                    }
+                                }),
+                        new VRangeOption("Height Fog Depth",
+                                "How far below you the ground has to be before height fog has "
+                                        + "taken nearly all of the colour the setting above lets "
+                                        + "it take. The two work together: one says how much, this "
+                                        + "says how soon. Lower it and a valley a few blocks under "
+                                        + "your feet is already hazy; raise it and only the floor "
+                                        + "of a deep ravine is.",
+                                Cost.of(Level.NONE, Level.NONE, Level.NONE),
+                                "Only does anything while Height Fog is above 0.",
+                                4, 96, 4, " blocks", null,
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getHeightFogDepth();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setHeightFogDepth(value);
                                     }
                                 }),
                         new VRangeOption("Dynamic Light Distance",

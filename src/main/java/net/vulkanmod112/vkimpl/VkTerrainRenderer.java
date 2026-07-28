@@ -332,9 +332,10 @@ final class VkTerrainRenderer {
     private final float[] fogState = new float[8];
     /** Start of the clock the shaders animate from; see writeFrameUniforms. */
     private final long startedNanos = System.nanoTime();
-    private boolean directionalDynamicLight = true;
+    /** 0 leaves dynamic light exactly as vanilla has it; 1 is the full effect. */
+    private float directionalDynamicLight = 1.0f;
     private float heightFogStrength;
-    private float heightFogFalloff = 0.08f;
+    private float heightFogFalloff = 2.0f / 24.0f;
 
     // Size-dependent shared targets
     private int width;
@@ -1721,7 +1722,7 @@ final class VkTerrainRenderer {
         float seconds = (float) (((System.nanoTime() - startedNanos) / 1_000_000L) % 3_600_000L)
                 / 1000.0f;
         MemoryUtil.memPutFloat(base + 624, seconds);
-        MemoryUtil.memPutFloat(base + 628, directionalDynamicLight ? 1.0f : 0.0f);
+        MemoryUtil.memPutFloat(base + 628, directionalDynamicLight);
         MemoryUtil.memPutFloat(base + 632, 0.0f);
         MemoryUtil.memPutFloat(base + 636, 0.0f);
         // vec4 heightFog at 640.
@@ -1741,13 +1742,19 @@ final class VkTerrainRenderer {
      */
     private void refreshShaderSettings() {
         directionalDynamicLight =
-                !"false".equals(System.getProperty("vulkanmod112.directionalLight"));
-        int strength = intProperty("vulkanmod112.heightFog", 0);
-        heightFogStrength = Math.max(0, Math.min(100, strength)) / 100.0f;
-        // Hundredths of "per block", so 8 thickens by a factor of e over about
-        // twelve blocks of drop. Kept out of the settings screen: it is the
-        // shape of the curve rather than how much of it you want.
-        heightFogFalloff = Math.max(1, intProperty("vulkanmod112.heightFogFalloff", 8)) / 100.0f;
+                clampPercent(intProperty("vulkanmod112.directionalLight", 100));
+        heightFogStrength = clampPercent(intProperty("vulkanmod112.heightFog", 0));
+        // The setting is a depth in blocks; the shader wants a rate per block.
+        // Two e-foldings over that depth, so the drop the slider names is where
+        // the fog has taken about six sevenths of what its strength allows —
+        // near enough to "this is where it is as thick as it gets" to set by
+        // eye, which is how the slider is going to be used.
+        int depth = Math.max(1, intProperty("vulkanmod112.heightFogDepth", 24));
+        heightFogFalloff = 2.0f / depth;
+    }
+
+    private static float clampPercent(int value) {
+        return Math.max(0, Math.min(100, value)) / 100.0f;
     }
 
     private static int intProperty(String name, int fallback) {
