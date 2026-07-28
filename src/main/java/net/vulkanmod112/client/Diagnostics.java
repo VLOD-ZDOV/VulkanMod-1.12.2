@@ -266,6 +266,7 @@ public final class Diagnostics {
                 VulkanConfig.getFramesInFlight(),
                 VulkanConfig.isOwnVisibilityWalk() ? "on" : "off"));
         out.println("  " + DynamicLights.stats());
+        out.println("  " + FrameGraph.stats());
         writeVanillaCounters(out, mc);
         writeProfilerTree(out, mc);
 

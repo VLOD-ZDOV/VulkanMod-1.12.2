@@ -129,6 +129,7 @@ public final class VulkanConfig {
      * this way — but it is arithmetic per fragment per source, and it lights
      * only what this renderer draws.
      */
+    static final boolean DEF_FRAME_GRAPH = false;
     static final boolean DEF_DYNAMIC_LIGHTS = false;
     /**
      * How far a light source may be and still be drawn, in blocks. Not how far
@@ -186,6 +187,7 @@ public final class VulkanConfig {
     private static boolean ownVisibilityWalk = DEF_OWN_VISIBILITY_WALK;
     private static boolean fastFrustumTest = DEF_FAST_FRUSTUM_TEST;
     private static boolean vulkanTranslucent = DEF_VULKAN_TRANSLUCENT;
+    private static boolean frameGraph = DEF_FRAME_GRAPH;
     private static boolean dynamicLights = DEF_DYNAMIC_LIGHTS;
     private static int dynamicLightDistance = DEF_DYNAMIC_LIGHT_DISTANCE;
     private static boolean dropVanillaBuffers = DEF_DROP_VANILLA_BUFFERS;
@@ -289,6 +291,11 @@ public final class VulkanConfig {
                         + "chunks onto the card, which is what actually limits how fast a world "
                         + "fills in. Off by default: with those buffers empty, every fallback to "
                         + "vanilla rendering has to rebuild the entire world first.");
+        frameGraph = config.getBoolean("frameGraph", CATEGORY_GENERAL, DEF_FRAME_GRAPH,
+                "Show a frame-time graph in the bottom-left corner, with the worst and best frame "
+                        + "of the last couple of seconds and the 1% low. An average framerate "
+                        + "cannot tell a steady 120 from a 240 that stalls every tenth frame; the "
+                        + "1% low and the shape of the graph can.");
         dynamicLights = config.getBoolean("dynamicLights", CATEGORY_GENERAL, DEF_DYNAMIC_LIGHTS,
                 "Let a carried torch, a dropped glowing block or a burning creature light the "
                         + "terrain around it. The light is added while the world is being shaded, "
@@ -343,6 +350,7 @@ public final class VulkanConfig {
         setOwnVisibilityWalk(DEF_OWN_VISIBILITY_WALK);
         setFastFrustumTest(DEF_FAST_FRUSTUM_TEST);
         setVulkanTranslucent(DEF_VULKAN_TRANSLUCENT);
+        setFrameGraph(DEF_FRAME_GRAPH);
         setDynamicLights(DEF_DYNAMIC_LIGHTS);
         setDynamicLightDistance(DEF_DYNAMIC_LIGHT_DISTANCE);
         setDropVanillaBuffers(DEF_DROP_VANILLA_BUFFERS);
@@ -414,6 +422,15 @@ public final class VulkanConfig {
     public static void setDropVanillaBuffers(boolean value) {
         dropVanillaBuffers = value;
         store(CATEGORY_OPTIMIZATION, "dropVanillaBuffers", value);
+    }
+
+    public static boolean isFrameGraph() {
+        return frameGraph;
+    }
+
+    public static void setFrameGraph(boolean value) {
+        frameGraph = value;
+        store(CATEGORY_GENERAL, "frameGraph", value);
     }
 
     public static boolean isDynamicLights() {

@@ -138,6 +138,30 @@ final class VulkanOptions {
                                         mc.gameSettings.saveOptions();
                                     }
                                 }),
+                        new VSwitchOption("Frame Time Graph",
+                                "Draw a frame-time graph in the bottom-left corner: one bar per "
+                                        + "frame over the last couple of seconds, with the best and "
+                                        + "worst single frame and the 1%% low — the frame time that "
+                                        + "only one frame in a hundred exceeds. The framerate the "
+                                        + "game already shows is frames divided by seconds, and it "
+                                        + "cannot tell a steady 120 from a 240 that stalls every "
+                                        + "tenth frame; those two average out the same and only one "
+                                        + "of them is pleasant to play. Nothing is recorded at all "
+                                        + "while this is off, and with it on the whole graph is one "
+                                        + "draw call. The diagnostics log states what drawing it "
+                                        + "actually cost, rather than leaving that to be believed.",
+                                Cost.of(Level.NONE, Level.NONE, Level.NONE), null,
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return VulkanConfig.isFrameGraph();
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        VulkanConfig.setFrameGraph(value);
+                                    }
+                                }),
                         new VSwitchOption("Dynamic Lights",
                                 "Let a carried torch, a dropped glowing block or a burning "
                                         + "creature light the ground around it. The light is added "

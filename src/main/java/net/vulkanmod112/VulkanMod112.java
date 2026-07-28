@@ -28,6 +28,10 @@ public class VulkanMod112 {
         net.vulkanmod112.client.Zoom.register();
         net.minecraftforge.common.MinecraftForge.EVENT_BUS.register(
                 new net.vulkanmod112.client.Zoom.Handler());
+        // Also independent of Vulkan: a frame-time graph is wanted most in the
+        // case where the renderer did not come up.
+        net.minecraftforge.common.MinecraftForge.EVENT_BUS.register(
+                new net.vulkanmod112.client.FrameGraphHandler());
         // Vanilla exposes 32 chunks on a sufficiently large 64-bit heap. The
         // renderer and ViewFrustum themselves support higher values; expose
         // the 64-chunk option in our video-settings page.
