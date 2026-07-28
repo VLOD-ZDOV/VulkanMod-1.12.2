@@ -31,7 +31,10 @@ public final class VRangeOption extends VOption {
     @Override
     public String valueText() {
         int value = access.get();
-        return value == min && minText != null ? minText : value + suffix;
+        if (value == min && minText != null) {
+            return Lang.tr(Lang.VALUE, minText);
+        }
+        return value + Lang.tr(Lang.UNIT, suffix, suffix);
     }
 
     @Override
@@ -50,5 +53,13 @@ public final class VRangeOption extends VOption {
         int raw = Math.round(min + clamped * (max - min));
         int snapped = min + Math.round((raw - min) / (float) step) * step;
         access.set(snapped < min ? min : (snapped > max ? max : snapped));
+    }
+
+    public String englishSuffix() {
+        return suffix;
+    }
+
+    public String englishMinText() {
+        return minText;
     }
 }

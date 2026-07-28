@@ -1,2 +1,147 @@
+# VulkanMod112 settings screen.
+#
+# Generated with -Dvulkanmod112.dumpLang=true (Gradle: ./gradlew runClient -PdumpLang),
+# from the screen as it is actually built. Keys are derived from the English text in
+# the source, so renaming an option in English orphans its translations: regenerate
+# this file and diff it to catch that.
+#
+# A literal percent sign must be written %% — every value goes through String.format.
+
 key.categories.vulkanmod112=VulkanMod112
 key.vulkanmod112.zoom=Zoom
+
+vulkanmod112.ui.reset=Reset
+vulkanmod112.ui.cost=Cost
+vulkanmod112.ui.cpu=CPU
+vulkanmod112.ui.gpu=GPU
+vulkanmod112.ui.vram=VRAM
+vulkanmod112.ui.vulkan_unavailable=Vulkan unavailable
+vulkanmod112.cost.none=none
+vulkanmod112.cost.low=low
+vulkanmod112.cost.medium=medium
+vulkanmod112.cost.high=high
+
+vulkanmod112.page.rendering=Rendering
+vulkanmod112.group.presets=Presets
+vulkanmod112.option.stable=Stable
+vulkanmod112.tooltip.stable=Everything back to the values this mod ships with. This is the safe starting point: nothing is traded away for speed, and it behaves the same on every driver. Minecraft's own settings are left alone.
+vulkanmod112.value.apply=Apply
+vulkanmod112.option.balanced=Balanced
+vulkanmod112.tooltip.balanced=Caps the draw distances vanilla leaves far wider than anyone can actually see, and thins out particles. Costs almost nothing visually and is the biggest easy win on busy worlds.
+vulkanmod112.option.performance=Performance
+vulkanmod112.tooltip.performance=Trades looks for frames: short entity distances, no texture animation, minimal particles, fast graphics. The world will visibly lose detail — this is the one to pick when the framerate matters more than the view.
+vulkanmod112.group.vulkan=Vulkan
+vulkanmod112.option.vulkan_terrain=Vulkan Terrain
+vulkanmod112.tooltip.vulkan_terrain=Draw the opaque world through Vulkan instead of OpenGL. Turning it off returns to vanilla rendering immediately. The Vulkan path keeps a second copy of the world geometry in video memory, which is where the VRAM cost comes from.
+vulkanmod112.group.view=View
+vulkanmod112.option.render_distance=Render Distance
+vulkanmod112.tooltip.render_distance=How far chunks are drawn. Beyond 32 the vanilla chunk grid itself costs a lot of CPU and RAM before this mod sees anything, and servers may cap it anyway. The single most expensive setting in the game, on all three resources at once.
+vulkanmod112.unit.chunks= chunks
+vulkanmod112.option.max_framerate=Max Framerate
+vulkanmod112.tooltip.max_framerate=Frame cap. 260 means unlimited. A cap below your display's refresh rate lowers load, heat and fan noise without costing you anything you could see.
+vulkanmod112.unit.fps= fps
+vulkanmod112.option.dynamic_lights=Dynamic Lights
+vulkanmod112.tooltip.dynamic_lights=Let a carried torch, a dropped glowing block or a burning creature light the ground around it. The light is added while the world is being shaded rather than written into it, so no chunk is rebuilt — and rebuilding chunks is exactly what the frame is already waiting on while you move, which is what makes the usual approach to this cost so much. Any block that gives off light does, including modded ones, because the value is read from the block itself. Mobs standing in the light, the particles a broken block throws off and the view from first person are all lit to match. Nothing is written into the world and nothing is sent anywhere: this is worked out on your machine while the frame is drawn, so it changes nothing about mob spawning or daylight sensors and works on any server. Another player carrying a torch lights the ground for you without needing this mod themselves — only the one looking needs it.
+vulkanmod112.option.dynamic_light_distance=Dynamic Light Distance
+vulkanmod112.tooltip.dynamic_light_distance=How far away a light source may be and still be drawn, in blocks. This is not how far the light reaches — that comes from the source itself, and a torch lights about fifteen blocks around it whatever this says. What it decides is whether a distant torch lights the ground it stands on at all, and a pool of light on the ground is visible from as far away as the ground is. An early version cut this off at 24 blocks, reasoning that a level-15 light reaches 15, and lights visibly winked out as you flew away from torches that were still in plain sight. Lowering it costs nothing and buys nothing except fewer distant lights: every loaded entity is looked at either way, and only the nearest 32 sources are ever drawn.
+vulkanmod112.applies.dynamic_light_distance=Only does anything while Dynamic Lights is on.
+vulkanmod112.unit.blocks= blocks
+vulkanmod112.option.fog=Fog
+vulkanmod112.tooltip.fog=Fade the Vulkan-drawn world into the distance the way the rest of the scene already does. Without it the terrain is the one thing in view with no fog at all, which shows up worst underwater: fish and mobs take on the colour of the water while the blocks behind them stay perfectly clear. Off leaves the world ending in a hard edge and is very slightly faster.
+vulkanmod112.option.zoom=Zoom
+vulkanmod112.tooltip.zoom=Hold the zoom key to narrow the field of view, the way OptiFine does it. Mouse sensitivity is scaled to match while it is held, otherwise the view would sweep across the screen far too fast to aim with. Rebind the key under Controls.
+vulkanmod112.option.zoom_level=Zoom Level
+vulkanmod112.tooltip.zoom_level=How far the zoom key narrows the field of view. 4 means a quarter of it, which is what OptiFine uses.
+vulkanmod112.unit.x=x
+vulkanmod112.option.vsync=VSync
+vulkanmod112.tooltip.vsync=Lock the framerate to the monitor's refresh rate. Removes tearing, and caps FPS at your refresh rate.
+
+vulkanmod112.page.optimizations=Optimizations
+vulkanmod112.group.entities=Entities
+vulkanmod112.option.entity_distance=Entity Distance
+vulkanmod112.tooltip.entity_distance=Stop drawing mobs, items and other entities past this distance. Vanilla uses a per-entity limit that is often far larger than you can see. The biggest win in crowded worlds, mob farms and busy servers — and almost entirely a CPU one, since each entity is decided and submitted one at a time.
+vulkanmod112.value.vanilla=Vanilla
+vulkanmod112.option.block_entity_distance=Block Entity Distance
+vulkanmod112.tooltip.block_entity_distance=Same limit for chests, signs, banners and other blocks with their own renderer. These are drawn one by one, so a low limit helps a lot in storage rooms.
+vulkanmod112.option.entity_shadows=Entity Shadows
+vulkanmod112.tooltip.entity_shadows=The dark blob under every entity. Each one is an extra draw.
+vulkanmod112.group.chunks=Chunks
+vulkanmod112.option.chunk_build_threads=Chunk Build Threads
+vulkanmod112.tooltip.chunk_build_threads=How many threads turn blocks into geometry. Vanilla sizes this pool from the heap rather than from the CPU and takes the smaller of the two, so a large processor builds chunks with part of itself idle. Building — not drawing — is what the frame waits for at long render distances. Extra threads share the same build buffers, whose count the heap still decides, so past a point more of them simply wait. Applies on the next world load.
+vulkanmod112.applies.chunk_build_threads=Next world load
+vulkanmod112.unit.threads= threads
+vulkanmod112.option.visibility_walk_interval=Visibility Walk Interval
+vulkanmod112.tooltip.visibility_walk_interval=How often the game may redo its visibility search while chunks are still being rebuilt. That search decides which chunks are on screen, and measured with the game's own profiler at render distance 64 it is a quarter to a half of the entire frame — eight times what drawing the world costs. It reruns whenever the camera moves, which is fair, and also whenever any chunk is queued for rebuild, which while a world fills in means every frame even standing perfectly still. This limits only the second case; camera movement always gets a fresh search. The cost is that a chunk which just finished building can wait this long before it appears, so raising it too far makes the world visibly arrive in steps. Off by default.
+vulkanmod112.unit.ms= ms
+vulkanmod112.value.off=Off
+vulkanmod112.option.near_clipping_plane=Near Clipping Plane
+vulkanmod112.tooltip.near_clipping_plane=How close to the eye the world starts being drawn, in hundredths of a block. Vanilla uses 5, and that is what makes distant snow speckle grey and sand through the white: the depth buffer's precision falls off with the square of distance divided by this number, and three hundred blocks out it can no longer separate a snow layer from the block under it, whose top face is still drawn. 20 puts the resolvable gap comfortably under that, and it is the default here. The price is that anything closer to the eye than this is clipped away, so with your head inside a block a large value can open a hole in it. Set it to 0 for vanilla.
+vulkanmod112.unit.100_block=/100 block
+vulkanmod112.value.vanilla_5=Vanilla (5)
+vulkanmod112.option.drop_vanilla_chunk_buffers=Drop Vanilla Chunk Buffers
+vulkanmod112.tooltip.drop_vanilla_chunk_buffers=Stop filling the game's own chunk buffers once Vulkan has the geometry. The world is currently held twice in video memory, once for each renderer, and this removes one of the copies — the single largest saving there is at high render distances. It also takes the second upload out of the budget the game reserves each frame for getting chunks onto the card, which is what really decides how fast a world fills in around you. Off by default for a specific reason: everything in this mod falls back to vanilla rendering when something goes wrong, and that works because those buffers hold the world. With them empty, falling back has to rebuild every chunk first, which it will do — but it is a pause, and one you should have chosen.
+vulkanmod112.option.vulkan_water_and_glass=Vulkan Water and Glass
+vulkanmod112.tooltip.vulkan_water_and_glass=Draw the translucent layer in Vulkan instead of leaving it to OpenGL. Not a speed setting — measured, that layer is 2.6%% of a frame either way. What it changes is that fog reaches all of the terrain: everything this mod draws fades into the distance, and water, being the one surface still drawn the old way, stays clear while the blocks around it do not. It also has to happen before the game's own chunk buffers can be dropped, which is where the video memory saving lives. Off by default while it is new; turn it off again if water looks wrong against entities.
+vulkanmod112.option.fast_frustum_test=Fast Frustum Test
+vulkanmod112.tooltip.fast_frustum_test=Decide whether something is off screen from its far corner instead of from all eight. It is the same answer by the same arithmetic, not an approximation: the corner furthest along a clipping plane is the last one to leave it, so if that one is outside then all of them are. Vanilla evaluates up to forty-eight corner positions to reject a single box, and the search that decides which chunks are on screen does this once for every chunk it reaches — which its own profiler puts at a quarter to a half of the frame at high render distances. On by default; the switch is here to rule it out, not to choose.
+vulkanmod112.option.own_visibility_search=Own Visibility Search
+vulkanmod112.tooltip.own_visibility_search=Decide which chunks are on screen with this mod's search instead of the game's. Same answer, run just as often — the difference is that vanilla follows a chain of pointers for every neighbour it tests, and this reads flat arrays instead. The game's own profiler puts its version at a quarter to a half of the entire frame at render distance 64, against 4.5%% for drawing the world, so it is the largest single item there is. Measured at that distance with the same amount of world on screen: 76 fps to 105. The step that could have gone wrong silently is working a chunk's position out instead of looking it up, and that was checked against the game's own answer 707 million times without a disagreement. Turn it off if you ever see a chunk missing that comes back when you approach it.
+vulkanmod112.option.preload_offscreen_chunks=Preload Offscreen Chunks
+vulkanmod112.tooltip.preload_offscreen_chunks=Let chunks behind you be built too. Vanilla only ever schedules chunks that are on screen right now, so at high render distances the world fills in along whatever you look at, and turning around means waiting again. This tops the build queue up from the rest of the grid once the visible chunks are handled, so they never lose their place in line. Off by default, and the reason is worth knowing before you turn it on: measured at render distance 64, 330 fps without it against 120-140 with. Filling the world in is not free work the game was skipping out of laziness — it is continuous chunk building, and it also means video memory reaches what the distance really implies instead of only what you have looked at. Worth it if you would rather the world were there than have the frames.
+vulkanmod112.group.window=Window
+vulkanmod112.option.background_fps_limit=Background FPS Limit
+vulkanmod112.tooltip.background_fps_limit=Framerate while the window is minimised or in the background. With the frame cap on unlimited the game otherwise keeps the GPU at full load drawing frames nobody sees.
+vulkanmod112.group.textures=Textures
+vulkanmod112.option.animated_textures=Animated Textures
+vulkanmod112.tooltip.animated_textures=Water, lava, fire, portals and every animated modded block upload a new frame every tick, on screen or not. Turning them off is a straight win in modpacks; the blocks just stop moving.
+vulkanmod112.group.effects=Effects
+vulkanmod112.option.particles=Particles
+vulkanmod112.tooltip.particles=How many particles the game spawns. Minimal is a large win near fire, potions and redstone.
+vulkanmod112.value.all=All
+vulkanmod112.value.decreased=Decreased
+vulkanmod112.value.minimal=Minimal
+
+vulkanmod112.page.quality=Quality
+vulkanmod112.group.world=World
+vulkanmod112.option.graphics=Graphics
+vulkanmod112.tooltip.graphics=Fast drops transparent leaves and simplifies water. Mostly a CPU and chunk-build win, since it removes geometry — which is also why it frees a little video memory.
+vulkanmod112.value.fast=Fast
+vulkanmod112.value.fancy=Fancy
+vulkanmod112.option.smooth_lighting=Smooth Lighting
+vulkanmod112.tooltip.smooth_lighting=Ambient occlusion baked into chunk geometry. Costs chunk build time, not frame time — so it shows up as stutter while the world loads, not as a lower framerate standing still.
+vulkanmod112.value.minimum=Minimum
+vulkanmod112.value.maximum=Maximum
+vulkanmod112.option.mipmap_levels=Mipmap Levels
+vulkanmod112.tooltip.mipmap_levels=Smaller copies of the block atlas for distant surfaces. This mod copies them into Vulkan, so raising this removes shimmer far away and is easier on the texture cache. Raising it usually costs nothing and can even gain a little.
+vulkanmod112.applies.mipmap_levels=Applies after the texture atlas reloads.
+
+vulkanmod112.page.advanced=Advanced
+vulkanmod112.group.memory=Memory
+vulkanmod112.option.geometry_budget=Geometry Budget
+vulkanmod112.tooltip.geometry_budget=How much video memory the world geometry may take before the renderer stops growing its buffer generously and starts creeping. Growing that buffer stops the GPU and re-uploads every chunk, so a larger budget on a card that has the memory to spare removes those stutters. On a small card a lower value keeps the footprint tight. Auto uses a quarter of what the GPU reports. Chunks are never dropped to stay inside the budget — it steers growth, it is not a wall.
+vulkanmod112.applies.geometry_budget=Applies after the game restarts.
+vulkanmod112.value.auto=Auto
+vulkanmod112.value.256_mib=256 MiB
+vulkanmod112.value.512_mib=512 MiB
+vulkanmod112.value.1_gib=1 GiB
+vulkanmod112.value.2_gib=2 GiB
+vulkanmod112.value.4_gib=4 GiB
+vulkanmod112.option.frames_in_flight=Frames In Flight
+vulkanmod112.tooltip.frames_in_flight=How many terrain frames the CPU may prepare before waiting for the GPU. Higher hides stalls when the CPU is the bottleneck, at the cost of one more frame of input delay and another copy of the per-frame buffers. 2 is the safe default.
+vulkanmod112.applies.frames_in_flight=Applies after the game restarts.
+vulkanmod112.unit.frames= frames
+vulkanmod112.group.compositing=Compositing
+vulkanmod112.option.depth_blit=Depth Blit
+vulkanmod112.tooltip.depth_blit=Copy Vulkan's depth buffer into the game's with hardware blit instead of writing it per pixel in a shader. Faster, but needs a driver that can share a 24-bit depth target; the renderer falls back on its own if it cannot.
+vulkanmod112.applies.depth_blit=Applies after the window is resized or the game restarts.
+vulkanmod112.option.backface_culling=Backface Culling
+vulkanmod112.tooltip.backface_culling=Skip triangles facing away from the camera. Only turn this off to diagnose missing or inside-out geometry — with it off the GPU shades roughly twice the triangles for nothing.
+vulkanmod112.applies.backface_culling=Applies after the game restarts.
+vulkanmod112.group.diagnostics=Diagnostics
+vulkanmod112.option.ultra_logging=Ultra Logging
+vulkanmod112.tooltip.ultra_logging=Write everything about the renderer, your mods and your settings to logs/vulkanmod112-diagnostics.log. Turn this on before reporting a problem — the file answers most questions on its own.
+vulkanmod112.option.log_interval=Log Interval
+vulkanmod112.tooltip.log_interval=How often a snapshot is appended to the diagnostics file.
+vulkanmod112.unit.s= s
+vulkanmod112.option.diagnostic_overlay=Diagnostic Overlay
+vulkanmod112.tooltip.diagnostic_overlay=Small Vulkan-rendered test image in the corner. Proves the interop path works; costs a submit and two semaphore waits a frame.

@@ -10,6 +10,8 @@ rather than crashing.
 
 ### 0.7.0 — in development
 
+- **The settings screen is translated** into Russian, Simplified Chinese, German, French, Spanish,
+  Brazilian Portuguese and Japanese, following Minecraft's own language setting.
 - **Dynamic light distance is adjustable**, 1 to 200 blocks. Not how far the light reaches — how
   far away a source may be and still light the ground it stands on.
 

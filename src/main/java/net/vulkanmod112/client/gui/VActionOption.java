@@ -23,11 +23,15 @@ public final class VActionOption extends VOption {
 
     @Override
     public String valueText() {
-        return buttonText;
+        return Lang.tr(Lang.VALUE, buttonText);
     }
 
     @Override
     public void activate(int direction, float fraction) {
         action.run();
+    }
+
+    public String englishButtonText() {
+        return buttonText;
     }
 }

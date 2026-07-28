@@ -22,12 +22,17 @@ public final class VCyclingOption extends VOption {
     @Override
     public String valueText() {
         int index = access.get();
-        return index >= 0 && index < values.length ? values[index] : "?";
+        return index >= 0 && index < values.length
+                ? Lang.tr(Lang.VALUE, values[index]) : "?";
     }
 
     @Override
     public void activate(int direction, float fraction) {
         int next = (access.get() + direction + values.length) % values.length;
         access.set(next);
+    }
+
+    public String[] englishValues() {
+        return values;
     }
 }

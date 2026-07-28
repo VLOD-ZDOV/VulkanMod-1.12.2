@@ -82,11 +82,24 @@ public abstract class VOption {
     }
 
     public String name() {
-        return name;
+        return Lang.tr(Lang.OPTION, name, name);
     }
 
     public String tooltip() {
+        return Lang.tr(Lang.TOOLTIP, name, tooltip);
+    }
+
+    /** The untranslated name, which is what every key here is derived from. */
+    public String englishName() {
+        return name;
+    }
+
+    public String englishTooltip() {
         return tooltip;
+    }
+
+    public String englishAppliesWhen() {
+        return appliesWhen;
     }
 
     public Cost cost() {
@@ -94,7 +107,7 @@ public abstract class VOption {
     }
 
     public String appliesWhen() {
-        return appliesWhen;
+        return Lang.tr(Lang.APPLIES, name, appliesWhen);
     }
 
     /** Text drawn on the right of the row. */

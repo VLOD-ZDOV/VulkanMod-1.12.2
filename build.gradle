@@ -433,6 +433,12 @@ tasks.matching { it.name in ['runClient', 'runObfClient'] }.configureEach {
     if (project.hasProperty('verifyWalk')) {
         jvmArgs '-Dvulkanmod112.verifyWalk=true'
     }
+    // -PdumpLang writes logs/vulkanmod112-en_us.lang from the settings screen
+    // as it is actually built, which is where the English language file comes
+    // from. Open the screen once, then copy the file into resources.
+    if (project.hasProperty('dumpLang')) {
+        jvmArgs '-Dvulkanmod112.dumpLang=true'
+    }
 }
 
 apply from: 'gradle/scripts/publishing.gradle'

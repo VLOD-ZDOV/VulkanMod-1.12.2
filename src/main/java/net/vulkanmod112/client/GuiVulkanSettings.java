@@ -3,6 +3,7 @@ package net.vulkanmod112.client;
 import net.minecraft.client.gui.GuiButton;
 import net.minecraft.client.gui.GuiScreen;
 import net.minecraft.client.resources.I18n;
+import net.vulkanmod112.client.gui.Lang;
 import net.vulkanmod112.VulkanBridge;
 import net.vulkanmod112.VulkanLoader;
 import net.vulkanmod112.client.gui.VOption;
@@ -62,6 +63,7 @@ public final class GuiVulkanSettings extends GuiScreen {
         this.buttonList.clear();
         if (this.pages == null) {
             this.pages = VulkanOptions.buildPages(this.mc);
+            vulkanmod112$dumpLang();
         }
 
         this.listTop = TOP;
@@ -82,10 +84,10 @@ public final class GuiVulkanSettings extends GuiScreen {
 
         for (int i = 0; i < this.pages.length; i++) {
             this.buttonList.add(new GuiButton(PAGE_BUTTON_BASE + i, MARGIN, TOP + i * (ROW_HEIGHT + 2),
-                    TAB_WIDTH, ROW_HEIGHT, this.pages[i].name));
+                    TAB_WIDTH, ROW_HEIGHT, this.pages[i].title()));
         }
         this.buttonList.add(new GuiButton(RESET, this.width / 2 - 154, this.height - 27, 100, 20,
-                "Reset"));
+                Lang.tr(Lang.UI, "Reset")));
         this.buttonList.add(new GuiButton(DONE, this.width / 2 - 50, this.height - 27, 150, 20,
                 I18n.format("gui.done")));
         updateTabHighlight();
@@ -135,7 +137,7 @@ public final class GuiVulkanSettings extends GuiScreen {
 
         this.drawCenteredString(this.fontRenderer, "VulkanMod112", this.width / 2, 12, 0xFFFFFF);
         VulkanBridge bridge = VulkanLoader.bridgeIfReady();
-        String gpu = bridge == null ? "Vulkan unavailable" : bridge.gpuSummary();
+        String gpu = bridge == null ? Lang.tr(Lang.UI, "Vulkan unavailable") : bridge.gpuSummary();
         int vram = VulkanOptions.vramMegabytes();
         if (vram > 0) {
             gpu = gpu + " — " + vram + " MiB";
@@ -150,7 +152,7 @@ public final class GuiVulkanSettings extends GuiScreen {
         int y = this.listTop - this.scroll;
         for (VOptionBlock block : this.pages[this.currentPage].blocks) {
             if (y + BLOCK_TITLE_HEIGHT > this.listTop && y < this.listBottom) {
-                this.fontRenderer.drawString(block.title, this.listLeft + 2, y + 3, 0xC0C0C0);
+                this.fontRenderer.drawString(block.heading(), this.listLeft + 2, y + 3, 0xC0C0C0);
             }
             y += BLOCK_TITLE_HEIGHT;
             for (VOption option : block.options) {
@@ -207,8 +209,9 @@ public final class GuiVulkanSettings extends GuiScreen {
             lines.addAll(this.fontRenderer.listFormattedStringToWidth(this.hovered.tooltip(), 220));
             VOption.Cost cost = this.hovered.cost();
             if (!cost.isFree()) {
-                lines.add("CPU: " + cost.cpu.label + "   GPU: " + cost.gpu.label
-                        + "   VRAM: " + cost.vram.label);
+                lines.add(Lang.tr(Lang.UI, "CPU") + ": " + costLabel(cost.cpu)
+                        + "   " + Lang.tr(Lang.UI, "GPU") + ": " + costLabel(cost.gpu)
+                        + "   " + Lang.tr(Lang.UI, "VRAM") + ": " + costLabel(cost.vram));
             }
             drawHoveringText(lines, mouseX, mouseY);
             return;
@@ -228,11 +231,11 @@ public final class GuiVulkanSettings extends GuiScreen {
         VOption.Cost cost = this.hovered.cost();
         if (!cost.isFree()) {
             y += 8;
-            this.fontRenderer.drawString("Cost", left + 4, y, 0x808080);
+            this.fontRenderer.drawString(Lang.tr(Lang.UI, "Cost"), left + 4, y, 0x808080);
             y += 12;
-            y = drawCostRow(left, y, "CPU", cost.cpu);
-            y = drawCostRow(left, y, "GPU", cost.gpu);
-            y = drawCostRow(left, y, "VRAM", cost.vram);
+            y = drawCostRow(left, y, Lang.tr(Lang.UI, "CPU"), cost.cpu);
+            y = drawCostRow(left, y, Lang.tr(Lang.UI, "GPU"), cost.gpu);
+            y = drawCostRow(left, y, Lang.tr(Lang.UI, "VRAM"), cost.vram);
         }
         if (this.hovered.appliesWhen() != null) {
             y += 4;
@@ -258,7 +261,7 @@ public final class GuiVulkanSettings extends GuiScreen {
             boolean filled = i < level.bars;
             drawRect(x, y, x + 8, y + 7, filled ? 0xFF000000 | level.color : 0x40FFFFFF);
         }
-        this.fontRenderer.drawString(level.label, barsLeft + 34, y, level.color);
+        this.fontRenderer.drawString(costLabel(level), barsLeft + 34, y, level.color);
         return y + 11;
     }
 
@@ -346,5 +349,37 @@ public final class GuiVulkanSettings extends GuiScreen {
     @Override
     public void onGuiClosed() {
         this.mc.gameSettings.saveOptions();
+    }
+
+    /** "low", "high" and friends, translated. */
+    private static String costLabel(VOption.Level level) {
+        return Lang.tr(Lang.COST, level.label);
+    }
+
+    /**
+     * Writes the English language file from the screen that was just built.
+     *
+     * Generated rather than maintained by hand: every key here is derived from
+     * the English text in the source, so a rename would orphan its translations
+     * with nothing to notice it. Regenerating and diffing is how that is caught.
+     */
+    private void vulkanmod112$dumpLang() {
+        if (!Boolean.getBoolean("vulkanmod112.dumpLang")) {
+            return;
+        }
+        try {
+            java.io.File file = new java.io.File(this.mc.gameDir, "logs/vulkanmod112-en_us.lang");
+            java.io.Writer writer = new java.io.OutputStreamWriter(
+                    new java.io.FileOutputStream(file), "UTF-8");
+            try {
+                writer.write(Lang.dump(this.pages));
+            } finally {
+                writer.close();
+            }
+            net.vulkanmod112.VulkanMod112.LOGGER.info("Language keys written to {}", file);
+        } catch (Throwable e) {
+            // Never let a development aid take the settings screen down.
+            net.vulkanmod112.VulkanMod112.LOGGER.warn("Could not write language keys", e);
+        }
     }
 }

@@ -1,0 +1,147 @@
+# VulkanMod112-Einstellungsbildschirm.
+#
+# Generiert mit -Dvulkanmod112.dumpLang=true (Gradle: ./gradlew runClient -PdumpLang),
+# direkt aus dem tatsächlich aufgebauten Bildschirm. Die Schlüssel stammen aus dem
+# englischen Text im Quellcode — wird eine Option auf Englisch umbenannt, verwaisen
+# ihre Übersetzungen: diese Datei neu erzeugen und per diff vergleichen, um das zu erkennen.
+#
+# Ein wörtliches Prozentzeichen muss als %% geschrieben werden — jeder Wert durchläuft String.format.
+
+key.categories.vulkanmod112=VulkanMod112
+key.vulkanmod112.zoom=Zoom
+
+vulkanmod112.ui.reset=Zurücksetzen
+vulkanmod112.ui.cost=Kosten
+vulkanmod112.ui.cpu=CPU
+vulkanmod112.ui.gpu=GPU
+vulkanmod112.ui.vram=VRAM
+vulkanmod112.ui.vulkan_unavailable=Vulkan nicht verfügbar
+vulkanmod112.cost.none=keine
+vulkanmod112.cost.low=gering
+vulkanmod112.cost.medium=mittel
+vulkanmod112.cost.high=hoch
+
+vulkanmod112.page.rendering=Rendering
+vulkanmod112.group.presets=Voreinstellungen
+vulkanmod112.option.stable=Stabil
+vulkanmod112.tooltip.stable=Setzt alles auf die Werte zurück, mit denen dieser Mod ausgeliefert wird. Das ist der sichere Ausgangspunkt: nichts wird für mehr Geschwindigkeit geopfert, und das Verhalten ist auf jedem Treiber gleich. Minecrafts eigene Einstellungen bleiben unangetastet.
+vulkanmod112.value.apply=Anwenden
+vulkanmod112.option.balanced=Ausgewogen
+vulkanmod112.tooltip.balanced=Begrenzt die Sichtweiten, die Vanilla viel weiter offen lässt, als irgendjemand tatsächlich sehen kann, und reduziert die Partikelanzahl. Kostet optisch fast nichts und ist der größte einfache Gewinn auf belebten Welten.
+vulkanmod112.option.performance=Leistung
+vulkanmod112.tooltip.performance=Tauscht Optik gegen Bildrate: kurze Entitätsdistanzen, keine Texturanimation, minimale Partikel, schnelle Grafik. Die Welt verliert sichtbar an Detail — das ist die Wahl, wenn die Bildrate wichtiger ist als die Ansicht.
+vulkanmod112.group.vulkan=Vulkan
+vulkanmod112.option.vulkan_terrain=Vulkan-Terrain
+vulkanmod112.tooltip.vulkan_terrain=Zeichnet die undurchsichtige Welt über Vulkan statt über OpenGL. Beim Ausschalten wird sofort zum Vanilla-Rendering zurückgekehrt. Der Vulkan-Pfad hält eine zweite Kopie der Weltgeometrie im Grafikspeicher vor, daher kommen die VRAM-Kosten.
+vulkanmod112.group.view=Ansicht
+vulkanmod112.option.render_distance=Sichtweite
+vulkanmod112.tooltip.render_distance=Wie weit Chunks gezeichnet werden. Jenseits von 32 kostet schon das Vanilla-Chunk-Raster selbst viel CPU und RAM, bevor dieser Mod überhaupt etwas sieht, und Server begrenzen den Wert ohnehin oft. Die mit Abstand teuerste Einstellung im Spiel, bei allen drei Ressourcen gleichzeitig.
+vulkanmod112.unit.chunks= Chunks
+vulkanmod112.option.max_framerate=Maximale Bildrate
+vulkanmod112.tooltip.max_framerate=Bildratenbegrenzung. 260 bedeutet unbegrenzt. Eine Begrenzung unterhalb der Bildwiederholrate deines Displays senkt Last, Wärme und Lüftergeräusch, ohne dass du optisch etwas verlierst.
+vulkanmod112.unit.fps= FPS
+vulkanmod112.option.dynamic_lights=Dynamische Beleuchtung
+vulkanmod112.tooltip.dynamic_lights=Lässt eine getragene Fackel, einen fallengelassenen leuchtenden Block oder eine brennende Kreatur den Boden um sich herum beleuchten. Das Licht wird beim Schattieren der Welt hinzugefügt statt in sie hineingeschrieben, sodass kein Chunk neu erstellt wird — und genau das Neuerstellen von Chunks ist es, worauf das Bild beim Bewegen ohnehin schon wartet, was den üblichen Ansatz für diesen Effekt so teuer macht. Jeder Block, der Licht abgibt, tut das, einschließlich solcher aus Mods, weil der Wert direkt vom Block gelesen wird. Mobs, die im Licht stehen, die Partikel eines zerbrochenen Blocks und die Ansicht aus der Egoperspektive werden alle passend beleuchtet. Es wird nichts in die Welt geschrieben und nichts irgendwohin gesendet: Das wird auf deinem Rechner berechnet, während das Bild gezeichnet wird, es ändert also nichts am Mob-Spawning oder an Tageslichtsensoren und funktioniert auf jedem Server. Ein anderer Spieler mit einer Fackel beleuchtet den Boden für dich, ohne dass er selbst diesen Mod braucht — nur wer hinschaut, braucht ihn.
+vulkanmod112.option.dynamic_light_distance=Lichtreichweite
+vulkanmod112.tooltip.dynamic_light_distance=Wie weit eine Lichtquelle entfernt sein darf und trotzdem noch gezeichnet wird, in Blöcken. Das ist nicht die Reichweite des Lichts selbst — die kommt von der Quelle, und eine Fackel beleuchtet etwa fünfzehn Blöcke um sich herum, ganz gleich, was hier eingestellt ist. Entschieden wird nur, ob eine entfernte Fackel den Boden, auf dem sie steht, überhaupt beleuchtet, und ein Lichtfleck auf dem Boden ist von so weit weg sichtbar wie der Boden selbst. Eine frühe Version kappte das bei 24 Blöcken, mit der Überlegung, dass ein Licht der Stufe 15 eben 15 Blöcke reicht, und Lichter verschwanden dadurch sichtbar, sobald man von noch klar sichtbaren Fackeln wegflog. Den Wert zu senken kostet nichts und bringt nichts außer weniger entfernten Lichtern: Jede geladene Entität wird ohnehin geprüft, und es werden nie mehr als die 32 nächstgelegenen Quellen gezeichnet.
+vulkanmod112.applies.dynamic_light_distance=Wirkt sich nur aus, solange Dynamische Beleuchtung aktiv ist.
+vulkanmod112.unit.blocks= Blöcke
+vulkanmod112.option.fog=Nebel
+vulkanmod112.tooltip.fog=Lässt die von Vulkan gezeichnete Welt in die Ferne ausblenden, so wie es der Rest der Szene bereits tut. Ohne diese Option ist das Gelände das Einzige im Bild ganz ohne Nebel, was unter Wasser am stärksten auffällt: Fische und Mobs nehmen die Farbe des Wassers an, während die Blöcke dahinter völlig klar bleiben. Ausgeschaltet endet die Welt mit einer harten Kante und ist minimal schneller.
+vulkanmod112.option.zoom=Zoom
+vulkanmod112.tooltip.zoom=Halte die Zoom-Taste gedrückt, um das Sichtfeld zu verengen, genau wie bei OptiFine. Die Mausempfindlichkeit wird währenddessen entsprechend angepasst, sonst würde die Ansicht viel zu schnell über den Bildschirm fahren, um damit zu zielen. Die Taste lässt sich unter Steuerung neu belegen.
+vulkanmod112.option.zoom_level=Zoomstufe
+vulkanmod112.tooltip.zoom_level=Wie stark die Zoom-Taste das Sichtfeld verengt. 4 bedeutet ein Viertel davon, das ist der Wert, den auch OptiFine verwendet.
+vulkanmod112.unit.x=x
+vulkanmod112.option.vsync=VSync
+vulkanmod112.tooltip.vsync=Koppelt die Bildrate an die Bildwiederholrate des Monitors. Beseitigt Tearing und begrenzt die FPS auf deine Bildwiederholrate.
+
+vulkanmod112.page.optimizations=Optimierungen
+vulkanmod112.group.entities=Entitäten
+vulkanmod112.option.entity_distance=Entitätsdistanz
+vulkanmod112.tooltip.entity_distance=Zeichnet Mobs, Items und andere Entitäten jenseits dieser Distanz nicht mehr. Vanilla verwendet ein Limit pro Entität, das oft weit größer ist, als man sehen kann. Der größte Gewinn in vollen Welten, Mobfarmen und belebten Servern — und fast ausschließlich einer bei der CPU, da jede Entität einzeln beurteilt und übermittelt wird.
+vulkanmod112.value.vanilla=Vanilla
+vulkanmod112.option.block_entity_distance=Blockentitätsdistanz
+vulkanmod112.tooltip.block_entity_distance=Dasselbe Limit für Truhen, Schilder, Banner und andere Blöcke mit eigenem Renderer. Diese werden einzeln gezeichnet, daher hilft ein niedriges Limit in Lagerräumen sehr.
+vulkanmod112.option.entity_shadows=Entitätsschatten
+vulkanmod112.tooltip.entity_shadows=Der dunkle Fleck unter jeder Entität. Jeder Einzelne ist ein zusätzlicher Zeichenaufruf.
+vulkanmod112.group.chunks=Chunks
+vulkanmod112.option.chunk_build_threads=Chunk-Build-Threads
+vulkanmod112.tooltip.chunk_build_threads=Wie viele Threads Blöcke in Geometrie umwandeln. Vanilla bemisst diesen Pool anhand des Heaps statt anhand der CPU und nimmt den kleineren der beiden Werte, sodass ein großer Prozessor Chunks baut, während ein Teil von ihm untätig bleibt. Bei großen Sichtweiten wartet das Bild auf das Bauen, nicht auf das Zeichnen. Zusätzliche Threads teilen sich dieselben Build-Puffer, deren Anzahl weiterhin der Heap bestimmt, sodass ab einem gewissen Punkt weitere Threads einfach nur warten. Wird beim nächsten Weltladen wirksam.
+vulkanmod112.applies.chunk_build_threads=Beim nächsten Weltladen
+vulkanmod112.unit.threads= Threads
+vulkanmod112.option.visibility_walk_interval=Sichtbarkeits-Intervall
+vulkanmod112.tooltip.visibility_walk_interval=Wie oft das Spiel seine Sichtbarkeitssuche wiederholen darf, während Chunks noch neu erstellt werden. Diese Suche entscheidet, welche Chunks im Bild sind, und laut dem spieleigenen Profiler beansprucht sie bei Sichtweite 64 ein Viertel bis die Hälfte des gesamten Bildes — das Achtfache dessen, was das Zeichnen der Welt kostet. Sie läuft erneut, sobald sich die Kamera bewegt, was gerechtfertigt ist, aber auch, sobald irgendein Chunk zur Neuerstellung eingereiht wird, was beim Auffüllen einer Welt jeden einzelnen Frame bedeutet, selbst wenn man völlig still steht. Diese Einstellung begrenzt nur den zweiten Fall; bei Kamerabewegung gibt es immer eine frische Suche. Der Preis ist, dass ein gerade fertig gebauter Chunk so lange warten kann, bis er erscheint, sodass ein zu hoher Wert die Welt sichtbar in Schüben auftauchen lässt. Standardmäßig aus.
+vulkanmod112.unit.ms= ms
+vulkanmod112.value.off=Aus
+vulkanmod112.option.near_clipping_plane=Near-Clipping-Ebene
+vulkanmod112.tooltip.near_clipping_plane=Wie nah am Auge die Welt zu zeichnen beginnt, in Hundertsteln eines Blocks. Vanilla verwendet 5, und genau das lässt entfernten Schnee grau durch das Weiß hindurchflackern: Die Präzision des Tiefenpuffers fällt mit dem Quadrat der Entfernung geteilt durch diese Zahl ab, und in dreihundert Blöcken Entfernung kann er eine Schneeschicht nicht mehr vom Block darunter unterscheiden, dessen Oberseite trotzdem noch gezeichnet wird. 20 bringt den auflösbaren Abstand bequem darunter und ist hier der Standardwert. Der Preis ist, dass alles, was näher am Auge liegt als dieser Wert, weggeschnitten wird, sodass ein großer Wert bei einem Kopf innerhalb eines Blocks ein Loch hineinreißen kann. Setze ihn auf 0 für Vanilla-Verhalten.
+vulkanmod112.unit.100_block=/100 Block
+vulkanmod112.value.vanilla_5=Vanilla (5)
+vulkanmod112.option.drop_vanilla_chunk_buffers=Vanilla-Chunk-Puffer verwerfen
+vulkanmod112.tooltip.drop_vanilla_chunk_buffers=Hört auf, die spieleigenen Chunk-Puffer zu füllen, sobald Vulkan die Geometrie hat. Die Welt liegt derzeit doppelt im Grafikspeicher, einmal für jeden Renderer, und das entfernt eine der beiden Kopien — die mit Abstand größte Ersparnis, die es bei hohen Sichtweiten gibt. Außerdem entfällt der zweite Upload aus dem Budget, das das Spiel jeden Frame dafür reserviert, Chunks auf die Karte zu bekommen, und genau das entscheidet, wie schnell sich eine Welt um dich herum füllt. Aus einem bestimmten Grund standardmäßig aus: Alles in diesem Mod fällt bei einem Fehler auf Vanilla-Rendering zurück, und das funktioniert, weil diese Puffer die Welt vorhalten. Sind sie leer, muss der Rückfall zuerst jeden Chunk neu bauen, was er auch tut — aber das ist eine Pause, und eine, die du selbst gewählt haben solltest.
+vulkanmod112.option.vulkan_water_and_glass=Vulkan-Wasser und -Glas
+vulkanmod112.tooltip.vulkan_water_and_glass=Zeichnet die durchscheinende Ebene in Vulkan, statt sie OpenGL zu überlassen. Keine Geschwindigkeitseinstellung — gemessen macht diese Ebene so oder so 2.6%% eines Bildes aus. Was sich ändert, ist, dass der Nebel das gesamte Gelände erreicht: Alles, was dieser Mod zeichnet, blendet in die Ferne aus, und Wasser, die einzige Fläche, die noch auf die alte Art gezeichnet wird, bleibt klar, während die Blöcke drumherum das nicht tun. Außerdem muss dies geschehen, bevor die spieleigenen Chunk-Puffer verworfen werden können, wo die Ersparnis beim Grafikspeicher herkommt. Standardmäßig aus, solange die Funktion neu ist; schalte sie wieder aus, falls Wasser gegenüber Entitäten falsch aussieht.
+vulkanmod112.option.fast_frustum_test=Schneller Frustum-Test
+vulkanmod112.tooltip.fast_frustum_test=Entscheidet anhand der am weitesten entfernten Ecke, ob etwas außerhalb des Bildes liegt, statt anhand aller acht. Das ist dieselbe Antwort durch dieselbe Rechnung, keine Näherung: Die Ecke, die einer Clipping-Ebene am weitesten entlang liegt, verlässt sie als Letzte, wenn also diese außerhalb liegt, tun es alle. Vanilla prüft bis zu achtundvierzig Eckpositionen, um eine einzelne Box zu verwerfen, und die Suche, die entscheidet, welche Chunks im Bild sind, macht das einmal für jeden erreichten Chunk — was laut eigenem Profiler bei hohen Sichtweiten ein Viertel bis die Hälfte des Bildes ausmacht. Standardmäßig an; der Schalter ist hier, um es auszuschließen, nicht um es zu wählen.
+vulkanmod112.option.own_visibility_search=Eigene Sichtbarkeitssuche
+vulkanmod112.tooltip.own_visibility_search=Entscheidet mit der Suche dieses Mods statt mit der des Spiels, welche Chunks im Bild sind. Gleiche Antwort, gleich oft ausgeführt — der Unterschied ist, dass Vanilla für jeden geprüften Nachbarn einer Kette von Zeigern folgt, während dies stattdessen flache Arrays liest. Der spieleigene Profiler beziffert seine Version bei Sichtweite 64 auf ein Viertel bis die Hälfte des gesamten Bildes, gegenüber 4.5%% für das Zeichnen der Welt, sie ist also der größte Einzelposten überhaupt. Bei dieser Sichtweite mit derselben Menge Welt im Bild gemessen: 76 fps auf 105. Der Schritt, der still hätte schiefgehen können, ist das Berechnen einer Chunk-Position statt des Nachschlagens, und das wurde 707 Millionen Mal gegen die eigene Antwort des Spiels geprüft, ohne eine einzige Abweichung. Schalte es aus, falls jemals ein Chunk fehlt, der beim Näherkommen wieder auftaucht.
+vulkanmod112.option.preload_offscreen_chunks=Off-Screen-Chunks vorladen
+vulkanmod112.tooltip.preload_offscreen_chunks=Lässt auch Chunks hinter dir bauen. Vanilla plant grundsätzlich nur Chunks ein, die gerade im Bild sind, sodass sich bei hohen Sichtweiten die Welt nur dort füllt, wohin man gerade schaut, und ein Umdrehen wieder Wartezeit bedeutet. Diese Option füllt die Bau-Warteschlange aus dem Rest des Rasters auf, sobald die sichtbaren Chunks erledigt sind, sodass sie ihren Platz in der Reihe nie verlieren. Standardmäßig aus, und der Grund dafür lohnt sich zu kennen, bevor man es einschaltet: Bei Sichtweite 64 gemessen 330 fps ohne diese Option gegenüber 120-140 mit ihr. Das Auffüllen der Welt ist keine kostenlose Arbeit, die das Spiel aus Faulheit ausgelassen hat — es ist fortlaufender Chunk-Bau, und es bedeutet außerdem, dass der Grafikspeicher das erreicht, was die Sichtweite tatsächlich verlangt, statt nur das, wohin man bereits geschaut hat. Es lohnt sich, wenn dir die vorhandene Welt wichtiger ist als die Bildrate.
+vulkanmod112.group.window=Fenster
+vulkanmod112.option.background_fps_limit=Hintergrund-FPS-Limit
+vulkanmod112.tooltip.background_fps_limit=Bildrate, während das Fenster minimiert oder im Hintergrund ist. Bei unbegrenzter Bildratenbegrenzung hält das Spiel sonst die GPU unter Volllast, um Frames zu zeichnen, die niemand sieht.
+vulkanmod112.group.textures=Texturen
+vulkanmod112.option.animated_textures=Animierte Texturen
+vulkanmod112.tooltip.animated_textures=Wasser, Lava, Feuer, Portale und jeder animierte Block aus Mods laden jeden Tick ein neues Bild hoch, egal ob im Bild oder nicht. Sie auszuschalten ist in Modpacks ein reiner Gewinn; die Blöcke hören einfach auf, sich zu bewegen.
+vulkanmod112.group.effects=Effekte
+vulkanmod112.option.particles=Partikel
+vulkanmod112.tooltip.particles=Wie viele Partikel das Spiel erzeugt. Minimal bringt in der Nähe von Feuer, Tränken und Redstone einen großen Gewinn.
+vulkanmod112.value.all=Alle
+vulkanmod112.value.decreased=Reduziert
+vulkanmod112.value.minimal=Minimal
+
+vulkanmod112.page.quality=Qualität
+vulkanmod112.group.world=Welt
+vulkanmod112.option.graphics=Grafik
+vulkanmod112.tooltip.graphics=Schnell lässt transparente Blätter weg und vereinfacht Wasser. Vor allem ein Gewinn bei CPU und Chunk-Bau, da Geometrie entfernt wird — deswegen gibt es auch etwas Grafikspeicher frei.
+vulkanmod112.value.fast=Schnell
+vulkanmod112.value.fancy=Schick
+vulkanmod112.option.smooth_lighting=Weiche Beleuchtung
+vulkanmod112.tooltip.smooth_lighting=Ambient Occlusion, das direkt in die Chunk-Geometrie eingebacken wird. Kostet Chunk-Bauzeit, nicht Bildzeit — zeigt sich also als Ruckeln beim Laden der Welt, nicht als niedrigere Bildrate im Stand.
+vulkanmod112.value.minimum=Minimum
+vulkanmod112.value.maximum=Maximum
+vulkanmod112.option.mipmap_levels=Mipmap-Stufen
+vulkanmod112.tooltip.mipmap_levels=Verkleinerte Kopien des Block-Atlas für entfernte Oberflächen. Dieser Mod kopiert sie nach Vulkan, daher entfernt eine Erhöhung Flimmern in der Ferne und entlastet den Textur-Cache. Eine Erhöhung kostet in der Regel nichts und kann sogar einen kleinen Gewinn bringen.
+vulkanmod112.applies.mipmap_levels=Wird wirksam, sobald der Textur-Atlas neu geladen wird.
+
+vulkanmod112.page.advanced=Erweitert
+vulkanmod112.group.memory=Speicher
+vulkanmod112.option.geometry_budget=Geometrie-Budget
+vulkanmod112.tooltip.geometry_budget=Wie viel Grafikspeicher die Weltgeometrie beanspruchen darf, bevor der Renderer aufhört, seinen Puffer großzügig zu vergrößern, und stattdessen nur noch in kleinen Schritten wächst. Das Vergrößern dieses Puffers hält die GPU an und lädt jeden Chunk neu hoch, daher entfernt ein größeres Budget auf einer Karte mit genug freiem Speicher diese Ruckler. Auf einer kleinen Karte hält ein niedrigerer Wert den Speicherbedarf knapp. Auto verwendet ein Viertel dessen, was die GPU meldet. Chunks werden nie verworfen, um innerhalb des Budgets zu bleiben — es lenkt das Wachstum, es ist keine feste Grenze.
+vulkanmod112.applies.geometry_budget=Wird nach einem Neustart des Spiels wirksam.
+vulkanmod112.value.auto=Auto
+vulkanmod112.value.256_mib=256 MiB
+vulkanmod112.value.512_mib=512 MiB
+vulkanmod112.value.1_gib=1 GiB
+vulkanmod112.value.2_gib=2 GiB
+vulkanmod112.value.4_gib=4 GiB
+vulkanmod112.option.frames_in_flight=Frames in Flight
+vulkanmod112.tooltip.frames_in_flight=Wie viele Terrain-Frames die CPU vorbereiten darf, bevor sie auf die GPU wartet. Ein höherer Wert verbirgt Aussetzer, wenn die CPU der Flaschenhals ist, auf Kosten eines weiteren Frames an Eingabeverzögerung und einer zusätzlichen Kopie der Pro-Frame-Puffer. 2 ist der sichere Standardwert.
+vulkanmod112.applies.frames_in_flight=Wird nach einem Neustart des Spiels wirksam.
+vulkanmod112.unit.frames= Frames
+vulkanmod112.group.compositing=Compositing
+vulkanmod112.option.depth_blit=Depth Blit
+vulkanmod112.tooltip.depth_blit=Kopiert Vulkans Tiefenpuffer per Hardware-Blit in den des Spiels, statt ihn pixelweise in einem Shader zu schreiben. Schneller, benötigt aber einen Treiber, der ein 24-Bit-Tiefenziel teilen kann; der Renderer fällt selbstständig zurück, wenn das nicht möglich ist.
+vulkanmod112.applies.depth_blit=Wird wirksam, sobald das Fenster in der Größe geändert wird, oder nach einem Neustart des Spiels.
+vulkanmod112.option.backface_culling=Backface-Culling
+vulkanmod112.tooltip.backface_culling=Überspringt Dreiecke, die von der Kamera weg zeigen. Schalte dies nur zur Diagnose fehlender oder nach innen gestülpter Geometrie aus — ausgeschaltet schattiert die GPU umsonst etwa doppelt so viele Dreiecke.
+vulkanmod112.applies.backface_culling=Wird nach einem Neustart des Spiels wirksam.
+vulkanmod112.group.diagnostics=Diagnose
+vulkanmod112.option.ultra_logging=Ultra-Protokollierung
+vulkanmod112.tooltip.ultra_logging=Schreibt alles über den Renderer, deine Mods und deine Einstellungen nach logs/vulkanmod112-diagnostics.log. Schalte dies ein, bevor du ein Problem meldest — die Datei beantwortet die meisten Fragen von selbst.
+vulkanmod112.option.log_interval=Protokollintervall
+vulkanmod112.tooltip.log_interval=Wie oft ein Schnappschuss an die Diagnosedatei angehängt wird.
+vulkanmod112.unit.s= s
+vulkanmod112.option.diagnostic_overlay=Diagnose-Overlay
+vulkanmod112.tooltip.diagnostic_overlay=Kleines, per Vulkan gerendertes Testbild in der Ecke. Beweist, dass der Interop-Pfad funktioniert; kostet einen Submit und zwei Semaphor-Wartevorgänge pro Frame.
