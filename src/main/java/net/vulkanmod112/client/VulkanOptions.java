@@ -101,13 +101,44 @@ final class VulkanOptions {
                                     }
                                 })),
                 new VOptionBlock("View",
+                        new VSwitchOption("Extreme Render Distance",
+                                "Let the slider below go past 64, up to 128. Read the number before "
+                                        + "reaching for it: the game builds a render chunk for every "
+                                        + "cell of a (2d+1) x (2d+1) x 16 grid as soon as the world "
+                                        + "loads, and keeps all of them — 266 256 at 64, 1 056 784 at "
+                                        + "128. That is four times the objects and four times the "
+                                        + "memory before a single block is drawn, whether or not "
+                                        + "there is anything out there to put in them, and a server "
+                                        + "decides for itself how far it will send chunks at all. "
+                                        + "Turning this off pulls the distance back to 64.",
+                                Cost.of(Level.HIGH, Level.NONE, Level.HIGH),
+                                "Only raises the limit; the distance below is what spends it.",
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return VulkanConfig.isExtremeRenderDistance();
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        VulkanConfig.setExtremeRenderDistance(value);
+                                        RenderDistanceLimit.apply();
+                                    }
+                                }),
                         new VRangeOption("Render Distance",
                                 "How far chunks are drawn. Beyond 32 the vanilla chunk grid itself "
                                         + "costs a lot of CPU and RAM before this mod sees anything, "
                                         + "and servers may cap it anyway. The single most expensive "
                                         + "setting in the game, on all three resources at once.",
                                 Cost.of(Level.HIGH, Level.HIGH, Level.HIGH), null,
-                                2, 64, 1, " chunks", null,
+                                2, RenderDistanceLimit.NORMAL,
+                                new VRangeOption.Ceiling() {
+                                    @Override
+                                    public int max() {
+                                        return RenderDistanceLimit.max();
+                                    }
+                                },
+                                1, " chunks", null,
                                 new VRangeOption.Access() {
                                     @Override
                                     public int get() {

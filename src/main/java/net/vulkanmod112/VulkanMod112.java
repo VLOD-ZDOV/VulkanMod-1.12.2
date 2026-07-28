@@ -33,9 +33,9 @@ public class VulkanMod112 {
         net.minecraftforge.common.MinecraftForge.EVENT_BUS.register(
                 new net.vulkanmod112.client.FrameGraphHandler());
         // Vanilla exposes 32 chunks on a sufficiently large 64-bit heap. The
-        // renderer and ViewFrustum themselves support higher values; expose
-        // the 64-chunk option in our video-settings page.
-        net.minecraft.client.settings.GameSettings.Options.RENDER_DISTANCE.setValueMax(64.0F);
+        // renderer and ViewFrustum themselves support higher values; 64, or 128
+        // with Extreme Render Distance turned on.
+        net.vulkanmod112.client.RenderDistanceLimit.apply();
         try {
             VulkanBridge vulkan = VulkanLoader.bridge();
             vulkan.init();

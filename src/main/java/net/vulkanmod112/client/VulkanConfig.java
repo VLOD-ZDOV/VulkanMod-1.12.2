@@ -161,6 +161,19 @@ public final class VulkanConfig {
      * they did not turn on.
      */
     static final boolean DEF_DROP_VANILLA_BUFFERS = false;
+    /**
+     * Let the render-distance slider go past 64, up to 128.
+     *
+     * Off by default because what it unlocks is not "more of the same". The
+     * game allocates a render chunk for every cell of a
+     * {@code (2d+1) x (2d+1) x 16} grid before anything is drawn: 266 256 of
+     * them at 64, and 1 056 784 at 128 — four times the objects, four times the
+     * heap, and four times the OpenGL buffer names, all of it up front and
+     * whether or not the world out there is loaded. The chunks themselves have
+     * to come from somewhere too, and a server decides how far it will send
+     * them; past that limit the extra grid is paid for and empty.
+     */
+    static final boolean DEF_EXTREME_RENDER_DISTANCE = false;
     static final boolean DEF_FOG = true;
     static final boolean DEF_ZOOM = true;
     /** Stored as an integer so it fits the config and the slider; 4 = quarter FOV. */
@@ -194,6 +207,7 @@ public final class VulkanConfig {
     private static boolean dynamicLights = DEF_DYNAMIC_LIGHTS;
     private static int dynamicLightDistance = DEF_DYNAMIC_LIGHT_DISTANCE;
     private static boolean dropVanillaBuffers = DEF_DROP_VANILLA_BUFFERS;
+    private static boolean extremeRenderDistance = DEF_EXTREME_RENDER_DISTANCE;
     private static boolean fogEnabled = DEF_FOG;
     private static boolean zoomEnabled = DEF_ZOOM;
     private static int zoomFactor = DEF_ZOOM_FACTOR;
@@ -321,6 +335,14 @@ public final class VulkanConfig {
                         + "ground. Lower it if you would rather only nearby sources counted; there "
                         + "is no meaningful cost either way, because every loaded entity is looked "
                         + "at regardless and only the nearest 32 sources are ever drawn.");
+        extremeRenderDistance = config.getBoolean("extremeRenderDistance", CATEGORY_GENERAL,
+                DEF_EXTREME_RENDER_DISTANCE,
+                "Let the render-distance slider go past 64, up to 128. The game builds a render "
+                        + "chunk for every cell of a (2d+1) x (2d+1) x 16 grid before it draws "
+                        + "anything: 266 256 of them at 64 and 1 056 784 at 128, four times the "
+                        + "objects and four times the memory, whether or not there is a world out "
+                        + "there to put in them. Turning this off again pulls the distance back to "
+                        + "64 if it is above it.");
         fogEnabled = config.getBoolean("fog", CATEGORY_GENERAL, DEF_FOG,
                 "Fade Vulkan terrain into the distance the way the rest of the scene already does. "
                         + "Off leaves the world ending in a hard edge, which is a little faster.");
@@ -363,6 +385,7 @@ public final class VulkanConfig {
         setDynamicLights(DEF_DYNAMIC_LIGHTS);
         setDynamicLightDistance(DEF_DYNAMIC_LIGHT_DISTANCE);
         setDropVanillaBuffers(DEF_DROP_VANILLA_BUFFERS);
+        setExtremeRenderDistance(DEF_EXTREME_RENDER_DISTANCE);
         setFogEnabled(DEF_FOG);
         setZoomEnabled(DEF_ZOOM);
         setZoomFactor(DEF_ZOOM_FACTOR);
@@ -450,6 +473,15 @@ public final class VulkanConfig {
     public static void setFrameGraphInterval(int value) {
         frameGraphInterval = value;
         store(CATEGORY_GENERAL, "frameGraphIntervalMs", value);
+    }
+
+    public static boolean isExtremeRenderDistance() {
+        return extremeRenderDistance;
+    }
+
+    public static void setExtremeRenderDistance(boolean value) {
+        extremeRenderDistance = value;
+        store(CATEGORY_GENERAL, "extremeRenderDistance", value);
     }
 
     public static boolean isDynamicLights() {
