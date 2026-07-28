@@ -13,7 +13,12 @@ layout(set = 0, binding = 3, std140) uniform Frame {
     // x = seconds, y = directional light strength (0 = off),
     // z = 1 when vMaterial is real, w = 1 to paint the world by material
     vec4 frameInfo;
-    vec4 heightFog;  // x = strength (0 = off), y = thickening per block
+    // x = strength (0 = off), y = thickening per block,
+    // z = how many entries of materialSprites are in use
+    vec4 heightFog;
+    // Pairs: a rectangle of the block atlas, then the material it stands for
+    // in .x. See spriteMaterial for why the translucent layer needs these.
+    vec4 materialSprites[16];
 } frame;
 
 layout(push_constant) uniform Draw {
@@ -34,6 +39,33 @@ const uint MATERIAL_WATER = 1u;
 const uint MATERIAL_FOLIAGE = 2u;
 const uint MATERIAL_GLASS = 3u;
 const uint MATERIAL_LAVA = 4u;
+const uint MATERIAL_ICE = 5u;
+
+/**
+ * The material of a surface read off the atlas rather than off the vertex.
+ *
+ * The translucent layer is the one place a per-vertex label cannot survive:
+ * the game sorts its quads by distance after building the chunk, and sorts
+ * them again every time the camera moves far enough, so that water draws back
+ * to front. Labels numbered by vertex describe the wrong surface the moment
+ * the quads move — marked only where a chunk's translucent layer was a single
+ * material, water went grey beside one block of ice.
+ *
+ * What the sort cannot separate is a quad from its own texture coordinates.
+ * So here the answer comes from where the fragment lands in the block atlas.
+ * A handful of rectangles, walked once, and only in the translucent pipeline:
+ * every other layer already has the real thing.
+ */
+uint spriteMaterial(vec2 uv) {
+    int count = int(frame.heightFog.z);
+    for (int i = 0; i < count; ++i) {
+        vec4 rect = frame.materialSprites[i * 2];
+        if (uv.x >= rect.x && uv.x <= rect.z && uv.y >= rect.y && uv.y <= rect.w) {
+            return uint(frame.materialSprites[i * 2 + 1].x);
+        }
+    }
+    return MATERIAL_PLAIN;
+}
 
 /**
  * Diagnostic colours for the material of a surface.
@@ -56,6 +88,9 @@ vec3 materialColor(uint material) {
     }
     if (material == MATERIAL_LAVA) {
         return vec3(1.0, 0.3, 0.1);
+    }
+    if (material == MATERIAL_ICE) {
+        return vec3(0.6, 0.9, 1.0);
     }
     return vec3(0.5);
 }
@@ -208,8 +243,15 @@ void main() {
     }
     vec3 light = texture(lightmap, vec2(blockLight, vLight.y)).rgb;
     vec3 shaded = tex.rgb * vColor.rgb * light;
+    // The translucent pipeline is the only one that asks the atlas, and it only
+    // asks where the vertex had nothing to say — which for that layer is
+    // everywhere, because its labels are dropped rather than sent wrong.
+    uint material = vMaterial;
+    if (BLEND && material == MATERIAL_PLAIN) {
+        material = spriteMaterial(vUV);
+    }
     if (frame.frameInfo.w > 0.5) {
-        shaded = materialColor(vMaterial) * light;
+        shaded = materialColor(material) * light;
     }
 
     int mode = int(frame.fogColor.a);

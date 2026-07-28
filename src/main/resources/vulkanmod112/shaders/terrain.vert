@@ -17,7 +17,12 @@ layout(set = 0, binding = 3, std140) uniform Frame {
     vec4 frameInfo;
     // x = how much of the colour the low ground gives up, 0 turns it off.
     // y = how quickly it thickens with each block below the camera.
+    // z = how many entries of materialSprites are in use.
     vec4 heightFog;
+    // Pairs: a rectangle of the block atlas, then the material it stands for
+    // in .x. Only the fragment stage reads them; they are declared here because
+    // both stages must see the same block.
+    vec4 materialSprites[16];
 } frame;
 
 // What actually differs between draws.

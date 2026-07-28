@@ -57,6 +57,7 @@ public final class MaterialRuns {
     public static final int FOLIAGE = 2;
     public static final int GLASS = 3;
     public static final int LAVA = 4;
+    public static final int ICE = 5;
 
     /**
      * A run is two ints: the vertex one past the end of the run, and what the
@@ -226,21 +227,26 @@ public final class MaterialRuns {
             return;
         }
         published.incrementAndGet();
-        if (table.plain() || (sorted && table.count > 1)) {
-            // Said rather than left unsaid. A chunk whose water somebody just
-            // drained is plain now, and its old runs are still in the buffer;
-            // only an explicit answer clears them.
+        if (sorted) {
+            // The translucent layer, whose quads the game is about to sort by
+            // distance — and will sort again, without rebuilding, every time
+            // the camera moves far enough, so that water draws back to front.
+            // Runs numbered by vertex describe the wrong surface the moment the
+            // quads move, so none are sent for this layer at all. Its material
+            // is read off the block atlas in the shader instead, because a sort
+            // that moves whole quads cannot separate one from its own texture
+            // coordinates. See MaterialSprites.
             //
-            // The second case is the translucent layer with more than one
-            // material in it. The runs are numbered by vertex and the sort is
-            // about to permute them, so they would describe the wrong
-            // surfaces. A layer of a single material has nothing to permute
-            // between and goes through untouched, which covers most water,
-            // since a chunk's translucent layer is usually water and nothing
-            // else. The mixed ones stay plain until there is a real answer.
-            if (sorted && table.count > 1) {
-                reordered.incrementAndGet();
-            }
+            // Sending plain rather than saying nothing: silence means "keep
+            // what is there", and what is there may be an older chunk's runs.
+            reordered.incrementAndGet();
+            ChunkMirror.onMaterials(slot, ALL_PLAIN, 1);
+            return;
+        }
+        if (table.plain()) {
+            // Said rather than left unsaid, for the same reason: a chunk whose
+            // torches somebody just took away is plain now, and only an
+            // explicit answer clears the runs still in the buffer.
             ChunkMirror.onMaterials(slot, ALL_PLAIN, 1);
             return;
         }
@@ -288,6 +294,9 @@ public final class MaterialRuns {
         if (material == Material.GLASS) {
             return GLASS;
         }
+        if (material == Material.ICE || material == Material.PACKED_ICE) {
+            return ICE;
+        }
         return PLAIN;
     }
 
@@ -312,7 +321,7 @@ public final class MaterialRuns {
         return String.format(
                 "material tags: %d blocks recorded, %d chunk layers averaging %.1f runs, "
                         + "%.0f%% of them one plain run; %d layers sent to the renderer, "
-                        + "%d of those flattened as reordered translucent, "
+                        + "%d of those translucent and left to the atlas, "
                         + "%d re-sorts left alone",
                 blockCount, tableCount,
                 tableCount == 0 ? 0.0 : runs / (double) tableCount,

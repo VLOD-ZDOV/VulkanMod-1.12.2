@@ -410,6 +410,7 @@ public final class TerrainHooks {
                 net.minecraft.client.renderer.EntityRenderer.class, mc.entityRenderer,
                 "lightmapTexture", "field_78513_d");
         bridge.updateAtlas(atlasId);
+        MaterialSprites.handOver(bridge, mc.getTextureMapBlocks());
         bridge.setLightmap(lightmap.getGlTextureId());
         lightmapColors = lightmap.getTextureData(); // backing array of the 16x16 lightmap
         atlasUploaded = true;

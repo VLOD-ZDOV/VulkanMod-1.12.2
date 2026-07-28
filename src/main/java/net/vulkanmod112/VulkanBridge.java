@@ -95,6 +95,20 @@ public interface VulkanBridge {
      */
     void stageChunkMaterials(int slot, int[] runs, int runCount);
 
+    /**
+     * Where in the block atlas each recognised material's texture sits.
+     *
+     * {@code rects} is four floats per entry — minU, minV, maxU, maxV — and
+     * {@code materials} says what each rectangle stands for. Sent after every
+     * atlas upload, because stitching decides afresh where a sprite lands.
+     *
+     * This is how the translucent layer knows what it is made of: the game
+     * reorders that layer's quads whenever the camera moves, so a label
+     * attached to a vertex describes the wrong surface afterwards, while the
+     * texture coordinates move with the quad they belong to.
+     */
+    void setMaterialSprites(int[] materials, float[] rects, int count);
+
     /** One-line mirror statistics for the F3 screen. */
     String chunkMirrorStats();
 

@@ -394,6 +394,14 @@ public final class VulkanContextImpl implements VulkanBridge {
     }
 
     @Override
+    public synchronized void setMaterialSprites(int[] materials, float[] rects, int count) {
+        if (!initialized) {
+            return;
+        }
+        terrainRenderer().setMaterialSprites(materials, rects, count);
+    }
+
+    @Override
     public void stageChunkMaterials(int slot, int[] runs, int runCount) {
         // Not synchronized, for the same reason as stageChunkBuffer below: this
         // arrives from the chunk builder threads, and the mirror has a lock of

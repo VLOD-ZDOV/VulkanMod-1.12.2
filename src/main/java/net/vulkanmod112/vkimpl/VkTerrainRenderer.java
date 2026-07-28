@@ -338,6 +338,34 @@ final class VkTerrainRenderer {
     private boolean materialsBound;
     /** Diagnostic: paint the terrain by material instead of by texture. */
     private boolean showMaterials;
+
+    /**
+     * Atlas rectangles the translucent shader classifies its fragments by.
+     *
+     * Eight is a ceiling with room to spare: water still and flowing, ice, lava
+     * still and flowing is five. Each entry is minU, minV, maxU, maxV and the
+     * material as a fifth float, laid out as two vec4s in the frame's uniform
+     * buffer so the shader can walk them without a second binding.
+     */
+    private static final int MAX_MATERIAL_SPRITES = 8;
+    private final float[] materialSprites = new float[MAX_MATERIAL_SPRITES * 8];
+    private int materialSpriteCount;
+
+    synchronized void setMaterialSprites(int[] materials, float[] rects, int count) {
+        int used = Math.min(count, MAX_MATERIAL_SPRITES);
+        for (int i = 0; i < used; i++) {
+            materialSprites[i * 8] = rects[i * 4];
+            materialSprites[i * 8 + 1] = rects[i * 4 + 1];
+            materialSprites[i * 8 + 2] = rects[i * 4 + 2];
+            materialSprites[i * 8 + 3] = rects[i * 4 + 3];
+            materialSprites[i * 8 + 4] = materials[i];
+            materialSprites[i * 8 + 5] = 0.0f;
+            materialSprites[i * 8 + 6] = 0.0f;
+            materialSprites[i * 8 + 7] = 0.0f;
+        }
+        materialSpriteCount = used;
+        LOGGER.info("Material sprite table: {} entries", used);
+    }
     private float heightFogStrength;
     private float heightFogFalloff = 2.0f / 24.0f;
 
@@ -1750,8 +1778,13 @@ final class VkTerrainRenderer {
         // vec4 heightFog at 640.
         MemoryUtil.memPutFloat(base + 640, heightFogStrength);
         MemoryUtil.memPutFloat(base + 644, heightFogFalloff);
-        MemoryUtil.memPutFloat(base + 648, 0.0f);
+        // z: how many of the sprite rectangles below are in use.
+        MemoryUtil.memPutFloat(base + 648, materialSpriteCount);
         MemoryUtil.memPutFloat(base + 652, 0.0f);
+        // The sprite table at 656: two vec4s each, rectangle then material.
+        for (int i = 0; i < materialSpriteCount * 8; i++) {
+            MemoryUtil.memPutFloat(base + 656 + i * 4L, materialSprites[i]);
+        }
     }
 
     /**
