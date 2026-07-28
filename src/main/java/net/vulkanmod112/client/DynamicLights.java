@@ -133,6 +133,15 @@ public final class DynamicLights {
         // rather than partway through a list.
         double radius = VulkanConfig.getDynamicLightDistance();
         double radiusSq = radius * radius;
+        // Where the entities are being drawn, not where they were at the last
+        // tick. The camera position handed in above is vanilla's own
+        // interpolated one, so raw tick positions here would mean the distance
+        // between a torch and the ground moved in twenty steps a second while
+        // the view moved with every frame. On flat ground that is invisible;
+        // jumping with a torch next to a raised block, the top of that block
+        // flickered, because that face's brightness turns fastest exactly as
+        // the light crosses its plane.
+        float partial = mc.getRenderPartialTicks();
         List<Entity> entities = mc.world.loadedEntityList;
         int size = entities.size();
         scanned += size;
@@ -147,9 +156,9 @@ public final class DynamicLights {
             if (entity == null) {
                 continue;
             }
-            double dx = entity.posX - viewX;
-            double dy = entity.posY - viewY;
-            double dz = entity.posZ - viewZ;
+            double dx = entity.lastTickPosX + (entity.posX - entity.lastTickPosX) * partial - viewX;
+            double dy = entity.lastTickPosY + (entity.posY - entity.lastTickPosY) * partial - viewY;
+            double dz = entity.lastTickPosZ + (entity.posZ - entity.lastTickPosZ) * partial - viewZ;
             double distSq = dx * dx + dy * dy + dz * dz;
             if (distSq > radiusSq) {
                 continue;
