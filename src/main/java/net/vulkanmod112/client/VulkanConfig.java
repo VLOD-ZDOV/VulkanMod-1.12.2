@@ -112,6 +112,23 @@ public final class VulkanConfig {
      */
     static final boolean DEF_FAST_REBUILD_NEAR = false;
     /**
+     * Record what each stretch of a chunk's geometry is made of while the chunk
+     * is being built.
+     *
+     * Off by default, and on its own it changes nothing on screen: this is the
+     * groundwork every remaining effect needs and has none of them yet. Water
+     * cannot be told from stained glass, nor grass from torches, because
+     * vanilla's four layers are not materials and the vertex carries nothing
+     * else. The one place the answer exists is the chunk rebuild loop, and it
+     * exists there for the length of one call.
+     *
+     * What it costs is a branch and a counter read per block rendered, on the
+     * build threads rather than the render thread. The diagnostics report says
+     * what that measured, which is the point of shipping it switchable and
+     * silent before anything depends on it.
+     */
+    static final boolean DEF_MATERIAL_TAGS = false;
+    /**
      * Queue a chunk that changed near the camera instead of rebuilding it on
      * the render thread.
      *
@@ -267,6 +284,7 @@ public final class VulkanConfig {
     private static boolean visibilitySeedCache = DEF_VISIBILITY_SEED_CACHE;
     private static boolean ownVisibilityWalk = DEF_OWN_VISIBILITY_WALK;
     private static boolean fastRebuildNear = DEF_FAST_REBUILD_NEAR;
+    private static boolean materialTags = DEF_MATERIAL_TAGS;
     private static boolean buildNearOffThread = DEF_BUILD_NEAR_OFF_THREAD;
     private static boolean fastFrustumTest = DEF_FAST_FRUSTUM_TEST;
     private static boolean vulkanTranslucent = DEF_VULKAN_TRANSLUCENT;
@@ -371,6 +389,16 @@ public final class VulkanConfig {
                         + "chunk object somewhere else in memory. Off by default because it "
                         + "replaces vanilla logic, and the way that goes wrong is that something "
                         + "stops being rebuilt.");
+        materialTags = config.getBoolean("materialTags", CATEGORY_OPTIMIZATION,
+                DEF_MATERIAL_TAGS,
+                "Record what each stretch of a chunk's geometry is made of while the chunk is "
+                        + "being built. On its own this changes nothing on screen: it is the "
+                        + "groundwork the remaining effects need. Water cannot be told from "
+                        + "stained glass, nor grass from torches, because vanilla's four render "
+                        + "layers are not materials and the vertex carries nothing else; the one "
+                        + "place the answer exists is the rebuild loop, for the length of one "
+                        + "call. Costs a branch and a counter read per block rendered, on the "
+                        + "build threads. The diagnostics report says what that measured.");
         buildNearOffThread = config.getBoolean("buildNearOffThread", CATEGORY_OPTIMIZATION,
                 DEF_BUILD_NEAR_OFF_THREAD,
                 "Queue a chunk that changed close to you for a builder thread instead of "
@@ -497,6 +525,7 @@ public final class VulkanConfig {
         setVisibilitySeedCacheEnabled(DEF_VISIBILITY_SEED_CACHE);
         setOwnVisibilityWalk(DEF_OWN_VISIBILITY_WALK);
         setFastRebuildNear(DEF_FAST_REBUILD_NEAR);
+        setMaterialTags(DEF_MATERIAL_TAGS);
         setBuildNearOffThread(DEF_BUILD_NEAR_OFF_THREAD);
         setFastFrustumTest(DEF_FAST_FRUSTUM_TEST);
         setVulkanTranslucent(DEF_VULKAN_TRANSLUCENT);
@@ -568,6 +597,15 @@ public final class VulkanConfig {
     public static void setFastRebuildNear(boolean value) {
         fastRebuildNear = value;
         store(CATEGORY_OPTIMIZATION, "fastRebuildNear", value);
+    }
+
+    public static boolean isMaterialTags() {
+        return materialTags;
+    }
+
+    public static void setMaterialTags(boolean value) {
+        materialTags = value;
+        store(CATEGORY_OPTIMIZATION, "materialTags", value);
     }
 
     public static boolean isBuildNearOffThread() {

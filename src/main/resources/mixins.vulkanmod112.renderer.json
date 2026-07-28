@@ -27,6 +27,7 @@
     "FrustumTestMixin",
     "EntityBrightnessMixin",
     "ParticleBrightnessMixin",
-    "HeldItemLightMixin"
+    "HeldItemLightMixin",
+    "MaterialTagMixin"
   ]
 }

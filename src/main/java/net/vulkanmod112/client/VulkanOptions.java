@@ -680,6 +680,33 @@ final class VulkanOptions {
                                         VulkanConfig.setFastRebuildNear(value);
                                     }
                                 }),
+                        new VSwitchOption("Material Tags",
+                                "Record what each stretch of a chunk is made of while the chunk is "
+                                        + "being built. On its own this changes nothing you can "
+                                        + "see: it is the groundwork the effects still to come are "
+                                        + "waiting on. The game draws terrain in four layers and a "
+                                        + "layer is not a material — water and stained glass are "
+                                        + "the same layer, so are grass and torches and rails — "
+                                        + "and the vertex carries position, colour, texture and "
+                                        + "light and nothing else. The one moment anything knows "
+                                        + "that a particular block is water is while that block is "
+                                        + "being turned into triangles, so that is where it is "
+                                        + "written down. Costs a branch per block on the building "
+                                        + "threads, and the diagnostics log says what it measured "
+                                        + "rather than leaving that to be believed.",
+                                Cost.of(Level.NONE, Level.NONE, Level.LOW),
+                                "Nothing uses this yet; it is here to be measured.",
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return VulkanConfig.isMaterialTags();
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        VulkanConfig.setMaterialTags(value);
+                                    }
+                                }),
                         new VSwitchOption("Build Near Chunks Off Thread",
                                 "Queue a chunk that changed close to you for a builder thread "
                                         + "instead of rebuilding it on the thread that draws. The "
