@@ -162,6 +162,27 @@ final class VulkanOptions {
                                         VulkanConfig.setFrameGraph(value);
                                     }
                                 }),
+                        new VRangeOption("Graph Refresh",
+                                "How often the numbers above the frame graph are recomputed. The "
+                                        + "trace itself always moves every frame — this is only the "
+                                        + "text, and figures that change three hundred times a "
+                                        + "second cannot be read at all. Lower it if you want the "
+                                        + "worst frame reported the moment it happens rather than "
+                                        + "at the end of the second it happened in.",
+                                Cost.of(Level.NONE, Level.NONE, Level.NONE),
+                                "Only does anything while Frame Time Graph is on.",
+                                100, 5000, 100, " ms", null,
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getFrameGraphInterval();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setFrameGraphInterval(value);
+                                    }
+                                }),
                         new VSwitchOption("Dynamic Lights",
                                 "Let a carried torch, a dropped glowing block or a burning "
                                         + "creature light the ground around it. The light is added "

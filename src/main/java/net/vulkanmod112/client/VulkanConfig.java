@@ -130,6 +130,8 @@ public final class VulkanConfig {
      * only what this renderer draws.
      */
     static final boolean DEF_FRAME_GRAPH = false;
+    /** How often the graph's numbers are recomputed, in milliseconds. */
+    static final int DEF_FRAME_GRAPH_INTERVAL = 1000;
     static final boolean DEF_DYNAMIC_LIGHTS = false;
     /**
      * How far a light source may be and still be drawn, in blocks. Not how far
@@ -188,6 +190,7 @@ public final class VulkanConfig {
     private static boolean fastFrustumTest = DEF_FAST_FRUSTUM_TEST;
     private static boolean vulkanTranslucent = DEF_VULKAN_TRANSLUCENT;
     private static boolean frameGraph = DEF_FRAME_GRAPH;
+    private static int frameGraphInterval = DEF_FRAME_GRAPH_INTERVAL;
     private static boolean dynamicLights = DEF_DYNAMIC_LIGHTS;
     private static int dynamicLightDistance = DEF_DYNAMIC_LIGHT_DISTANCE;
     private static boolean dropVanillaBuffers = DEF_DROP_VANILLA_BUFFERS;
@@ -296,6 +299,11 @@ public final class VulkanConfig {
                         + "of the last couple of seconds and the 1% low. An average framerate "
                         + "cannot tell a steady 120 from a 240 that stalls every tenth frame; the "
                         + "1% low and the shape of the graph can.");
+        frameGraphInterval = config.getInt("frameGraphIntervalMs", CATEGORY_GENERAL,
+                DEF_FRAME_GRAPH_INTERVAL, 100, 5000,
+                "How often the frame graph recomputes the numbers above it, in milliseconds. The "
+                        + "trace itself always moves every frame; this is only the text. Figures "
+                        + "that change every frame cannot be read at all.");
         dynamicLights = config.getBoolean("dynamicLights", CATEGORY_GENERAL, DEF_DYNAMIC_LIGHTS,
                 "Let a carried torch, a dropped glowing block or a burning creature light the "
                         + "terrain around it. The light is added while the world is being shaded, "
@@ -351,6 +359,7 @@ public final class VulkanConfig {
         setFastFrustumTest(DEF_FAST_FRUSTUM_TEST);
         setVulkanTranslucent(DEF_VULKAN_TRANSLUCENT);
         setFrameGraph(DEF_FRAME_GRAPH);
+        setFrameGraphInterval(DEF_FRAME_GRAPH_INTERVAL);
         setDynamicLights(DEF_DYNAMIC_LIGHTS);
         setDynamicLightDistance(DEF_DYNAMIC_LIGHT_DISTANCE);
         setDropVanillaBuffers(DEF_DROP_VANILLA_BUFFERS);
@@ -431,6 +440,16 @@ public final class VulkanConfig {
     public static void setFrameGraph(boolean value) {
         frameGraph = value;
         store(CATEGORY_GENERAL, "frameGraph", value);
+    }
+
+    /** Milliseconds between refreshes of the frame graph's numbers. */
+    public static int getFrameGraphInterval() {
+        return frameGraphInterval;
+    }
+
+    public static void setFrameGraphInterval(int value) {
+        frameGraphInterval = value;
+        store(CATEGORY_GENERAL, "frameGraphIntervalMs", value);
     }
 
     public static boolean isDynamicLights() {

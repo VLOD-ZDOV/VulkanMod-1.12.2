@@ -51,16 +51,6 @@ public final class FrameGraph {
 
     /** Frames kept. At 120 fps this is about two seconds of history. */
     private static final int SAMPLES = 240;
-    /**
-     * How often the numbers above the graph are recomputed.
-     *
-     * Deliberately slow. Figures that change every frame cannot be read at all
-     * — the eye gets a blur of digits — and the graph underneath already shows
-     * everything happening frame by frame. A second is long enough to read a
-     * number and short enough to still feel live.
-     */
-    private static final long STATS_INTERVAL_NANOS = 1_000_000_000L;
-
     private static final int WIDTH = SAMPLES;
     private static final int HEIGHT = 40;
     private static final int MARGIN = 4;
@@ -201,7 +191,10 @@ public final class FrameGraph {
     }
 
     private static void refreshStats(long now) {
-        if (now - lastStatsNanos < STATS_INTERVAL_NANOS && statMax != 0) {
+        // Read every time rather than cached: the setting is a slider, and a
+        // slider that only takes effect on the next world load is a bad slider.
+        long interval = VulkanConfig.getFrameGraphInterval() * 1_000_000L;
+        if (now - lastStatsNanos < interval && statMax != 0) {
             return;
         }
         lastStatsNanos = now;
