@@ -4,6 +4,7 @@ import com.google.common.collect.Sets;
 import net.minecraft.client.renderer.RenderGlobal;
 import net.minecraft.client.renderer.chunk.ChunkRenderDispatcher;
 import net.minecraft.client.renderer.chunk.RenderChunk;
+import net.minecraft.util.math.BlockPos;
 import net.vulkanmod112.client.DirtyChunks;
 import net.vulkanmod112.client.GridSlot;
 import net.vulkanmod112.client.RenderInfo;
@@ -183,6 +184,44 @@ public abstract class RebuildNearMixin {
         }
         VanillaFrame.countRebuildFilter(shortlist.size(), System.nanoTime() - started);
         return shortlist.iterator();
+    }
+
+    /**
+     * Scratch for the one position the rebuild pass builds per chunk. Only ever
+     * touched on the render thread, inside a single statement, and never stored.
+     */
+    @Unique
+    private final BlockPos.MutableBlockPos vulkanmod112$nearCentre = new BlockPos.MutableBlockPos();
+
+    /**
+     * The centre of a chunk, without allocating one object per chunk to hold it.
+     *
+     * Vanilla builds it as {@code renderChunk.getPosition().add(8, 8, 8)} and
+     * uses it on the very next line, for one distance comparison, and never
+     * again. That is a fresh {@code BlockPos} for every chunk the rebuild pass
+     * acts on — and while a world is loading that is around 16 800 a frame, some
+     * 1.7 million allocations a second, for a number that is read once and
+     * dropped.
+     *
+     * Worse, with near chunks queued rather than built on the spot the number is
+     * not read at all: vanilla computes the position and the distance
+     * unconditionally, before the branch that would have used them, and the
+     * branch then takes its first arm on the left of an {@code ||}.
+     *
+     * One reused mutable does instead. It cannot escape — the value lives for
+     * two instructions inside a single statement — so this is the same
+     * comparison against the same numbers with the allocation removed.
+     */
+    @Redirect(method = "setupTerrain",
+            at = @At(value = "INVOKE",
+                    target = "Lnet/minecraft/util/math/BlockPos;add(III)"
+                            + "Lnet/minecraft/util/math/BlockPos;"))
+    private BlockPos vulkanmod112$chunkCentre(BlockPos position, int x, int y, int z) {
+        if (!VulkanConfig.isFastRebuildNear()) {
+            return position.add(x, y, z);
+        }
+        return this.vulkanmod112$nearCentre.setPos(
+                position.getX() + x, position.getY() + y, position.getZ() + z);
     }
 
     /**
