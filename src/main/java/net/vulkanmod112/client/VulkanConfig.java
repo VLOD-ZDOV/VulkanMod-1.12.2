@@ -131,6 +131,17 @@ public final class VulkanConfig {
      */
     static final boolean DEF_DYNAMIC_LIGHTS = false;
     /**
+     * How far a light source may be and still be drawn, in blocks. Not how far
+     * its light reaches — that is set by the source's own level, and a torch
+     * lights about fifteen blocks around itself whatever this says. What this
+     * decides is whether a distant torch's pool of light appears at all, and a
+     * pool of light on the ground is visible from any distance you can see the
+     * ground from. An early version culled at 24 blocks on the reasoning that a
+     * level-15 light reaches 15, and the result was lights winking out as you
+     * flew away from them while the torch itself stayed in plain view.
+     */
+    static final int DEF_DYNAMIC_LIGHT_DISTANCE = 160;
+    /**
      * Stop filling the game's own chunk buffers once Vulkan holds the geometry.
      *
      * The world is currently stored twice in video memory — once in the game's
@@ -176,6 +187,7 @@ public final class VulkanConfig {
     private static boolean fastFrustumTest = DEF_FAST_FRUSTUM_TEST;
     private static boolean vulkanTranslucent = DEF_VULKAN_TRANSLUCENT;
     private static boolean dynamicLights = DEF_DYNAMIC_LIGHTS;
+    private static int dynamicLightDistance = DEF_DYNAMIC_LIGHT_DISTANCE;
     private static boolean dropVanillaBuffers = DEF_DROP_VANILLA_BUFFERS;
     private static boolean fogEnabled = DEF_FOG;
     private static boolean zoomEnabled = DEF_ZOOM;
@@ -284,6 +296,16 @@ public final class VulkanConfig {
                         + "because rebuilding chunks is what the frame is already waiting on when "
                         + "you move. It lights terrain only: entities and anything else OpenGL "
                         + "still draws are unaffected.");
+        dynamicLightDistance = config.getInt("dynamicLightDistance", CATEGORY_GENERAL,
+                DEF_DYNAMIC_LIGHT_DISTANCE, 1, 200,
+                "How far away a light source may be and still be drawn, in blocks. This is not how "
+                        + "far the light reaches — that comes from the source's own level, and a "
+                        + "torch lights about fifteen blocks around itself whatever this is set to. "
+                        + "It decides whether a distant torch lights the ground it is standing on "
+                        + "at all, and that pool of light is visible from as far as you can see the "
+                        + "ground. Lower it if you would rather only nearby sources counted; there "
+                        + "is no meaningful cost either way, because every loaded entity is looked "
+                        + "at regardless and only the nearest 32 sources are ever drawn.");
         fogEnabled = config.getBoolean("fog", CATEGORY_GENERAL, DEF_FOG,
                 "Fade Vulkan terrain into the distance the way the rest of the scene already does. "
                         + "Off leaves the world ending in a hard edge, which is a little faster.");
@@ -322,6 +344,7 @@ public final class VulkanConfig {
         setFastFrustumTest(DEF_FAST_FRUSTUM_TEST);
         setVulkanTranslucent(DEF_VULKAN_TRANSLUCENT);
         setDynamicLights(DEF_DYNAMIC_LIGHTS);
+        setDynamicLightDistance(DEF_DYNAMIC_LIGHT_DISTANCE);
         setDropVanillaBuffers(DEF_DROP_VANILLA_BUFFERS);
         setFogEnabled(DEF_FOG);
         setZoomEnabled(DEF_ZOOM);
@@ -400,6 +423,16 @@ public final class VulkanConfig {
     public static void setDynamicLights(boolean value) {
         dynamicLights = value;
         store(CATEGORY_GENERAL, "dynamicLights", value);
+    }
+
+    /** How far a light source may be and still be drawn, in blocks. */
+    public static int getDynamicLightDistance() {
+        return dynamicLightDistance;
+    }
+
+    public static void setDynamicLightDistance(int value) {
+        dynamicLightDistance = value;
+        store(CATEGORY_GENERAL, "dynamicLightDistance", value);
     }
 
     public static boolean isFastFrustumTest() {

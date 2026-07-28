@@ -8,6 +8,11 @@ rather than crashing.
 
 ## Done
 
+### 0.7.0 — in development
+
+- **Dynamic light distance is adjustable**, 1 to 200 blocks. Not how far the light reaches — how
+  far away a source may be and still light the ground it stands on.
+
 ### 0.6.0
 
 - **Water and glass drawn in Vulkan.** They now get fog like everything else.

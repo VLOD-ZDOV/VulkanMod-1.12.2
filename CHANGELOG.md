@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **Dynamic Light Distance**, 160 blocks by default, adjustable from 1 to 200. How far away a light source may be and still be drawn. It is worth being precise about what that is not: it is not how far the light reaches. That comes from the source's own level — a torch lights about fifteen blocks around itself whatever this is set to — and raising this will not throw light further. What it decides is whether a distant torch lights the ground it is standing on at all, and a pool of light on the ground is visible from as far away as the ground is. The distinction is here because getting it wrong was a real defect: an early version cut sources off at 24 blocks, reasoning that a level-15 light reaches 15, and lights visibly winked out as you flew away from torches that were still in plain sight. Lowering it costs nothing and saves nothing — every loaded entity is examined either way, and only the nearest 32 sources are ever drawn — so it is there for taste rather than for frames.
+
+### Changed
+
+- The Dynamic Lights description said it lit the terrain only and left entities alone, which stopped being true when mobs, particles and the first-person view each got their own hook. It now also says what it does across a network, because that is the first thing anyone will want to know: nothing is written into the world and nothing is sent anywhere, so mob spawning and daylight sensors are unchanged and it works on any server. Another player carrying a torch lights the ground for you without needing this mod themselves — only the one looking needs it.
+
 ## [0.6.0] - 2026-07-28
 
 ### Added

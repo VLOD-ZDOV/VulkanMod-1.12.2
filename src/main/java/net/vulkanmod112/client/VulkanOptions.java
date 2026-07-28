@@ -147,9 +147,15 @@ final class VulkanOptions {
                                         + "you move, which is what makes the usual approach to "
                                         + "this cost so much. Any block that gives off light does, "
                                         + "including modded ones, because the value is read from "
-                                        + "the block itself. It lights the terrain only: entities "
-                                        + "and everything else still drawn by OpenGL are "
-                                        + "unaffected.",
+                                        + "the block itself. Mobs standing in the light, the "
+                                        + "particles a broken block throws off and the view from "
+                                        + "first person are all lit to match. Nothing is written "
+                                        + "into the world and nothing is sent anywhere: this is "
+                                        + "worked out on your machine while the frame is drawn, so "
+                                        + "it changes nothing about mob spawning or daylight "
+                                        + "sensors and works on any server. Another player carrying "
+                                        + "a torch lights the ground for you without needing this "
+                                        + "mod themselves — only the one looking needs it.",
                                 Cost.of(Level.LOW, Level.LOW, Level.NONE), null,
                                 new VSwitchOption.Access() {
                                     @Override
@@ -160,6 +166,34 @@ final class VulkanOptions {
                                     @Override
                                     public void set(boolean value) {
                                         VulkanConfig.setDynamicLights(value);
+                                    }
+                                }),
+                        new VRangeOption("Dynamic Light Distance",
+                                "How far away a light source may be and still be drawn, in blocks. "
+                                        + "This is not how far the light reaches — that comes from "
+                                        + "the source itself, and a torch lights about fifteen "
+                                        + "blocks around it whatever this says. What it decides is "
+                                        + "whether a distant torch lights the ground it stands on "
+                                        + "at all, and a pool of light on the ground is visible "
+                                        + "from as far away as the ground is. An early version cut "
+                                        + "this off at 24 blocks, reasoning that a level-15 light "
+                                        + "reaches 15, and lights visibly winked out as you flew "
+                                        + "away from torches that were still in plain sight. "
+                                        + "Lowering it costs nothing and buys nothing except fewer "
+                                        + "distant lights: every loaded entity is looked at either "
+                                        + "way, and only the nearest 32 sources are ever drawn.",
+                                Cost.of(Level.NONE, Level.NONE, Level.NONE),
+                                "Only does anything while Dynamic Lights is on.",
+                                1, 200, 1, " blocks", null,
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getDynamicLightDistance();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setDynamicLightDistance(value);
                                     }
                                 }),
                         new VSwitchOption("Fog",

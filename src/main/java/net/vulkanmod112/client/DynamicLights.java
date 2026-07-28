@@ -50,8 +50,7 @@ public final class DynamicLights {
      * has to cover is not how far the light reaches but how far the lit ground
      * can be seen from.
      */
-    private static final double RADIUS = 160.0;
-    private static final double RADIUS_SQ = RADIUS * RADIUS;
+
 
     /** Where the camera was when the list was filled; the stored positions are relative to it. */
     private static double originX;
@@ -130,6 +129,10 @@ public final class DynamicLights {
             return;
         }
         frames++;
+        // Read once per frame: a setting change takes effect on the next frame
+        // rather than partway through a list.
+        double radius = VulkanConfig.getDynamicLightDistance();
+        double radiusSq = radius * radius;
         List<Entity> entities = mc.world.loadedEntityList;
         int size = entities.size();
         scanned += size;
@@ -148,7 +151,7 @@ public final class DynamicLights {
             double dy = entity.posY - viewY;
             double dz = entity.posZ - viewZ;
             double distSq = dx * dx + dy * dy + dz * dz;
-            if (distSq > RADIUS_SQ) {
+            if (distSq > radiusSq) {
                 continue;
             }
             int level = lightLevel(entity);
