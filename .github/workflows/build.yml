@@ -1,0 +1,58 @@
+# Builds the mod on every push and pull request, and keeps the JAR as an
+# artifact. The point is to catch a compilation break before somebody launches
+# the game to find it: a mixin whose target moved, a mapping that changed, a
+# shader that no longer compiles.
+#
+# Deployment lives in deploy.yml and still runs only on a version tag. This
+# workflow publishes nothing.
+
+name: Build
+
+on:
+  push:
+    branches:
+      - '**'
+    tags-ignore:
+      - '**'
+  pull_request:
+  workflow_dispatch:
+
+# A new push to the same branch cancels the run already in flight; only the
+# latest commit is worth the minutes.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      # RetroFuturaGradle needs a newer class-file format than the game does.
+      # Minecraft itself still runs on Java 8; these are different things and
+      # both are correct.
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: '25'
+          distribution: 'zulu'
+          cache: gradle
+
+      - name: Build
+        run: ./gradlew build --stacktrace
+
+      - name: Upload the JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: vulkanmod112-${{ github.sha }}
+          path: |
+            build/libs/*.jar
+            !build/libs/*-dev.jar
+            !build/libs/*-uberdev.jar
+          if-no-files-found: error
+          retention-days: 14
