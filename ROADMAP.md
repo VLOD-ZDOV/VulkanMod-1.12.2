@@ -10,6 +10,9 @@ rather than crashing.
 
 ### 0.7.0 — in development
 
+- **Directional light.** A dropped torch no longer lights the underside of the floor it is lying
+  on as brightly as the top. On by default.
+- **Height fog**, off by default — how much colour the ground below you gives up to fog.
 - **Render distance up to 128**, behind a switch that states the price: the chunk grid the game
   allocates goes from 266 256 chunks to 1 056 784, all of it up front.
 - **A cheaper rebuild scan**, and a switch to stop the game rebuilding nearby chunks on the
@@ -93,6 +96,10 @@ In the order they are likely to be worth doing.
 
 ## Not planned
 
+- **Ray tracing.** Not for want of hardware — the obstacle is that a chunk's acceleration
+  structure has to be rebuilt whenever the chunk is, which is constantly, and chunk rebuilding is
+  already the largest cost in a moving frame. The rays would also not see entities, particles or
+  the sky, because this renderer does not draw them, so shadows would ignore every mob.
 - **Shader packs.** A different project rather than a feature — the vertex format, the passes
   and the whole pipeline change with a pack loaded.
 - **Replacing the entire renderer.** Entities, particles, the sky and the interface stay on the
