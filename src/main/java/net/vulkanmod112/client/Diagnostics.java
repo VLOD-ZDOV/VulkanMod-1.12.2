@@ -254,6 +254,9 @@ public final class Diagnostics {
         out.println("  fps: " + Minecraft.getDebugFPS()
                 + ", world: " + (mc.world == null ? "none" : "loaded")
                 + ", gui: " + (mc.currentScreen == null ? "none" : mc.currentScreen.getClass().getSimpleName()));
+        // Before the timings, not after: every number below is about a scene,
+        // and this is the only line that says which scene.
+        out.println("  " + SessionLog.cameraLine());
         out.println("  " + TerrainHooks.stats());
         out.println("  " + TerrainHooks.vanillaLayerStats());
         out.println("  " + VanillaFrame.stats());

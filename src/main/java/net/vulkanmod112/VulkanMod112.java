@@ -32,6 +32,11 @@ public class VulkanMod112 {
         // case where the renderer did not come up.
         net.minecraftforge.common.MinecraftForge.EVENT_BUS.register(
                 new net.vulkanmod112.client.FrameGraphHandler());
+        // Also independent of Vulkan: what marks the diagnostics log with where
+        // the camera was and what put it there. It writes nothing unless ultra
+        // logging is on.
+        net.minecraftforge.common.MinecraftForge.EVENT_BUS.register(
+                new net.vulkanmod112.client.SessionLog.Handler());
         // Vanilla exposes 32 chunks on a sufficiently large 64-bit heap. The
         // renderer and ViewFrustum themselves support higher values; 64, or 128
         // with Extreme Render Distance turned on.
