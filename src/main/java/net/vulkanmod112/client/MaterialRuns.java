@@ -76,9 +76,21 @@ public final class MaterialRuns {
         private int count;
         /** Material of the run being built, so a repeat is a no-op. */
         private int openMaterial = -1;
+        /**
+         * Blocks recorded into this table, counted here rather than into the
+         * shared total.
+         *
+         * A table belongs to one buffer and a buffer to one build thread, so
+         * this is a plain field on data nobody else touches. The first version
+         * incremented a shared AtomicLong per block instead, and that measured:
+         * a dozen build threads pushing four hundred thousand blocks a second
+         * through one cache line cost more than the recording it was counting.
+         */
+        private int blocks;
 
         /** Records that vertices up to {@code endVertex} are of this material. */
         void extend(int endVertex, int material) {
+            blocks++;
             if (material == openMaterial && count > 0) {
                 runs[(count - 1) * RUN_INTS] = endVertex;
                 return;
@@ -96,6 +108,7 @@ public final class MaterialRuns {
 
         void reset() {
             count = 0;
+            blocks = 0;
             openMaterial = -1;
         }
 
@@ -144,7 +157,6 @@ public final class MaterialRuns {
             }
         }
         table.extend(endVertex, materialOf(state));
-        blocks.incrementAndGet();
     }
 
     /**
@@ -173,6 +185,7 @@ public final class MaterialRuns {
         }
         tables.incrementAndGet();
         runsTotal.addAndGet(table.count);
+        blocks.addAndGet(table.blocks);
         if (table.plain()) {
             plainTables.incrementAndGet();
         }
