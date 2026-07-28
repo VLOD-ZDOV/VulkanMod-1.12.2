@@ -10,6 +10,10 @@ rather than crashing.
 
 ### 0.7.0 — in development
 
+- **Render distance up to 128**, behind a switch that states the price: the chunk grid the game
+  allocates goes from 266 256 chunks to 1 056 784, all of it up front.
+- **A cheaper rebuild scan**, and a switch to stop the game rebuilding nearby chunks on the
+  thread that draws — which measurement showed is where that step actually spends its time.
 - **Frame-time graph** in the corner, off by default, with the 1% low — the number that tells a
   steady framerate from one that stalls, which an average cannot.
 - **The settings screen is translated** into Russian, Simplified Chinese, German, French, Spanish,

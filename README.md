@@ -11,7 +11,7 @@ Experimental Vulkan terrain renderer for Minecraft Forge 1.12.2. Minecraft still
 - Optional dropping of the vanilla chunk buffers once Vulkan holds the geometry, so the world is stored once in video memory instead of twice.
 - Vanilla OpenGL remains responsible for entities, tile entities, particles, sky and GUI.
 - If Vulkan, required driver extensions, or terrain rendering fail, the game falls back to vanilla OpenGL rather than crashing.
-- Video Settings includes a **VulkanMod112 Settings...** page with presets, a geometry budget, per-setting CPU/GPU/VRAM costs and a render-distance slider up to 64 chunks.
+- Video Settings includes a **VulkanMod112 Settings...** page with presets, a geometry budget, per-setting CPU/GPU/VRAM costs and a render-distance slider up to 64 chunks, or 128 with Extreme Render Distance turned on.
 - Hold-to-zoom on **C** (rebindable under Controls), with mouse sensitivity scaled to match.
 
 This is not yet a complete replacement for the modern VulkanMod renderer.
@@ -64,7 +64,7 @@ Every row states what it costs on the CPU, the GPU and in VRAM separately, becau
 
 **Geometry Budget** (Advanced) sets how much video memory the world geometry may take before the renderer stops growing its buffer generously. Each growth stops the GPU and re-uploads every chunk, so on a card with memory to spare a larger budget buys those stutters away; on a small one a lower value keeps the footprint tight. Automatic uses a quarter of the device-local memory the GPU reports, shown in the screen header. Chunks are never dropped to stay inside the budget — it steers growth, it is not a cap.
 
-The slider permits 2–64 chunks. 64 is an experimental maximum: vanilla 1.12.2 must allocate a very large render-chunk grid, so it can consume substantial CPU and RAM, and multiplayer servers can impose a smaller view-distance cap. Increase it gradually and restart the world if the chunk grid does not refresh immediately.
+The slider permits 2–64 chunks, and 2–128 with **Extreme Render Distance** on. Both are experimental maxima: vanilla 1.12.2 allocates a render chunk for every cell of a `(2d+1) x (2d+1) x 16` grid as soon as a world loads and keeps all of them — 266 256 at 64 and 1 056 784 at 128 — so CPU and RAM are spent up front whether or not there is terrain out there to put in them, and multiplayer servers can impose a smaller view-distance cap regardless. Increase it gradually and restart the world if the chunk grid does not refresh immediately. Turning Extreme Render Distance back off pulls the distance down to 64 with it.
 
 Zero-copy sharing requires OpenGL and Vulkan to run on the same GPU. On systems with more than one, the mod compares device UUIDs at startup and stays on vanilla rendering if they differ, naming both devices in the log.
 
