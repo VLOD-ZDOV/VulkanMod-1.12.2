@@ -43,11 +43,18 @@ public final class MaterialSprites {
     private static final String[] NAMES = {
             "minecraft:blocks/water_still",
             "minecraft:blocks/water_flow",
+            // Water has a third texture, and forgetting it showed: the game
+            // draws the face where water meets a block with a solid face —
+            // glass, most visibly — with this one rather than with the flowing
+            // texture (BlockFluidRenderer:189). Water against a glass wall was
+            // grey exactly along the contact and blue everywhere else.
+            "minecraft:blocks/water_overlay",
             "minecraft:blocks/ice",
             "minecraft:blocks/lava_still",
             "minecraft:blocks/lava_flow",
     };
     private static final int[] MATERIALS = {
+            MaterialRuns.WATER,
             MaterialRuns.WATER,
             MaterialRuns.WATER,
             MaterialRuns.ICE,
