@@ -177,6 +177,30 @@ public final class VanillaFrame {
         filterPending += pending;
     }
 
+    /**
+     * How far out of near-to-far order the visible list actually is.
+     *
+     * B2 on the roadmap proposed sorting each layer front to back so the depth
+     * buffer fills early. The premise was that the list might be unsorted — but
+     * both searches, vanilla's and this mod's, are breadth-first from the
+     * camera's own chunk through a FIFO queue, so the list comes out in
+     * non-decreasing graph distance by construction. Graph distance is not
+     * Euclidean distance, though: a chunk reached the long way round a wall sits
+     * later in the list than its distance deserves. This counts how often that
+     * happens, so the item can be closed on a number rather than on the
+     * argument above.
+     *
+     * Opt-in, because it costs the dereference per chunk that the rest of this
+     * work exists to avoid.
+     */
+    private static long orderPairs;
+    private static long orderInversions;
+
+    public static void countListOrder(int pairs, int inversions) {
+        orderPairs += pairs;
+        orderInversions += inversions;
+    }
+
     public static void countRebuildFilter(int kept, long nanos) {
         filterRuns++;
         filterNanos += nanos;
@@ -212,6 +236,12 @@ public final class VanillaFrame {
                     filterNanos / 1_000_000.0 / filterRuns, filterKept / filterRuns));
         } else {
             line.append(" | filter off");
+        }
+        if (orderPairs > 0) {
+            line.append(String.format(" | order: %d of %d pairs go backwards (%.1f%%)",
+                    orderInversions, orderPairs, 100.0 * orderInversions / orderPairs));
+            orderPairs = 0L;
+            orderInversions = 0L;
         }
         rebuildFrames = 0L;
         rebuildNanos = 0L;

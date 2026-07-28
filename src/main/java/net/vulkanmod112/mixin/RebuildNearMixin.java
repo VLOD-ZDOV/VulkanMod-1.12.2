@@ -138,6 +138,9 @@ public abstract class RebuildNearMixin {
         // exactly what happened the first time this was measured.
         VanillaFrame.countRebuildScan(size, this.vulkanmod112$pending == null
                 ? 0 : this.vulkanmod112$pending.size());
+        if (CHECK_ORDER && size > 1) {
+            vulkanmod112$checkOrder(list, size);
+        }
 
         if (list != this.renderInfos || !VulkanConfig.isFastRebuildNear() || !DirtyChunks.ready()) {
             return list.iterator();
@@ -184,6 +187,46 @@ public abstract class RebuildNearMixin {
         }
         VanillaFrame.countRebuildFilter(shortlist.size(), System.nanoTime() - started);
         return shortlist.iterator();
+    }
+
+    /**
+     * Answers roadmap item B2 with a number: how often the visible list steps
+     * away from the camera and then back towards it. Opt-in, because it costs a
+     * dereference per chunk.
+     */
+    @Unique
+    private static final boolean CHECK_ORDER = Boolean.getBoolean("vulkanmod112.checkOrder");
+
+    /**
+     * The list is breadth-first from the camera's chunk, so it is ordered by
+     * graph distance by construction. This measures the gap between that and
+     * Euclidean distance, which is what an early-depth pass actually wants: a
+     * chunk reached the long way round a wall lands later than its distance
+     * deserves, and each such pair is counted here. The origin is the first
+     * entry, which is the chunk the search was seeded from.
+     */
+    @Unique
+    @SuppressWarnings("rawtypes")
+    private void vulkanmod112$checkOrder(List list, int size) {
+        BlockPos origin = ((RenderInfo) list.get(0)).vulkanmod112$chunk().getPosition();
+        long previous = -1L;
+        int inversions = 0;
+        int pairs = 0;
+        for (int i = 0; i < size; i++) {
+            BlockPos at = ((RenderInfo) list.get(i)).vulkanmod112$chunk().getPosition();
+            long dx = at.getX() - origin.getX();
+            long dy = at.getY() - origin.getY();
+            long dz = at.getZ() - origin.getZ();
+            long distance = dx * dx + dy * dy + dz * dz;
+            if (previous >= 0L) {
+                pairs++;
+                if (distance < previous) {
+                    inversions++;
+                }
+            }
+            previous = distance;
+        }
+        VanillaFrame.countListOrder(pairs, inversions);
     }
 
     /**
