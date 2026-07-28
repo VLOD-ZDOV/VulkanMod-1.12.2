@@ -140,6 +140,76 @@ public final class VanillaFrame {
         ownWalkFellBack++;
     }
 
+    /**
+     * The rebuild pass at the end of {@code setupTerrain}, split three ways.
+     *
+     * The game's profiler calls all of it one section and puts it at 19.1% of
+     * the frame, which is not enough to act on: a scan of every visible chunk
+     * and a synchronous chunk build live in there together, and they want
+     * opposite fixes. So the whole section, the filter this mod puts in front of
+     * it, and the builds are timed separately. {@code kept} against
+     * {@code scanned} is the number the filter exists to move — everything not
+     * kept is a chunk vanilla would have dereferenced to learn nothing.
+     */
+    private static long rebuildFrames;
+    private static long rebuildNanos;
+    private static long filterRuns;
+    private static long filterNanos;
+    private static long filterScanned;
+    private static long filterKept;
+    private static long filterPending;
+    private static long buildNearCount;
+    private static long buildNearNanos;
+
+    public static void countRebuildNear(long nanos) {
+        rebuildFrames++;
+        rebuildNanos += nanos;
+    }
+
+    public static void countRebuildFilter(int scanned, int kept, int pending, long nanos) {
+        filterRuns++;
+        filterNanos += nanos;
+        filterScanned += scanned;
+        filterKept += kept;
+        filterPending += pending;
+    }
+
+    public static void countBuildNear(long nanos) {
+        buildNearCount++;
+        buildNearNanos += nanos;
+    }
+
+    /** Reads and resets, like the others, so a snapshot covers one interval. */
+    public static String rebuildNearStats() {
+        if (rebuildFrames == 0) {
+            return "rebuild near: no frames";
+        }
+        StringBuilder line = new StringBuilder(160);
+        line.append(String.format("rebuild near: %.3f ms per frame over %d frames",
+                rebuildNanos / 1_000_000.0 / rebuildFrames, rebuildFrames));
+        if (buildNearCount > 0) {
+            line.append(String.format(" | %.3f ms of it building %d chunks on the spot",
+                    buildNearNanos / 1_000_000.0 / rebuildFrames, buildNearCount));
+        }
+        if (filterRuns > 0) {
+            line.append(String.format(" | filter %.3f ms, %d scanned → %d kept, %d queued",
+                    filterNanos / 1_000_000.0 / filterRuns, filterScanned / filterRuns,
+                    filterKept / filterRuns, filterPending / filterRuns));
+        } else {
+            line.append(" | filter off");
+        }
+        rebuildFrames = 0L;
+        rebuildNanos = 0L;
+        filterRuns = 0L;
+        filterNanos = 0L;
+        filterScanned = 0L;
+        filterKept = 0L;
+        filterPending = 0L;
+        buildNearCount = 0L;
+        buildNearNanos = 0L;
+        return line.toString();
+    }
+
     /** Reads and resets, like the others, so a snapshot covers one interval. */
     public static String ownWalkStats() {
         if (ownWalks == 0 && ownWalkFellBack == 0) {

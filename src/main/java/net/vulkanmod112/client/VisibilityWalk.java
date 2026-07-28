@@ -198,6 +198,7 @@ public final class VisibilityWalk {
         if (record == null) {
             return null;
         }
+        record.vulkanmod112$setGridSlot(slot);
         stamp[slot] = epoch;
         push(record, x, y, z, floorMod(x >> 4, countX), y >> 4, floorMod(z >> 4, countZ), 0);
         return record;
@@ -305,6 +306,10 @@ public final class VisibilityWalk {
                     return false;
                 }
                 child.vulkanmod112$setDirection(mask, FACES[face]);
+                // Free: the slot is already in a register here, and carrying it
+                // is what lets the rebuild loop at the end of setupTerrain ask
+                // about this chunk without touching the chunk.
+                child.vulkanmod112$setGridSlot(slot);
                 push(child, nx, ny, nz, nSlotX, nSlotY, nSlotZ, counter + 1);
             }
         }

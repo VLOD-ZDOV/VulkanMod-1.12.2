@@ -43,4 +43,17 @@ public interface RenderInfo {
     boolean vulkanmod112$hasDirection(EnumFacing direction);
 
     byte vulkanmod112$facingMask();
+
+    /**
+     * The grid slot of this record's chunk, or -1 when it is not known — which
+     * is the case for every record the game allocated itself.
+     *
+     * Carried here so that the loop at the end of {@code setupTerrain} can ask
+     * whether a chunk needs rebuilding without dereferencing the chunk. The
+     * search knows the slot already: it is the number it stepped to in order to
+     * reach the chunk, so putting it here costs nothing.
+     */
+    int vulkanmod112$gridSlot();
+
+    void vulkanmod112$setGridSlot(int slot);
 }

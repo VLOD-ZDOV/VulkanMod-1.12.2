@@ -7,6 +7,7 @@ import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Mutable;
 import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.Unique;
 
 /**
  * Opens {@code RenderGlobal.ContainerLocalRenderInformation} up for reuse.
@@ -44,6 +45,25 @@ public abstract class RenderInfoMixin implements RenderInfo {
     @Shadow
     byte setFacing;
 
+    /**
+     * One more than the grid slot, so an untouched zero reads as "not known".
+     * The game allocates these records itself on any frame our search hands
+     * back, and reading their zero as the corner of the grid would answer a
+     * question about the wrong chunk.
+     */
+    @Unique
+    private int vulkanmod112$slotPlusOne;
+
+    @Override
+    public int vulkanmod112$gridSlot() {
+        return this.vulkanmod112$slotPlusOne - 1;
+    }
+
+    @Override
+    public void vulkanmod112$setGridSlot(int slot) {
+        this.vulkanmod112$slotPlusOne = slot + 1;
+    }
+
     @Override
     public RenderChunk vulkanmod112$chunk() {
         return this.renderChunk;
@@ -60,6 +80,7 @@ public abstract class RenderInfoMixin implements RenderInfo {
         this.facing = facingIn;
         this.counter = counterIn;
         this.setFacing = 0;
+        this.vulkanmod112$slotPlusOne = 0;
     }
 
     @Override

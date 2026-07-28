@@ -100,6 +100,30 @@ public final class VulkanConfig {
      */
     static final boolean DEF_OWN_VISIBILITY_WALK = true;
     /**
+     * Shortlist the chunks the rebuild pass at the end of {@code setupTerrain}
+     * can act on, instead of letting it scan every visible chunk.
+     *
+     * Off by default while it is new: like the visibility search, this replaces
+     * vanilla logic rather than this mod's renderer, and the way it would fail
+     * is that a chunk somebody dug into never gets queued for rebuilding and
+     * stays stale on screen. The flag it reads is mirrored into a flat bitset,
+     * and every path that can change it is hooked, so a missed transition would
+     * have to come from somewhere that cannot write the field at all.
+     */
+    static final boolean DEF_FAST_REBUILD_NEAR = false;
+    /**
+     * Queue a chunk that changed near the camera instead of rebuilding it on
+     * the render thread.
+     *
+     * This is where the rebuild pass actually spends its time. The scan around
+     * it measures 0.02 to 0.07 ms a frame; the synchronous builds measure 0.4
+     * to 0.7 ms a frame in the windows where they happen, and they are 89% to
+     * 97% of the section when they do. Forge has the same switch, so the
+     * behaviour is known ground; the cost is that a chunk you just changed
+     * appears a frame or two late instead of at once.
+     */
+    static final boolean DEF_BUILD_NEAR_OFF_THREAD = false;
+    /**
      * Test boxes against the frustum by their far corner. On by default: the
      * answer is the same one vanilla computes, by the same arithmetic, for
      * strictly fewer corners — this is not a trade between speed and accuracy,
@@ -200,6 +224,8 @@ public final class VulkanConfig {
     private static int nearPlaneHundredths = DEF_NEAR_PLANE_HUNDREDTHS;
     private static boolean visibilitySeedCache = DEF_VISIBILITY_SEED_CACHE;
     private static boolean ownVisibilityWalk = DEF_OWN_VISIBILITY_WALK;
+    private static boolean fastRebuildNear = DEF_FAST_REBUILD_NEAR;
+    private static boolean buildNearOffThread = DEF_BUILD_NEAR_OFF_THREAD;
     private static boolean fastFrustumTest = DEF_FAST_FRUSTUM_TEST;
     private static boolean vulkanTranslucent = DEF_VULKAN_TRANSLUCENT;
     private static boolean frameGraph = DEF_FRAME_GRAPH;
@@ -283,6 +309,26 @@ public final class VulkanConfig {
                         + "version at a quarter to a half of the frame at render distance 64. Off "
                         + "by default because it replaces vanilla logic, and the way that goes "
                         + "wrong is that something stops being drawn.");
+        fastRebuildNear = config.getBoolean("fastRebuildNear", CATEGORY_OPTIMIZATION,
+                DEF_FAST_REBUILD_NEAR,
+                "Hand the last loop of the terrain setup only the chunks it can act on. That loop "
+                        + "walks every chunk on screen every frame — some 8 600 at render distance "
+                        + "64, and the game's own profiler puts it at 19% of the frame — to find "
+                        + "the few a block was broken in. The answer for each one is a single bit, "
+                        + "and it now lives in a flat array beside the grid rather than inside a "
+                        + "chunk object somewhere else in memory. Off by default because it "
+                        + "replaces vanilla logic, and the way that goes wrong is that something "
+                        + "stops being rebuilt.");
+        buildNearOffThread = config.getBoolean("buildNearOffThread", CATEGORY_OPTIMIZATION,
+                DEF_BUILD_NEAR_OFF_THREAD,
+                "Queue a chunk that changed close to you for a builder thread instead of "
+                        + "rebuilding it on the thread that draws. Vanilla rebuilds anything "
+                        + "dirty within about 28 blocks of the eye right there in the middle of "
+                        + "setting the frame up, and the frame waits for it: measured, that is "
+                        + "0.4 to 0.7 ms a frame while it is happening, which is nearly all of "
+                        + "what that step costs. The price is that a chunk you just changed "
+                        + "catches up a frame or two later rather than instantly. Forge has the "
+                        + "same switch and it wins when it is on.");
         fastFrustumTest = config.getBoolean("fastFrustumTest", CATEGORY_OPTIMIZATION,
                 DEF_FAST_FRUSTUM_TEST,
                 "Decide whether a box is off screen from its far corner rather than from all "
@@ -378,6 +424,8 @@ public final class VulkanConfig {
         setNearPlaneHundredths(DEF_NEAR_PLANE_HUNDREDTHS);
         setVisibilitySeedCacheEnabled(DEF_VISIBILITY_SEED_CACHE);
         setOwnVisibilityWalk(DEF_OWN_VISIBILITY_WALK);
+        setFastRebuildNear(DEF_FAST_REBUILD_NEAR);
+        setBuildNearOffThread(DEF_BUILD_NEAR_OFF_THREAD);
         setFastFrustumTest(DEF_FAST_FRUSTUM_TEST);
         setVulkanTranslucent(DEF_VULKAN_TRANSLUCENT);
         setFrameGraph(DEF_FRAME_GRAPH);
@@ -436,6 +484,24 @@ public final class VulkanConfig {
     public static void setOwnVisibilityWalk(boolean value) {
         ownVisibilityWalk = value;
         store(CATEGORY_OPTIMIZATION, "ownVisibilityWalk", value);
+    }
+
+    public static boolean isFastRebuildNear() {
+        return fastRebuildNear;
+    }
+
+    public static void setFastRebuildNear(boolean value) {
+        fastRebuildNear = value;
+        store(CATEGORY_OPTIMIZATION, "fastRebuildNear", value);
+    }
+
+    public static boolean isBuildNearOffThread() {
+        return buildNearOffThread;
+    }
+
+    public static void setBuildNearOffThread(boolean value) {
+        buildNearOffThread = value;
+        store(CATEGORY_OPTIMIZATION, "buildNearOffThread", value);
     }
 
     public static boolean isVulkanTranslucent() {
