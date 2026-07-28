@@ -330,6 +330,11 @@ final class VkTerrainRenderer {
      * switched off, and the shader skips the blend entirely.
      */
     private final float[] fogState = new float[8];
+    /** Start of the clock the shaders animate from; see writeFrameUniforms. */
+    private final long startedNanos = System.nanoTime();
+    private boolean directionalDynamicLight = true;
+    private float heightFogStrength;
+    private float heightFogFalloff = 0.08f;
 
     // Size-dependent shared targets
     private int width;
@@ -784,6 +789,7 @@ final class VkTerrainRenderer {
             // The matrix and the fog are the same for every chunk and every
             // layer, so they live in this frame's uniform buffer rather than
             // being pushed again for each of them.
+            refreshShaderSettings();
             writeFrameUniforms(mvp, fogState);
 
             // Standard (y-down) viewport: the GL-sourced matrices produce a
@@ -1703,6 +1709,52 @@ final class VkTerrainRenderer {
         MemoryUtil.memPutFloat(base + 108, 0.0f);
         for (int i = 0; i < dynamicLightCount * 4; i++) {
             MemoryUtil.memPutFloat(base + 112 + i * 4L, dynamicLights[i]);
+        }
+        // vec4 frameInfo at 624, straight after lights[32].
+        //
+        // The clock is read here rather than sent across the bridge. What
+        // anything animated needs is a value that advances smoothly and never
+        // jumps, and System.nanoTime is that on this side already; routing it
+        // through the game would add a bridge call per frame and tie the
+        // animation to the game thread for nothing. Reduced modulo an hour so
+        // the float keeps its precision however long the session runs.
+        float seconds = (float) (((System.nanoTime() - startedNanos) / 1_000_000L) % 3_600_000L)
+                / 1000.0f;
+        MemoryUtil.memPutFloat(base + 624, seconds);
+        MemoryUtil.memPutFloat(base + 628, directionalDynamicLight ? 1.0f : 0.0f);
+        MemoryUtil.memPutFloat(base + 632, 0.0f);
+        MemoryUtil.memPutFloat(base + 636, 0.0f);
+        // vec4 heightFog at 640.
+        MemoryUtil.memPutFloat(base + 640, heightFogStrength);
+        MemoryUtil.memPutFloat(base + 644, heightFogFalloff);
+        MemoryUtil.memPutFloat(base + 648, 0.0f);
+        MemoryUtil.memPutFloat(base + 652, 0.0f);
+    }
+
+    /**
+     * Shader settings read once a frame from the properties the game side sets.
+     *
+     * Both are plain numbers in the frame's uniform buffer rather than
+     * specialization constants, which is the whole point: a slider that
+     * rebuilds a pipeline is a slider that stutters, and neither of these
+     * changes what the shader costs enough to be worth a second variant of it.
+     */
+    private void refreshShaderSettings() {
+        directionalDynamicLight =
+                !"false".equals(System.getProperty("vulkanmod112.directionalLight"));
+        int strength = intProperty("vulkanmod112.heightFog", 0);
+        heightFogStrength = Math.max(0, Math.min(100, strength)) / 100.0f;
+        // Hundredths of "per block", so 8 thickens by a factor of e over about
+        // twelve blocks of drop. Kept out of the settings screen: it is the
+        // shape of the curve rather than how much of it you want.
+        heightFogFalloff = Math.max(1, intProperty("vulkanmod112.heightFogFalloff", 8)) / 100.0f;
+    }
+
+    private static int intProperty(String name, int fallback) {
+        try {
+            return Integer.parseInt(System.getProperty(name, Integer.toString(fallback)));
+        } catch (NumberFormatException e) {
+            return fallback;
         }
     }
 

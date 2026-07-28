@@ -244,6 +244,58 @@ final class VulkanOptions {
                                         VulkanConfig.setDynamicLights(value);
                                     }
                                 }),
+                        new VSwitchOption("Directional Light",
+                                "Let dynamic light care which way a surface is turned. The game's "
+                                        + "own light is one number per block and knows nothing "
+                                        + "about orientation, so a dropped torch lights the "
+                                        + "underside of the floor it is lying on exactly as "
+                                        + "brightly as the top of it. This renderer can work the "
+                                        + "face out from how the surface changes across the "
+                                        + "screen — every quad in a block model is flat, so that "
+                                        + "is the real face rather than a guess — and dim what is "
+                                        + "turned away from the light. Costs nothing at all while "
+                                        + "dynamic lights are off.",
+                                Cost.of(Level.NONE, Level.LOW, Level.NONE),
+                                "Only does anything while Dynamic Lights is on.",
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return VulkanConfig.isDirectionalLight();
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        VulkanConfig.setDirectionalLight(value);
+                                    }
+                                }),
+                        new VRangeOption("Height Fog",
+                                "How much colour the ground below you gives up to fog. This is a "
+                                        + "look rather than a fix, and it is honest about its "
+                                        + "limits: it fades towards the game's own fog colour and "
+                                        + "only where the game already has fog, so it cannot "
+                                        + "invent a haze the sky disagrees with. What it cannot "
+                                        + "reach is everything this renderer does not draw — "
+                                        + "entities and particles are fogged by OpenGL, which "
+                                        + "knows nothing about height, so a mob standing in a "
+                                        + "fogged valley stays clearer than the ground under it.",
+                                Cost.of(Level.NONE, Level.LOW, Level.NONE), null,
+                                // A single percent, not a doubled one: this
+                                // string is drawn as it is rather than passed
+                                // through the game's formatter, because its key
+                                // slugs to nothing and no translation can exist
+                                // for it.
+                                0, 100, 5, "%", "OFF",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getHeightFog();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setHeightFog(value);
+                                    }
+                                }),
                         new VRangeOption("Dynamic Light Distance",
                                 "How far away a light source may be and still be drawn, in blocks. "
                                         + "This is not how far the light reaches — that comes from "

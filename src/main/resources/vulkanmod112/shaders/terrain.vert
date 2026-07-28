@@ -10,6 +10,12 @@ layout(set = 0, binding = 3, std140) uniform Frame {
     vec4 fogParams;  // x = start, y = end, z = density
     vec4 lightInfo;  // x = how many of lights[] are in use
     vec4 lights[32]; // xyz = position relative to the camera, w = light level
+    // x = seconds since the renderer came up, for anything that animates.
+    // y = 1 when dynamic light should respect which way a surface faces.
+    vec4 frameInfo;
+    // x = how much of the colour the low ground gives up, 0 turns it off.
+    // y = how quickly it thickens with each block below the camera.
+    vec4 heightFog;
 } frame;
 
 // What actually differs between draws.

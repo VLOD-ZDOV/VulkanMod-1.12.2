@@ -10,6 +10,8 @@ layout(set = 0, binding = 3, std140) uniform Frame {
     vec4 fogParams;  // x = start, y = end, z = density
     vec4 lightInfo;  // x = how many of lights[] are in use
     vec4 lights[32]; // xyz = position relative to the camera, w = light level
+    vec4 frameInfo;  // x = seconds, y = 1 for directional dynamic light
+    vec4 heightFog;  // x = strength (0 = off), y = thickening per block
 } frame;
 
 layout(push_constant) uniform Draw {
@@ -59,6 +61,40 @@ float fogFactor(int mode) {
     return exp(-scaled * scaled);
 }
 
+/**
+ * The surface normal, worked out from how the world position changes across
+ * the screen rather than read from the vertex.
+ *
+ * There is no normal to read: the game's block vertex is 28 bytes of position,
+ * colour, texture and light map, and adding one would mean building the chunk
+ * ourselves instead of mirroring the buffer the game already built. Every quad
+ * in a block model is flat, so the cross product of the two screen-space
+ * derivatives is the exact face normal here, not an approximation of it.
+ *
+ * vRelative is the surface with the eye at the origin, so the direction back to
+ * the camera is its negation. Which way the cross product points depends on the
+ * winding as it lands on screen, so the result is turned to face the camera
+ * rather than trusted.
+ */
+vec3 faceNormal() {
+    vec3 n = normalize(cross(dFdx(vRelative), dFdy(vRelative)));
+    return dot(n, vRelative) > 0.0 ? -n : n;
+}
+
+/**
+ * Thickens the fog towards the ground below the camera.
+ *
+ * Measured from the camera rather than from sea level, because the shader is
+ * given camera-relative positions and nothing else; the difference shows only
+ * when the camera itself is inside the fog, and the effect is a mood rather
+ * than a simulation. Returns how much of the fog colour to mix in, on top of
+ * whatever distance fog already decided.
+ */
+float heightFogAmount() {
+    float below = max(0.0, -vRelative.y);
+    return frame.heightFog.x * (1.0 - exp(-below * frame.heightFog.y));
+}
+
 void main() {
     vec4 tex = texture(atlas, vUV);
     if (ALPHA_TEST) {
@@ -74,12 +110,25 @@ void main() {
     // like a torch; adding white would look like a flashlight.
     float blockLight = vLight.x;
     int lightCount = int(frame.lightInfo.x);
+    // Both of these come from the frame's uniform buffer, so every fragment in
+    // the draw takes the same branch — which is what makes it safe to ask for
+    // derivatives inside it.
+    bool directional = frame.frameInfo.y > 0.5;
+    vec3 normal = (lightCount > 0 && directional) ? faceNormal() : vec3(0.0, 1.0, 0.0);
     for (int i = 0; i < lightCount; ++i) {
         vec4 source = frame.lights[i];
-        float distance = length(source.xyz - vRelative);
+        vec3 toSource = source.xyz - vRelative;
+        float distance = length(toSource);
         // Vanilla propagates block light one level per block, so a source of
         // level L reaches L blocks. The same falloff, in a straight line.
         float level = source.w - distance;
+        if (directional && level > 0.0) {
+            // A face turned away from a torch should not be lit by it. Vanilla
+            // cannot express this — its light is a per-block value with no idea
+            // which way a surface points — so a dropped torch used to light the
+            // underside of the floor it sits on exactly as brightly as the top.
+            level *= max(dot(normal, toSource / max(distance, 0.0001)), 0.0);
+        }
         if (level > 0.0) {
             // The light map is sampled at (level * 16 + 8) / 256, which is the
             // texel centre of that row.
@@ -92,6 +141,13 @@ void main() {
     int mode = int(frame.fogColor.a);
     if (mode != 0) {
         shaded = mix(frame.fogColor.rgb, shaded, clamp(fogFactor(mode), 0.0, 1.0));
+    }
+    // After the distance fog and only where the game already has fog of its
+    // own: with fog switched off there is no colour to thicken towards, and
+    // inventing one would make this the only surface in the scene fading into
+    // something the sky never does.
+    if (mode != 0 && frame.heightFog.x > 0.0) {
+        shaded = mix(shaded, frame.fogColor.rgb, clamp(heightFogAmount(), 0.0, 1.0));
     }
     if (BLEND) {
         float alpha = tex.a * vColor.a;
