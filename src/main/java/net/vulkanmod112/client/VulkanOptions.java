@@ -757,7 +757,7 @@ final class VulkanOptions {
                                         + "far away and is easier on the texture cache. Raising it "
                                         + "usually costs nothing and can even gain a little.",
                                 Cost.of(Level.NONE, Level.MEDIUM, Level.LOW),
-                                "Applies after the texture atlas reloads.",
+                                "The atlas is rebuilt when you close this screen.",
                                 0, 4, 1, "", "Off",
                                 new VRangeOption.Access() {
                                     @Override
@@ -765,17 +765,37 @@ final class VulkanOptions {
                                         return mc.gameSettings.mipmapLevels;
                                     }
 
+                                    /**
+                                     * Handed to the game's own setter rather than
+                                     * applied by hand.
+                                     *
+                                     * This row used to do the four steps itself and
+                                     * then call {@code scheduleResourcesRefresh},
+                                     * which reloads every resource there is — and
+                                     * that restarts the sound engine. A slider is
+                                     * dragged, so two steps a second apart meant two
+                                     * reloads a second apart, the second OpenAL
+                                     * context refusing to exist beside the first,
+                                     * thirty seconds of the sound loader waiting, and
+                                     * then the game dying on the natives that had
+                                     * been unloaded underneath its still-running
+                                     * sound threads.
+                                     *
+                                     * Forge already fixed this in vanilla's setter for
+                                     * the same reason (MC-64581): it applies the level
+                                     * immediately and defers one narrow model reload
+                                     * to when the screen closes. Calling that setter
+                                     * inherits the fix instead of reproducing the bug
+                                     * beside it; see this screen's onGuiClosed for the
+                                     * other half.
+                                     */
                                     @Override
                                     public void set(int value) {
                                         if (value == mc.gameSettings.mipmapLevels) {
                                             return;
                                         }
-                                        mc.gameSettings.mipmapLevels = value;
-                                        mc.getTextureMapBlocks().setMipmapLevels(value);
-                                        mc.getTextureManager().bindTexture(
-                                                net.minecraft.client.renderer.texture.TextureMap.LOCATION_BLOCKS_TEXTURE);
-                                        mc.getTextureMapBlocks().setBlurMipmapDirect(false, value > 0);
-                                        mc.scheduleResourcesRefresh();
+                                        mc.gameSettings.setOptionFloatValue(
+                                                GameSettings.Options.MIPMAP_LEVELS, value);
                                         mc.gameSettings.saveOptions();
                                     }
                                 })));

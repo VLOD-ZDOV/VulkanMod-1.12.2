@@ -121,7 +121,7 @@ vulkanmod112.value.minimum=Minimum
 vulkanmod112.value.maximum=Maximum
 vulkanmod112.option.mipmap_levels=Mipmap Levels
 vulkanmod112.tooltip.mipmap_levels=Smaller copies of the block atlas for distant surfaces. This mod copies them into Vulkan, so raising this removes shimmer far away and is easier on the texture cache. Raising it usually costs nothing and can even gain a little.
-vulkanmod112.applies.mipmap_levels=Applies after the texture atlas reloads.
+vulkanmod112.applies.mipmap_levels=The atlas is rebuilt when you close this screen.
 
 vulkanmod112.page.advanced=Advanced
 vulkanmod112.group.memory=Memory

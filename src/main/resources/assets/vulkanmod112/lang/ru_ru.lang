@@ -121,7 +121,7 @@ vulkanmod112.value.minimum=Минимум
 vulkanmod112.value.maximum=Максимум
 vulkanmod112.option.mipmap_levels=Уровни mip-текстур
 vulkanmod112.tooltip.mipmap_levels=Уменьшенные копии атласа блоков для далёких поверхностей. Этот мод копирует их в Vulkan, поэтому увеличение значения убирает мерцание вдали и облегчает нагрузку на кэш текстур. Увеличение обычно ничего не стоит и может даже немного прибавить производительности.
-vulkanmod112.applies.mipmap_levels=Применяется после перезагрузки атласа текстур.
+vulkanmod112.applies.mipmap_levels=Атлас пересобирается при закрытии этого экрана.
 
 vulkanmod112.page.advanced=Продвинутые
 vulkanmod112.group.memory=Память

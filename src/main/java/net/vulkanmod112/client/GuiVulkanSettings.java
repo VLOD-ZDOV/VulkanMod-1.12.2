@@ -345,9 +345,20 @@ public final class GuiVulkanSettings extends GuiScreen {
         return null;
     }
 
+    /**
+     * The same two calls vanilla's video settings screen makes on the way out.
+     *
+     * {@code onGuiClosed} on the game's settings is the second of them and it is
+     * not optional. Forge defers the model reload the mipmap slider needs to
+     * exactly this point — MC-64581, "very laggy mipmap slider" — and a screen
+     * that changes that setting without calling it either never applies the new
+     * mipmap level, or has to reload resources itself, which is what this screen
+     * used to do and what crashed the game.
+     */
     @Override
     public void onGuiClosed() {
         this.mc.gameSettings.saveOptions();
+        this.mc.gameSettings.onGuiClosed();
     }
 
     /** "low", "high" and friends, translated. */
