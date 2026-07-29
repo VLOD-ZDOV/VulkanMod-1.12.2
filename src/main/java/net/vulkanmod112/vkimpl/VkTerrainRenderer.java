@@ -358,6 +358,7 @@ final class VkTerrainRenderer {
      * player. Only the remainder modulo the wave lattice ever leaves this side.
      */
     private double viewWorldX;
+    private double viewWorldY;
     private double viewWorldZ;
 
     /**
@@ -553,6 +554,43 @@ final class VkTerrainRenderer {
     private float aoRadius = 2.0f;
     private boolean aoFailed;
     /**
+     * Where each pixel of this frame stood in the last one.
+     *
+     * Nothing on screen changes because of this. It is what every effect that
+     * wants to remember something needs and none of them can have without it: a
+     * reflection or a shadow worked out from a handful of samples is too noisy
+     * to use on its own, and the way that is made usable is by adding this
+     * frame's answer to the ones before it — which cannot be done until it is
+     * known which pixel of the last frame was looking at the same place in the
+     * world.
+     *
+     * Two matrices and a distance are the whole of it. The position a depth
+     * comes back to is measured from the camera, so between frames the origin
+     * itself has moved, and the camera's own step has to be added back before
+     * last frame's matrix is asked where that point was. That step is taken in
+     * double and crosses as a small number — the same reason the wave lattice
+     * exists, and for once the two effects want exactly the same thing.
+     */
+    private int motionTexture;
+    private int motionFbo;
+    private int motionProgram;
+    private int motionInvSizeUniform = -1;
+    private int motionReprojectUniform = -1;
+    private int motionWidth;
+    private int motionHeight;
+    private boolean motionFailed;
+    /** Diagnostic: paint the frame with the motion instead of the world. */
+    private boolean showMotion;
+    private final float[] currentMvp = new float[16];
+    private final float[] previousMvp = new float[16];
+    private boolean hasPreviousFrame;
+    private double previousViewX;
+    private double previousViewY;
+    private double previousViewZ;
+    private final float[] reprojectMatrix = new float[16];
+    private final java.nio.FloatBuffer reprojectBuffer =
+            org.lwjgl.BufferUtils.createFloatBuffer(16);
+    /**
      * How far apart the blur's taps stand when it is smoothing occlusion rather
      * than a glow.
      */
@@ -560,6 +598,7 @@ final class VkTerrainRenderer {
     private final java.nio.FloatBuffer projectionMatrix =
             org.lwjgl.BufferUtils.createFloatBuffer(16);
     private final int[] compositeAoOnlyUniforms = {-1, -1};
+    private final int[] compositeMotionUniforms = {-1, -1};
     private final int[] compositeInvSizeUniforms = {-1, -1};
     /** Diagnostic: draw the occlusion on its own instead of applying it. */
     private boolean showOcclusion;
@@ -898,6 +937,7 @@ final class VkTerrainRenderer {
         // Before the first layer opens the frame, because that is where the
         // uniforms are written and the translucent pass reuses them.
         viewWorldX = viewX;
+        viewWorldY = viewY;
         viewWorldZ = viewZ;
         if (layerOrdinal == LAYER_TRANSLUCENT) {
             // Its own pass, its own submission, and it runs after the opaque
@@ -931,6 +971,7 @@ final class VkTerrainRenderer {
             long t1 = System.nanoTime();
             submitFrame();
             composite();
+            rememberFrame();
             submitCompositeNanos += System.nanoTime() - t1;
             frameCounter++;
             logFrameDiagnostics();
@@ -1511,6 +1552,18 @@ final class VkTerrainRenderer {
             // wrong in here costs this one effect for the session and the frame
             // carries on undarkened, rather than taking the terrain renderer
             // down with it and dropping the player back to vanilla GL.
+            boolean motion = false;
+            if (!motionFailed) {
+                int frameFbo = GL11C.glGetInteger(GL30C.GL_FRAMEBUFFER_BINDING);
+                try {
+                    motion = motionPass();
+                } catch (Throwable t) {
+                    LOGGER.error("Motion vectors failed; off for this session", t);
+                    motionFailed = true;
+                    GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, frameFbo);
+                }
+            }
+
             boolean ao = false;
             if (aoStrength > 0.0f && !aoFailed) {
                 int frameFbo = GL11C.glGetInteger(GL30C.GL_FRAMEBUFFER_BINDING);
@@ -1527,6 +1580,12 @@ final class VkTerrainRenderer {
             GL20C.glUniform1f(compositeAoUniforms[depthBlit ? 1 : 0], ao ? 1.0f : 0.0f);
             GL20C.glUniform1f(compositeAoOnlyUniforms[depthBlit ? 1 : 0],
                     ao && showOcclusion ? 1.0f : 0.0f);
+            GL20C.glUniform1f(compositeMotionUniforms[depthBlit ? 1 : 0],
+                    motion && showMotion ? 1.0f : 0.0f);
+            if (motion) {
+                GL13C.glActiveTexture(GL13C.GL_TEXTURE3);
+                GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, motionTexture);
+            }
             if (ao) {
                 GL13C.glActiveTexture(GL13C.GL_TEXTURE2);
                 GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, aoTexture);
@@ -1939,6 +1998,249 @@ final class VkTerrainRenderer {
         }
         aoWidth = 0;
         aoHeight = 0;
+    }
+
+    private void destroyMotionProgram() {
+        if (motionProgram != 0) {
+            GL20C.glDeleteProgram(motionProgram);
+            motionProgram = 0;
+        }
+    }
+
+    /**
+     * Where each pixel of this frame was standing in the last one, written into
+     * a texture as a step across the screen.
+     *
+     * The whole of it is one matrix. A pixel's clip position is known — its
+     * place on screen and its depth — and last frame's matrix says where that
+     * point would have landed then, once the camera's own step between the two
+     * frames has been added back to it, because everything here is measured
+     * from a camera that has itself moved. Multiplying the three together on
+     * this side leaves the shader with a single transform and no inverse to
+     * take per pixel.
+     *
+     * The first frame after the renderer starts, and the first after a resize,
+     * have nothing behind them and are written as standing still. That is the
+     * right answer rather than a placeholder: nothing may be carried over from
+     * a frame that does not exist.
+     */
+    private boolean motionPass() {
+        if (!ensureMotionTargets()) {
+            return false;
+        }
+        if (!hasPreviousFrame) {
+            identity(reprojectMatrix);
+        } else {
+            // The camera's step, taken in double where it is exact and handed
+            // over small. World coordinates in this game reach tens of millions
+            // and a float cannot separate one block from the next up there, but
+            // the distance a camera covers in a frame is a fraction of a block.
+            float dx = (float) (viewWorldX - previousViewX);
+            float dy = (float) (viewWorldY - previousViewY);
+            float dz = (float) (viewWorldZ - previousViewZ);
+            float[] inverse = new float[16];
+            if (!invert(currentMvp, inverse)) {
+                identity(reprojectMatrix);
+            } else {
+                // The camera's step, folded straight into the inverse rather
+                // than applied as a matrix of its own. Translating a
+                // homogeneous point moves it by the step times its own w, which
+                // is the same point translated and left homogeneous — so it is
+                // three rows gaining a multiple of the fourth, and no divide is
+                // forced into the middle of the product.
+                float[] shifted = new float[16];
+                for (int col = 0; col < 4; col++) {
+                    float w = inverse[col * 4 + 3];
+                    shifted[col * 4] = inverse[col * 4] + dx * w;
+                    shifted[col * 4 + 1] = inverse[col * 4 + 1] + dy * w;
+                    shifted[col * 4 + 2] = inverse[col * 4 + 2] + dz * w;
+                    shifted[col * 4 + 3] = w;
+                }
+                multiply(previousMvp, shifted, reprojectMatrix);
+            }
+        }
+
+        int prevFbo = GL11C.glGetInteger(GL30C.GL_FRAMEBUFFER_BINDING);
+        org.lwjgl.opengl.GL11.glPushAttrib(org.lwjgl.opengl.GL11.GL_VIEWPORT_BIT);
+        try {
+            GL11C.glDisable(GL11C.GL_DEPTH_TEST);
+            GL11C.glDepthMask(false);
+            GL11C.glDisable(GL11C.GL_BLEND);
+            GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, motionFbo);
+            GL11C.glViewport(0, 0, motionWidth, motionHeight);
+            GL20C.glUseProgram(motionProgram);
+            GL20C.glUniform2f(motionInvSizeUniform, 1.0f / motionWidth, 1.0f / motionHeight);
+            reprojectBuffer.clear();
+            reprojectBuffer.put(reprojectMatrix).flip();
+            GL20C.glUniformMatrix4fv(motionReprojectUniform, false, reprojectBuffer);
+            GL13C.glActiveTexture(GL13C.GL_TEXTURE0);
+            GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, glDepthTexture);
+            fullscreenQuad();
+        } finally {
+            GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo);
+            org.lwjgl.opengl.GL11.glPopAttrib();
+        }
+        return true;
+    }
+
+    /** Keeps this frame's matrix and camera for the next one to ask about. */
+    private void rememberFrame() {
+        System.arraycopy(currentMvp, 0, previousMvp, 0, 16);
+        previousViewX = viewWorldX;
+        previousViewY = viewWorldY;
+        previousViewZ = viewWorldZ;
+        hasPreviousFrame = true;
+    }
+
+    private boolean ensureMotionTargets() {
+        int wantWidth = Math.max(1, width / 2);
+        int wantHeight = Math.max(1, height / 2);
+        if (motionFbo != 0 && motionWidth == wantWidth && motionHeight == wantHeight) {
+            return true;
+        }
+        destroyMotionTargets();
+        motionWidth = wantWidth;
+        motionHeight = wantHeight;
+        int prevFbo = GL11C.glGetInteger(GL30C.GL_FRAMEBUFFER_BINDING);
+        int prevTexture = GL11C.glGetInteger(GL11C.GL_TEXTURE_BINDING_2D);
+        motionTexture = GL11C.glGenTextures();
+        allocateBloomTexture(motionTexture, motionWidth, motionHeight);
+        motionFbo = GL30C.glGenFramebuffers();
+        GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, motionFbo);
+        GL30C.glFramebufferTexture2D(GL30C.GL_FRAMEBUFFER, GL30C.GL_COLOR_ATTACHMENT0,
+                GL11C.GL_TEXTURE_2D, motionTexture, 0);
+        boolean ok = GL30C.glCheckFramebufferStatus(GL30C.GL_FRAMEBUFFER)
+                == GL30C.GL_FRAMEBUFFER_COMPLETE;
+        GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo);
+        GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, prevTexture);
+        if (!ok) {
+            LOGGER.error("Motion vector target incomplete; off for this session");
+            destroyMotionTargets();
+            motionFailed = true;
+            return false;
+        }
+        try {
+            buildMotionProgram();
+        } catch (RuntimeException e) {
+            LOGGER.error("Motion vector program failed to build; off for this session", e);
+            destroyMotionTargets();
+            motionFailed = true;
+            return false;
+        }
+        // The frame this target was made for has nothing before it.
+        hasPreviousFrame = false;
+        return true;
+    }
+
+    private void buildMotionProgram() {
+        if (motionProgram != 0) {
+            return;
+        }
+        motionProgram = buildQuadProgram(
+                "uniform sampler2D uSource;\n"
+                        + "uniform vec2 uInvSize;\n"
+                        + "uniform mat4 uReproject;\n"
+                        + "void main() {\n"
+                        + "    vec2 uv = gl_FragCoord.xy * uInvSize;\n"
+                        + "    float d = texture2D(uSource, uv).r;\n"
+                        // Sky. Nothing was drawn, so there is nothing that was
+                        // anywhere last frame either.
+                        + "    if (d >= 0.9999) { gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0); return; }\n"
+                        // The depth written here is already the [0,1] the
+                        // matrix was built to produce, so it goes in as it is
+                        // rather than being stretched to [-1,1] first.
+                        + "    vec4 clipNow = vec4(uv * 2.0 - 1.0, d, 1.0);\n"
+                        + "    vec4 before = uReproject * clipNow;\n"
+                        + "    if (abs(before.w) < 1e-6) { gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0); return; }\n"
+                        + "    vec2 prevUv = (before.xy / before.w) * 0.5 + 0.5;\n"
+                        + "    gl_FragColor = vec4(prevUv - uv, 0.0, 1.0);\n"
+                        + "}\n");
+        motionInvSizeUniform = GL20C.glGetUniformLocation(motionProgram, "uInvSize");
+        motionReprojectUniform = GL20C.glGetUniformLocation(motionProgram, "uReproject");
+    }
+
+    private void destroyMotionTargets() {
+        if (motionFbo != 0) {
+            GL30C.glDeleteFramebuffers(motionFbo);
+            motionFbo = 0;
+        }
+        if (motionTexture != 0) {
+            GL11C.glDeleteTextures(motionTexture);
+            motionTexture = 0;
+        }
+        motionWidth = 0;
+        motionHeight = 0;
+        hasPreviousFrame = false;
+    }
+
+    /** Column-major, as everything that reaches OpenGL or Vulkan is. */
+    private static void identity(float[] out) {
+        for (int i = 0; i < 16; i++) {
+            out[i] = (i % 5 == 0) ? 1.0f : 0.0f;
+        }
+    }
+
+    /** out = a * b, both column-major. */
+    private static void multiply(float[] a, float[] b, float[] out) {
+        for (int col = 0; col < 4; col++) {
+            for (int row = 0; row < 4; row++) {
+                float sum = 0.0f;
+                for (int k = 0; k < 4; k++) {
+                    sum += a[k * 4 + row] * b[col * 4 + k];
+                }
+                out[col * 4 + row] = sum;
+            }
+        }
+    }
+
+    /**
+     * The general inverse, by cofactors. A projection times a view is not a
+     * rotation and a translation any more — the perspective divide is in there
+     * — so none of the shortcuts for rigid transforms apply.
+     */
+    private static boolean invert(float[] m, float[] out) {
+        float[] inv = new float[16];
+        inv[0] = m[5] * m[10] * m[15] - m[5] * m[11] * m[14] - m[9] * m[6] * m[15]
+                + m[9] * m[7] * m[14] + m[13] * m[6] * m[11] - m[13] * m[7] * m[10];
+        inv[4] = -m[4] * m[10] * m[15] + m[4] * m[11] * m[14] + m[8] * m[6] * m[15]
+                - m[8] * m[7] * m[14] - m[12] * m[6] * m[11] + m[12] * m[7] * m[10];
+        inv[8] = m[4] * m[9] * m[15] - m[4] * m[11] * m[13] - m[8] * m[5] * m[15]
+                + m[8] * m[7] * m[13] + m[12] * m[5] * m[11] - m[12] * m[7] * m[9];
+        inv[12] = -m[4] * m[9] * m[14] + m[4] * m[10] * m[13] + m[8] * m[5] * m[14]
+                - m[8] * m[6] * m[13] - m[12] * m[5] * m[10] + m[12] * m[6] * m[9];
+        inv[1] = -m[1] * m[10] * m[15] + m[1] * m[11] * m[14] + m[9] * m[2] * m[15]
+                - m[9] * m[3] * m[14] - m[13] * m[2] * m[11] + m[13] * m[3] * m[10];
+        inv[5] = m[0] * m[10] * m[15] - m[0] * m[11] * m[14] - m[8] * m[2] * m[15]
+                + m[8] * m[3] * m[14] + m[12] * m[2] * m[11] - m[12] * m[3] * m[10];
+        inv[9] = -m[0] * m[9] * m[15] + m[0] * m[11] * m[13] + m[8] * m[1] * m[15]
+                - m[8] * m[3] * m[13] - m[12] * m[1] * m[11] + m[12] * m[3] * m[9];
+        inv[13] = m[0] * m[9] * m[14] - m[0] * m[10] * m[13] - m[8] * m[1] * m[14]
+                + m[8] * m[2] * m[13] + m[12] * m[1] * m[10] - m[12] * m[2] * m[9];
+        inv[2] = m[1] * m[6] * m[15] - m[1] * m[7] * m[14] - m[5] * m[2] * m[15]
+                + m[5] * m[3] * m[14] + m[13] * m[2] * m[7] - m[13] * m[3] * m[6];
+        inv[6] = -m[0] * m[6] * m[15] + m[0] * m[7] * m[14] + m[4] * m[2] * m[15]
+                - m[4] * m[3] * m[14] - m[12] * m[2] * m[7] + m[12] * m[3] * m[6];
+        inv[10] = m[0] * m[5] * m[15] - m[0] * m[7] * m[13] - m[4] * m[1] * m[15]
+                + m[4] * m[3] * m[13] + m[12] * m[1] * m[7] - m[12] * m[3] * m[5];
+        inv[14] = -m[0] * m[5] * m[14] + m[0] * m[6] * m[13] + m[4] * m[1] * m[14]
+                - m[4] * m[2] * m[13] - m[12] * m[1] * m[6] + m[12] * m[2] * m[5];
+        inv[3] = -m[1] * m[6] * m[11] + m[1] * m[7] * m[10] + m[5] * m[2] * m[11]
+                - m[5] * m[3] * m[10] - m[9] * m[2] * m[7] + m[9] * m[3] * m[6];
+        inv[7] = m[0] * m[6] * m[11] - m[0] * m[7] * m[10] - m[4] * m[2] * m[11]
+                + m[4] * m[3] * m[10] + m[8] * m[2] * m[7] - m[8] * m[3] * m[6];
+        inv[11] = -m[0] * m[5] * m[11] + m[0] * m[7] * m[9] + m[4] * m[1] * m[11]
+                - m[4] * m[3] * m[9] - m[8] * m[1] * m[7] + m[8] * m[3] * m[5];
+        inv[15] = m[0] * m[5] * m[10] - m[0] * m[6] * m[9] - m[4] * m[1] * m[10]
+                + m[4] * m[2] * m[9] + m[8] * m[1] * m[6] - m[8] * m[2] * m[5];
+        float det = m[0] * inv[0] + m[1] * inv[4] + m[2] * inv[8] + m[3] * inv[12];
+        if (det == 0.0f || Float.isNaN(det) || Float.isInfinite(det)) {
+            return false;
+        }
+        float scale = 1.0f / det;
+        for (int i = 0; i < 16; i++) {
+            out[i] = inv[i] * scale;
+        }
+        return true;
     }
 
     private void bloomPrepare() {
@@ -2833,6 +3135,10 @@ final class VkTerrainRenderer {
      * place.
      */
     private void writeFrameUniforms(float[] mvp, float[] fogState) {
+        // Kept because the next frame will want to ask this one where a point
+        // was. Copied rather than referenced: the array belongs to the game
+        // side and is refilled every frame.
+        System.arraycopy(mvp, 0, currentMvp, 0, 16);
         long base = frameUniformMapped[activeFrameSlot];
         if (base == 0L) {
             return;
@@ -2920,6 +3226,7 @@ final class VkTerrainRenderer {
         heightFogFalloff = 2.0f / depth;
         showMaterials = "true".equals(System.getProperty("vulkanmod112.showMaterials"));
         showOcclusion = "true".equals(System.getProperty("vulkanmod112.showOcclusion"));
+        showMotion = "true".equals(System.getProperty("vulkanmod112.showMotion"));
         waterReflection = clampPercent(intProperty("vulkanmod112.waterReflection", 0));
         waterWaves = clampPercent(intProperty("vulkanmod112.waterWaves", 0));
         foliageSway = clampPercent(intProperty("vulkanmod112.foliageSway", 0));
@@ -3497,8 +3804,10 @@ final class VkTerrainRenderer {
                 + "uniform sampler2D uColor;\n"
                 + "uniform sampler2D uDepth;\n"
                 + "uniform sampler2D uAo;\n"
+                + "uniform sampler2D uMotion;\n"
                 + "uniform float uAo_on;\n"
                 + "uniform float uAo_only;\n"
+                + "uniform float uMotion_show;\n"
                 + "uniform vec2 uInvSize;\n"
                 + "void main() {\n"
                 + "    vec2 uv = gl_FragCoord.xy * uInvSize;\n"
@@ -3515,6 +3824,13 @@ final class VkTerrainRenderer {
                 // them out: what is left on screen is this effect and nothing
                 // else, and a defect either survives that or was never here.
                 + "    c.rgb = mix(c.rgb * ao, vec3(ao), uAo_only);\n"
+                // Where this pixel was a frame ago, as a colour: red for a step
+                // sideways, green for a step up or down, and a still camera over
+                // a still world is one flat grey. Multiplied up hard, because
+                // the numbers are fractions of a screen and a walking pace is a
+                // few thousandths of one.
+                + "    vec2 step = texture2D(uMotion, uv).rg * 24.0;\n"
+                + "    c.rgb = mix(c.rgb, vec3(0.5 + step.x, 0.5 + step.y, 0.5), uMotion_show);\n"
                 + (writeDepth ? "    gl_FragDepth = texture2D(uDepth, uv).r;\n" : "")
                 + "    gl_FragColor = vec4(c.rgb, 1.0);\n"
                 + "}\n";
@@ -3536,7 +3852,10 @@ final class VkTerrainRenderer {
         GL20C.glUniform1i(GL20C.glGetUniformLocation(program, "uColor"), 0);
         GL20C.glUniform1i(GL20C.glGetUniformLocation(program, "uDepth"), 1);
         GL20C.glUniform1i(GL20C.glGetUniformLocation(program, "uAo"), 2);
+        GL20C.glUniform1i(GL20C.glGetUniformLocation(program, "uMotion"), 3);
         compositeAoUniforms[writeDepth ? 0 : 1] = GL20C.glGetUniformLocation(program, "uAo_on");
+        compositeMotionUniforms[writeDepth ? 0 : 1] =
+                GL20C.glGetUniformLocation(program, "uMotion_show");
         compositeAoOnlyUniforms[writeDepth ? 0 : 1] =
                 GL20C.glGetUniformLocation(program, "uAo_only");
         compositeInvSizeUniforms[writeDepth ? 0 : 1] =

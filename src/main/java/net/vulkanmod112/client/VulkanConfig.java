@@ -330,6 +330,7 @@ public final class VulkanConfig {
      */
     static final int DEF_AO_RADIUS = 2;
     static final boolean DEF_SHOW_OCCLUSION = false;
+    static final boolean DEF_SHOW_MOTION = false;
     static final boolean DEF_FOG = true;
     static final boolean DEF_ZOOM = true;
     /** Stored as an integer so it fits the config and the slider; 4 = quarter FOV. */
@@ -360,6 +361,7 @@ public final class VulkanConfig {
     private static boolean materialTags = DEF_MATERIAL_TAGS;
     private static boolean showMaterials = DEF_SHOW_MATERIALS;
     private static boolean showOcclusion = DEF_SHOW_OCCLUSION;
+    private static boolean showMotion = DEF_SHOW_MOTION;
     private static boolean buildNearOffThread = DEF_BUILD_NEAR_OFF_THREAD;
     private static boolean fastFrustumTest = DEF_FAST_FRUSTUM_TEST;
     private static boolean vulkanTranslucent = DEF_VULKAN_TRANSLUCENT;
@@ -491,6 +493,12 @@ public final class VulkanConfig {
                         + "face by which way it points, so a dark seam in a lit room says nothing "
                         + "until those two are out of the picture. This takes them out. Needs "
                         + "Ambient Occlusion above zero.");
+        showMotion = config.getBoolean("showMotion", CATEGORY_ADVANCED, DEF_SHOW_MOTION,
+                "Paint the world with how far each pixel moved since the last frame instead of "
+                        + "with itself: red for sideways, green for up and down, flat grey where "
+                        + "nothing moved. Nothing on screen depends on this yet — it is what "
+                        + "reflections and any effect that remembers previous frames are built "
+                        + "on, and this is how to see whether it is right.");
         buildNearOffThread = config.getBoolean("buildNearOffThread", CATEGORY_OPTIMIZATION,
                 DEF_BUILD_NEAR_OFF_THREAD,
                 "Queue a chunk that changed close to you for a builder thread instead of "
@@ -758,6 +766,16 @@ public final class VulkanConfig {
     public static void setShowOcclusion(boolean value) {
         showOcclusion = value;
         store(CATEGORY_ADVANCED, "showOcclusion", value);
+        applySystemProperties();
+    }
+
+    public static boolean isShowMotion() {
+        return showMotion;
+    }
+
+    public static void setShowMotion(boolean value) {
+        showMotion = value;
+        store(CATEGORY_ADVANCED, "showMotion", value);
         applySystemProperties();
     }
 
@@ -1114,6 +1132,7 @@ public final class VulkanConfig {
         System.setProperty("vulkanmod112.aoRadius", Integer.toString(aoRadius));
         System.setProperty("vulkanmod112.showMaterials", Boolean.toString(showMaterials));
         System.setProperty("vulkanmod112.showOcclusion", Boolean.toString(showOcclusion));
+        System.setProperty("vulkanmod112.showMotion", Boolean.toString(showMotion));
     }
 
     private static void store(String category, String key, int value) {
