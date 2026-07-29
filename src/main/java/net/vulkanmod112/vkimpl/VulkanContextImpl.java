@@ -12,6 +12,7 @@ import org.lwjgl.vulkan.VK;
 import org.lwjgl.vulkan.VkApplicationInfo;
 import org.lwjgl.vulkan.VkDevice;
 import org.lwjgl.vulkan.VkDeviceCreateInfo;
+import org.lwjgl.vulkan.VkPhysicalDeviceFeatures;
 import org.lwjgl.vulkan.VkDeviceQueueCreateInfo;
 import org.lwjgl.vulkan.VkInstance;
 import org.lwjgl.vulkan.VkInstanceCreateInfo;
@@ -294,9 +295,29 @@ public final class VulkanContextImpl implements VulkanBridge {
                     .queueFamilyIndex(graphicsQueueFamily)
                     .pQueuePriorities(stack.floats(1.0f));
 
+            // Out-of-bounds reads return zero instead of taking the GPU down.
+            //
+            // This renderer mirrors a buffer the game built and indexes a second
+            // buffer beside it by vertex number, and both are addressed through
+            // an indirect draw's vertexOffset rather than through anything this
+            // code can bounds-check at the point of use. Without this, one wrong
+            // offset anywhere in that chain is an MMU fault, and an MMU fault is
+            // not a wrong pixel: the device is lost, every queue with it, and
+            // the session ends — which is what happened, once, with a page
+            // faulted at an address no buffer here reaches.
+            //
+            // It is a core Vulkan feature rather than an extension, so it is
+            // always available. What it costs is a bounds check the hardware was
+            // built to do; what it buys is that the worst case becomes terrain
+            // shaded as though it were made of nothing, which can be seen,
+            // reported and found.
+            VkPhysicalDeviceFeatures features = VkPhysicalDeviceFeatures.calloc(stack)
+                    .robustBufferAccess(true);
+
             VkDeviceCreateInfo deviceInfo = VkDeviceCreateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO)
-                    .pQueueCreateInfos(queueInfo);
+                    .pQueueCreateInfos(queueInfo)
+                    .pEnabledFeatures(features);
 
             this.interopCapable = hasInteropExtensions(stack);
             if (!interopCapable) {
