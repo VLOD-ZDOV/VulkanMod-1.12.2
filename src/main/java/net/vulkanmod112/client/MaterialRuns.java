@@ -298,18 +298,32 @@ public final class MaterialRuns {
         // would move: the stem would come apart at the seam. Doing that
         // properly means knowing how far up its own plant a block is, which is
         // not something a single block state can say.
-        if (material == Material.PLANTS) {
+        // Both, and this is not tidiness. Vanilla's Material is a table of
+        // physical behaviour, not of shape, and in this version ordinary grass,
+        // ferns, dead bushes, real vines and two-block plants are all
+        // Material.VINE together. Reading that name as "a vine" is what left
+        // every patch of grass in the world standing perfectly still while the
+        // flowers beside it moved. What the shape is has to come from the block.
+        if (material == Material.PLANTS || material == Material.VINE) {
             Block block = state.getBlock();
-            boolean tall = block instanceof net.minecraft.block.BlockDoublePlant
-                    || block instanceof net.minecraft.block.BlockReed;
-            return tall ? FOLIAGE : PLANT;
+            boolean still =
+                    // Hangs from above, so the end that must stay put is the
+                    // top one — the opposite rule to everything else here.
+                    block instanceof net.minecraft.block.BlockVine
+                    // Taller than one block: the top of the lower half and the
+                    // bottom of the upper half are at the same height, so only
+                    // the first would move and the stem would come apart.
+                    || block instanceof net.minecraft.block.BlockDoublePlant
+                    || block instanceof net.minecraft.block.BlockReed
+                    // Flat on the water: all four of its corners are level, and
+                    // the rule that moves the top pair would tear it in half.
+                    || block instanceof net.minecraft.block.BlockLilyPad;
+            return still ? FOLIAGE : PLANT;
         }
-        // Leaves and vines: lit as a volume like the rest, but never moved.
-        // Leaves are a full cube, so its top face is four corners at one
-        // height, and the rule that moves the top pair of a vertical quad
-        // would tear that face in half. Vines hang, so the end that should
-        // stay put is the top one — the opposite of everything else here.
-        if (material == Material.LEAVES || material == Material.VINE) {
+        // Leaves: lit as a volume like the rest, never moved. A leaf block is a
+        // full cube, so its top face is four corners at one height, and moving
+        // the top pair of each quad would tear that face apart.
+        if (material == Material.LEAVES) {
             return FOLIAGE;
         }
         if (material == Material.GLASS) {
