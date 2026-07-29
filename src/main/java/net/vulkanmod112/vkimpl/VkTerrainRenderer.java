@@ -352,6 +352,33 @@ final class VkTerrainRenderer {
     private boolean reflectionBindingsDirty;
     /** Diagnostic: paint the water with what the ray found and nothing else. */
     private boolean showReflections;
+    private float nearPlane = 0.05f;
+    private float farPlane = 256.0f;
+
+    /**
+     * The near and far planes of the projection the game is drawing with.
+     *
+     * Read rather than carried, for the same reason the corner shading reads
+     * it: this runs inside the game's own world pass, so it is still set, and
+     * two numbers out of it are all a depth needs to become a distance again.
+     * Left at the last good pair if the matrix is not a perspective one, which
+     * is what the menu background is.
+     */
+    private void readProjectionPlanes() {
+        projectionMatrix.clear();
+        GL11C.glGetFloatv(org.lwjgl.opengl.GL11.GL_PROJECTION_MATRIX, projectionMatrix);
+        float m10 = projectionMatrix.get(10);
+        float m14 = projectionMatrix.get(14);
+        if (m10 == 1.0f || m10 == -1.0f) {
+            return;
+        }
+        float n = m14 / (m10 - 1.0f);
+        float f = m14 / (m10 + 1.0f);
+        if (n > 0.0f && f > n) {
+            nearPlane = n;
+            farPlane = f;
+        }
+    }
     /** How far the water surface is tilted by the wave pattern; 0 is off. */
     private float waterWaves;
     /** How far the top of a plant leans in the wind; 0 is off. */
@@ -3249,6 +3276,13 @@ final class VkTerrainRenderer {
         // rather than taken from the fog colour.
         MemoryUtil.memPutFloat(base + 928, screenReflections);
         MemoryUtil.memPutFloat(base + 932, showReflections ? 1.0f : 0.0f);
+        // The two numbers that turn a stored depth back into a distance. The
+        // reflection needs them to tell "the ray crossed this surface" from
+        // "the ray sailed past a long way behind it", and those two are the
+        // same reading of the depth buffer without them.
+        readProjectionPlanes();
+        MemoryUtil.memPutFloat(base + 936, nearPlane);
+        MemoryUtil.memPutFloat(base + 940, farPlane);
     }
 
     /** The wave lattice from terrain.frag, which this side has to agree with. */

@@ -35,7 +35,8 @@ layout(set = 0, binding = 3, std140) uniform Frame {
     vec4 water;
     // x = how much of a reflection is traced against the scene rather than
     // taken from the fog colour, 0 = off. y = 1 to paint the water with what
-    // the ray found and nothing else.
+    // the ray found and nothing else. zw = the near and far planes, which turn
+    // a stored depth back into a distance.
     vec4 screenMirror;
 } frame;
 
@@ -367,6 +368,24 @@ vec3 foliageNormal(vec3 geometric) {
 // what water at that distance shows anyway.
 const float REFLECT_REACH = 26.0;
 
+// How far behind a surface a ray may be and still be counted as having hit it,
+// in blocks. Without this the reflection finds things standing in front of the
+// water rather than beside it: the ray leaves the surface going away from the
+// eye, but its path across the *screen* passes behind whatever is nearer the
+// camera — the bank you are standing on — and everything is deeper than that,
+// so every ray "hits" it. What was reflected was the near shore, in a mess of
+// alternating hit and miss along the boundary where neighbouring rays disagreed.
+// A crossing is a crossing only if the ray is a little way behind the surface,
+// not a long way past it.
+const float REFLECT_THICKNESS = 1.4;
+
+/** A stored depth back to a distance from the eye. */
+float distanceOf(float depth) {
+    float n = frame.screenMirror.z;
+    float f = frame.screenMirror.w;
+    return 2.0 * n * f / (f + n - (2.0 * depth - 1.0) * (f - n));
+}
+
 vec4 traceReflection(vec3 origin, vec3 dir) {
     // Away from the surface before the first step, or the surface finds itself.
     float t = 0.3;
@@ -405,6 +424,12 @@ vec4 traceReflection(vec3 origin, vec3 dir) {
             // Faded out towards the edges of the picture, because that is where
             // the picture stops knowing. A reflection that ended in a hard line
             // along the edge of the screen would announce how it was made.
+            // Behind it, but by how much. A ray that is a long way past the
+            // surface never touched it — it went by, somewhere out of sight.
+            if (distanceOf(onScreen.z) - distanceOf(textureLod(sceneDepth, onScreen.xy, 0.0).r)
+                    > REFLECT_THICKNESS) {
+                return vec4(0.0);
+            }
             vec2 edge = smoothstep(vec2(0.0), vec2(0.14), onScreen.xy)
                       * smoothstep(vec2(0.0), vec2(0.14), vec2(1.0) - onScreen.xy);
             // And believed less the further it had to go, all the way to
