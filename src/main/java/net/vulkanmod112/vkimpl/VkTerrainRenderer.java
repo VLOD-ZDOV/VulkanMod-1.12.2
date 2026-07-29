@@ -490,6 +490,17 @@ final class VkTerrainRenderer {
     private float bloomStrength;
     /** Set once if anything about the bloom targets fails; never retried. */
     private boolean bloomFailed;
+    /**
+     * Whether the blur targets hold more than eight bits a channel.
+     *
+     * They have to. A blur spreads a small source's light thin, and the far
+     * part of a glow is a very small number — below one step of an eight-bit
+     * channel, which rounds it to nothing. Three passes of that in a row and
+     * the reach is gone entirely while the bright core survives, which is
+     * exactly what was reported: a lamp post lighting its own edges and
+     * nothing beyond them. Dropped to eight bits only if the driver refuses.
+     */
+    private boolean bloomFloat = true;
     private final int[] compositeInvSizeUniforms = {-1, -1};
     /**
      * Copying depth with glBlitFramebuffer instead of writing gl_FragDepth
@@ -1672,22 +1683,40 @@ final class VkTerrainRenderer {
         destroyBloomTargets();
         bloomWidth = wantWidth;
         bloomHeight = wantHeight;
+        if (!buildBloomTargets()) {
+            if (!bloomFloat) {
+                return false;
+            }
+            // A driver without float render targets: the reach will suffer,
+            // which is better than the effect not existing.
+            LOGGER.warn("Bloom targets refused a float format; falling back to eight bits");
+            bloomFloat = false;
+            destroyBloomTargets();
+            bloomWidth = wantWidth;
+            bloomHeight = wantHeight;
+            if (!buildBloomTargets()) {
+                bloomFailed = true;
+                return false;
+            }
+        }
+        try {
+            buildBloomPrograms();
+        } catch (RuntimeException e) {
+            LOGGER.error("Bloom programs failed to build; the effect is off for this session", e);
+            destroyBloomTargets();
+            bloomFailed = true;
+            return false;
+        }
+        return true;
+    }
+
+    private boolean buildBloomTargets() {
         GL11C.glGetError();
         int prevFbo = GL11C.glGetInteger(GL30C.GL_FRAMEBUFFER_BINDING);
         int prevTexture = GL11C.glGetInteger(GL11C.GL_TEXTURE_BINDING_2D);
         for (int i = 0; i < 2; i++) {
             bloomTexture[i] = GL11C.glGenTextures();
-            GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, bloomTexture[i]);
-            GL11C.glTexImage2D(GL11C.GL_TEXTURE_2D, 0, GL11C.GL_RGBA8, bloomWidth, bloomHeight,
-                    0, GL11C.GL_RGBA, GL11C.GL_UNSIGNED_BYTE, (java.nio.ByteBuffer) null);
-            // Linear, and the extract pass leans on it: reading the full-size
-            // frame into a half-size target is a box filter for free.
-            GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_MIN_FILTER, GL11C.GL_LINEAR);
-            GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_MAG_FILTER, GL11C.GL_LINEAR);
-            // Clamped, so a blur tap off the edge repeats the edge instead of
-            // wrapping the glow round to the far side of the screen.
-            GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_WRAP_S, GL12C.GL_CLAMP_TO_EDGE);
-            GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_WRAP_T, GL12C.GL_CLAMP_TO_EDGE);
+            allocateBloomTexture(bloomTexture[i], bloomWidth, bloomHeight);
             bloomFbo[i] = GL30C.glGenFramebuffers();
             GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, bloomFbo[i]);
             GL30C.glFramebufferTexture2D(GL30C.GL_FRAMEBUFFER, GL30C.GL_COLOR_ATTACHMENT0,
@@ -1707,13 +1736,7 @@ final class VkTerrainRenderer {
         bloomNearHeight = maskHeight;
         for (int i = 0; i < 2; i++) {
             bloomNearTexture[i] = GL11C.glGenTextures();
-            GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, bloomNearTexture[i]);
-            GL11C.glTexImage2D(GL11C.GL_TEXTURE_2D, 0, GL11C.GL_RGBA8, bloomNearWidth, bloomNearHeight,
-                    0, GL11C.GL_RGBA, GL11C.GL_UNSIGNED_BYTE, (java.nio.ByteBuffer) null);
-            GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_MIN_FILTER, GL11C.GL_LINEAR);
-            GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_MAG_FILTER, GL11C.GL_LINEAR);
-            GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_WRAP_S, GL12C.GL_CLAMP_TO_EDGE);
-            GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_WRAP_T, GL12C.GL_CLAMP_TO_EDGE);
+            allocateBloomTexture(bloomNearTexture[i], bloomNearWidth, bloomNearHeight);
             bloomNearFbo[i] = GL30C.glGenFramebuffers();
             GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, bloomNearFbo[i]);
             GL30C.glFramebufferTexture2D(GL30C.GL_FRAMEBUFFER, GL30C.GL_COLOR_ATTACHMENT0,
@@ -1728,13 +1751,7 @@ final class VkTerrainRenderer {
             }
         }
         bloomMaskTexture = GL11C.glGenTextures();
-        GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, bloomMaskTexture);
-        GL11C.glTexImage2D(GL11C.GL_TEXTURE_2D, 0, GL11C.GL_RGBA8, maskWidth, maskHeight,
-                0, GL11C.GL_RGBA, GL11C.GL_UNSIGNED_BYTE, (java.nio.ByteBuffer) null);
-        GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_MIN_FILTER, GL11C.GL_LINEAR);
-        GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_MAG_FILTER, GL11C.GL_LINEAR);
-        GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_WRAP_S, GL12C.GL_CLAMP_TO_EDGE);
-        GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_WRAP_T, GL12C.GL_CLAMP_TO_EDGE);
+        allocateBloomTexture(bloomMaskTexture, maskWidth, maskHeight);
         bloomMaskFbo = GL30C.glGenFramebuffers();
         GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, bloomMaskFbo);
         GL30C.glFramebufferTexture2D(GL30C.GL_FRAMEBUFFER, GL30C.GL_COLOR_ATTACHMENT0,
@@ -1749,15 +1766,23 @@ final class VkTerrainRenderer {
         }
         GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo);
         GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, prevTexture);
-        try {
-            buildBloomPrograms();
-        } catch (RuntimeException e) {
-            LOGGER.error("Bloom programs failed to build; the effect is off for this session", e);
-            destroyBloomTargets();
-            bloomFailed = true;
-            return false;
-        }
         return true;
+    }
+
+    /** One blur target; float where the driver allows it. See {@link #bloomFloat}. */
+    private void allocateBloomTexture(int texture, int w, int h) {
+        GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, texture);
+        if (bloomFloat) {
+            GL11C.glTexImage2D(GL11C.GL_TEXTURE_2D, 0, GL30C.GL_RGBA16F, w, h,
+                    0, GL11C.GL_RGBA, GL11C.GL_FLOAT, (java.nio.ByteBuffer) null);
+        } else {
+            GL11C.glTexImage2D(GL11C.GL_TEXTURE_2D, 0, GL11C.GL_RGBA8, w, h,
+                    0, GL11C.GL_RGBA, GL11C.GL_UNSIGNED_BYTE, (java.nio.ByteBuffer) null);
+        }
+        GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_MIN_FILTER, GL11C.GL_LINEAR);
+        GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_MAG_FILTER, GL11C.GL_LINEAR);
+        GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_WRAP_S, GL12C.GL_CLAMP_TO_EDGE);
+        GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_WRAP_T, GL12C.GL_CLAMP_TO_EDGE);
     }
 
     private void destroyBloomTargets() {
@@ -2874,7 +2899,7 @@ final class VkTerrainRenderer {
                         + "uniform float uStrength;\n"
                         + "void main() {\n"
                         + "    vec2 uv = gl_FragCoord.xy * uInvSize;\n"
-                        + "    vec3 glow = texture2D(uSource, uv).rgb + texture2D(uNear, uv).rgb;\n"
+                        + "    vec3 glow = texture2D(uSource, uv).rgb * 2.0 + texture2D(uNear, uv).rgb;\n"
                         // Held back on the surfaces producing it, and this is
                         // not taste. Adding light to a pixel that is already
                         // near the top of an eight-bit channel does not make it
