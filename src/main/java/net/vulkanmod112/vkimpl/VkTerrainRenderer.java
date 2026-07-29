@@ -559,7 +559,10 @@ final class VkTerrainRenderer {
     private static final float AO_BLUR_SPREAD = 2.0f;
     private final java.nio.FloatBuffer projectionMatrix =
             org.lwjgl.BufferUtils.createFloatBuffer(16);
+    private final int[] compositeAoOnlyUniforms = {-1, -1};
     private final int[] compositeInvSizeUniforms = {-1, -1};
+    /** Diagnostic: draw the occlusion on its own instead of applying it. */
+    private boolean showOcclusion;
     /**
      * Copying depth with glBlitFramebuffer instead of writing gl_FragDepth
      * lets the composite quad keep early-Z and skips a per-pixel depth export.
@@ -1522,6 +1525,8 @@ final class VkTerrainRenderer {
 
             GL20C.glUseProgram(compositePrograms[depthBlit ? 1 : 0]);
             GL20C.glUniform1f(compositeAoUniforms[depthBlit ? 1 : 0], ao ? 1.0f : 0.0f);
+            GL20C.glUniform1f(compositeAoOnlyUniforms[depthBlit ? 1 : 0],
+                    ao && showOcclusion ? 1.0f : 0.0f);
             if (ao) {
                 GL13C.glActiveTexture(GL13C.GL_TEXTURE2);
                 GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, aoTexture);
@@ -1783,17 +1788,33 @@ final class VkTerrainRenderer {
                         // how much.
                         + "    vec2 ex = vec2(uInvSize.x, 0.0);\n"
                         + "    vec2 ey = vec2(0.0, uInvSize.y);\n"
-                        + "    float dl = texture2D(uSource, uv - ex).r;\n"
-                        + "    float dr = texture2D(uSource, uv + ex).r;\n"
-                        + "    float dd = texture2D(uSource, uv - ey).r;\n"
-                        + "    float du = texture2D(uSource, uv + ey).r;\n"
+                        + "    float dl1 = texture2D(uSource, uv - ex).r;\n"
+                        + "    float dl2 = texture2D(uSource, uv - 2.0 * ex).r;\n"
+                        + "    float dr1 = texture2D(uSource, uv + ex).r;\n"
+                        + "    float dr2 = texture2D(uSource, uv + 2.0 * ex).r;\n"
+                        + "    float dd1 = texture2D(uSource, uv - ey).r;\n"
+                        + "    float dd2 = texture2D(uSource, uv - 2.0 * ey).r;\n"
+                        + "    float du1 = texture2D(uSource, uv + ey).r;\n"
+                        + "    float du2 = texture2D(uSource, uv + 2.0 * ey).r;\n"
+                        // The side that bends least wins, and it takes two steps
+                        // to know which that is. One step only finds the nearer
+                        // neighbour, which answers a different question: it tells
+                        // a silhouette from flat ground, where the depth jumps.
+                        // Where a wall meets a ceiling nothing jumps — the two
+                        // surfaces touch, and only their slope changes — so the
+                        // nearer neighbour was as likely to be the wrong face as
+                        // the right one. A face carries straight on, so its two
+                        // steps predict where the third would fall; a side that
+                        // crosses the seam does not, and the difference between
+                        // those two predictions is what picks the face.
+                        //
                         // Written so both branches step the same way round the
                         // surface, or the cross product would face backwards
-                        // wherever the near neighbour happened to be behind.
-                        + "    vec3 gx = abs(dr - d) < abs(dl - d)\n"
-                        + "            ? viewPos(uv + ex, dr) - p : p - viewPos(uv - ex, dl);\n"
-                        + "    vec3 gy = abs(du - d) < abs(dd - d)\n"
-                        + "            ? viewPos(uv + ey, du) - p : p - viewPos(uv - ey, dd);\n"
+                        // wherever the straighter side happened to be behind.
+                        + "    vec3 gx = abs(2.0 * dr1 - dr2 - d) < abs(2.0 * dl1 - dl2 - d)\n"
+                        + "            ? viewPos(uv + ex, dr1) - p : p - viewPos(uv - ex, dl1);\n"
+                        + "    vec3 gy = abs(2.0 * du1 - du2 - d) < abs(2.0 * dd1 - dd2 - d)\n"
+                        + "            ? viewPos(uv + ey, du1) - p : p - viewPos(uv - ey, dd1);\n"
                         + "    vec3 n = normalize(cross(gx, gy));\n"
                         + "    if (dot(n, p) > 0.0) n = -n;\n"
                         // A radius in blocks becomes a radius on screen by
@@ -1851,7 +1872,20 @@ final class VkTerrainRenderer {
                         // In front of the surface and near enough to matter. The
                         // bias keeps a flat wall from shading itself, which is
                         // what the depth buffer's own steps would otherwise do.
-                        + "        float front = max(0.0, dot(n, diff / len) - 0.06);\n"
+                        // The bias grows with distance, and that is what the
+                        // banding on floors and ceilings was. Depth is stored in
+                        // twenty-four bits spread unevenly over the view, so a
+                        // reconstructed position carries a step, and the step is
+                        // wider the further away it is. A surface seen edge-on —
+                        // the floor you are standing on, the ceiling over your
+                        // head — spans that whole range across a few pixels of
+                        // screen, so the step lands as stripes running along it,
+                        // while a wall you are facing has every pixel at one
+                        // distance and shows nothing. A fixed bias cannot answer
+                        // both: set for the near end it leaves the far end
+                        // striped, set for the far end it erases the near.
+                        + "        float bias = 0.02 + 0.0004 * (-p.z);\n"
+                        + "        float front = max(0.0, dot(n, diff / len) - bias);\n"
                         // Fading to nothing at the edge of the radius rather
                         // than being cut off there. A sample that counts in full
                         // right up to the edge and then stops is a step in the
@@ -2877,6 +2911,7 @@ final class VkTerrainRenderer {
         int depth = Math.max(1, intProperty("vulkanmod112.heightFogDepth", 24));
         heightFogFalloff = 2.0f / depth;
         showMaterials = "true".equals(System.getProperty("vulkanmod112.showMaterials"));
+        showOcclusion = "true".equals(System.getProperty("vulkanmod112.showOcclusion"));
         waterReflection = clampPercent(intProperty("vulkanmod112.waterReflection", 0));
         waterWaves = clampPercent(intProperty("vulkanmod112.waterWaves", 0));
         foliageSway = clampPercent(intProperty("vulkanmod112.foliageSway", 0));
@@ -3455,6 +3490,7 @@ final class VkTerrainRenderer {
                 + "uniform sampler2D uDepth;\n"
                 + "uniform sampler2D uAo;\n"
                 + "uniform float uAo_on;\n"
+                + "uniform float uAo_only;\n"
                 + "uniform vec2 uInvSize;\n"
                 + "void main() {\n"
                 + "    vec2 uv = gl_FragCoord.xy * uInvSize;\n"
@@ -3463,7 +3499,14 @@ final class VkTerrainRenderer {
                 // How much of its surroundings this point can see. The game
                 // shades a face by which way it points and by nothing else, so
                 // without this an inside corner is lit exactly like open wall.
-                + "    c.rgb *= mix(1.0, texture2D(uAo, uv).r, uAo_on);\n"
+                + "    float ao = mix(1.0, texture2D(uAo, uv).r, uAo_on);\n"
+                // On its own, as flat grey, when asked for. Vanilla darkens the
+                // corners of its own blocks and darkens a face by which way it
+                // points, so a dark seam in a lit room is not evidence of
+                // anything until those two are out of the picture. This takes
+                // them out: what is left on screen is this effect and nothing
+                // else, and a defect either survives that or was never here.
+                + "    c.rgb = mix(c.rgb * ao, vec3(ao), uAo_only);\n"
                 + (writeDepth ? "    gl_FragDepth = texture2D(uDepth, uv).r;\n" : "")
                 + "    gl_FragColor = vec4(c.rgb, 1.0);\n"
                 + "}\n";
@@ -3486,6 +3529,8 @@ final class VkTerrainRenderer {
         GL20C.glUniform1i(GL20C.glGetUniformLocation(program, "uDepth"), 1);
         GL20C.glUniform1i(GL20C.glGetUniformLocation(program, "uAo"), 2);
         compositeAoUniforms[writeDepth ? 0 : 1] = GL20C.glGetUniformLocation(program, "uAo_on");
+        compositeAoOnlyUniforms[writeDepth ? 0 : 1] =
+                GL20C.glGetUniformLocation(program, "uAo_only");
         compositeInvSizeUniforms[writeDepth ? 0 : 1] =
                 GL20C.glGetUniformLocation(program, "uInvSize");
         GL20C.glUseProgram(prev);

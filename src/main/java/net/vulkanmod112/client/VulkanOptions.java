@@ -1274,6 +1274,31 @@ final class VulkanOptions {
                                     public void set(boolean value) {
                                         VulkanConfig.setShowMaterials(value);
                                     }
+                                }),
+                        new VSwitchOption("Show Ambient Occlusion",
+                                "Draw the corner shading on its own, as flat grey, instead of "
+                                        + "applying it to the world. Vanilla darkens the corners "
+                                        + "of its own blocks and darkens a face by which way it "
+                                        + "points — a top at full, sides at 0.8 and 0.6, an "
+                                        + "underside at half — so a dark seam in a lit room is "
+                                        + "not evidence of anything until both of those are out "
+                                        + "of the picture, and neither has any way of announcing "
+                                        + "itself while the world is drawn normally. This takes "
+                                        + "them out: what is left on screen is this effect and "
+                                        + "nothing else, and a defect either survives that or was "
+                                        + "never here to begin with.",
+                                Cost.of(Level.NONE, Level.NONE, Level.NONE),
+                                "Needs Ambient Occlusion above zero.",
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return VulkanConfig.isShowOcclusion();
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        VulkanConfig.setShowOcclusion(value);
+                                    }
                                 })));
     }
 

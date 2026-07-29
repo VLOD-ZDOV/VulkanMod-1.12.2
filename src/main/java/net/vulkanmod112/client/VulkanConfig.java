@@ -329,6 +329,7 @@ public final class VulkanConfig {
      * a smaller reach draws a line along the seam rather than a shadow.
      */
     static final int DEF_AO_RADIUS = 2;
+    static final boolean DEF_SHOW_OCCLUSION = false;
     static final boolean DEF_FOG = true;
     static final boolean DEF_ZOOM = true;
     /** Stored as an integer so it fits the config and the slider; 4 = quarter FOV. */
@@ -358,6 +359,7 @@ public final class VulkanConfig {
     private static boolean fastRebuildNear = DEF_FAST_REBUILD_NEAR;
     private static boolean materialTags = DEF_MATERIAL_TAGS;
     private static boolean showMaterials = DEF_SHOW_MATERIALS;
+    private static boolean showOcclusion = DEF_SHOW_OCCLUSION;
     private static boolean buildNearOffThread = DEF_BUILD_NEAR_OFF_THREAD;
     private static boolean fastFrustumTest = DEF_FAST_FRUSTUM_TEST;
     private static boolean vulkanTranslucent = DEF_VULKAN_TRANSLUCENT;
@@ -483,6 +485,12 @@ public final class VulkanConfig {
                         + "foliage green, glass yellow, lava orange, everything else grey. A "
                         + "diagnostic for the material buffer, which is invisible whether it is "
                         + "right or wrong. Needs Material Tags on and a chunk rebuild to fill in.");
+        showOcclusion = config.getBoolean("showOcclusion", CATEGORY_ADVANCED, DEF_SHOW_OCCLUSION,
+                "Draw the ambient occlusion on its own, as flat grey, instead of applying it to "
+                        + "the world. Vanilla darkens the corners of its own blocks and darkens a "
+                        + "face by which way it points, so a dark seam in a lit room says nothing "
+                        + "until those two are out of the picture. This takes them out. Needs "
+                        + "Ambient Occlusion above zero.");
         buildNearOffThread = config.getBoolean("buildNearOffThread", CATEGORY_OPTIMIZATION,
                 DEF_BUILD_NEAR_OFF_THREAD,
                 "Queue a chunk that changed close to you for a builder thread instead of "
@@ -740,6 +748,16 @@ public final class VulkanConfig {
     public static void setShowMaterials(boolean value) {
         showMaterials = value;
         store(CATEGORY_ADVANCED, "showMaterials", value);
+        applySystemProperties();
+    }
+
+    public static boolean isShowOcclusion() {
+        return showOcclusion;
+    }
+
+    public static void setShowOcclusion(boolean value) {
+        showOcclusion = value;
+        store(CATEGORY_ADVANCED, "showOcclusion", value);
         applySystemProperties();
     }
 
@@ -1095,6 +1113,7 @@ public final class VulkanConfig {
         System.setProperty("vulkanmod112.ambientOcclusion", Integer.toString(ambientOcclusion));
         System.setProperty("vulkanmod112.aoRadius", Integer.toString(aoRadius));
         System.setProperty("vulkanmod112.showMaterials", Boolean.toString(showMaterials));
+        System.setProperty("vulkanmod112.showOcclusion", Boolean.toString(showOcclusion));
     }
 
     private static void store(String category, String key, int value) {
