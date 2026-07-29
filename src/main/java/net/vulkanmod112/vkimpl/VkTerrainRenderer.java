@@ -458,6 +458,21 @@ final class VkTerrainRenderer {
     private final int[] bloomNearFbo = new int[2];
     private int bloomNearWidth;
     private int bloomNearHeight;
+    /**
+     * The third and widest scale, a thirty-second of the screen.
+     *
+     * Reach is bought by shrinking rather than by more passes: a blur of a
+     * fixed number of taps covers four times the frame for every quartering of
+     * the target, and costs a sixteenth as much doing it. Two scales gave a
+     * glow about half a block across, which was visible and still not what a
+     * lamp looks like in the dark; this one reaches a couple of blocks and
+     * carries almost nothing per pixel, which is what the far part of a glow
+     * is.
+     */
+    private final int[] bloomFarTexture = new int[2];
+    private final int[] bloomFarFbo = new int[2];
+    private int bloomFarWidth;
+    private int bloomFarHeight;
     private int bloomWidth;
     private int bloomHeight;
     /**
@@ -1616,7 +1631,24 @@ final class VkTerrainRenderer {
         GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, bloomNearTexture[0]);
         fullscreenQuad();
 
+        GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, bloomFarFbo[0]);
+        GL11C.glViewport(0, 0, bloomFarWidth, bloomFarHeight);
+        GL20C.glUniform2f(bloomDownInvSize, 1.0f / bloomFarWidth, 1.0f / bloomFarHeight);
+        GL20C.glUniform2f(bloomDownTexel, 1.0f / bloomWidth, 1.0f / bloomHeight);
+        GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, bloomTexture[0]);
+        fullscreenQuad();
+
         GL20C.glUseProgram(bloomBlurProgram);
+        GL11C.glViewport(0, 0, bloomFarWidth, bloomFarHeight);
+        GL20C.glUniform2f(bloomBlurInvSize, 1.0f / bloomFarWidth, 1.0f / bloomFarHeight);
+        for (int round = 0; round < 3; round++) {
+            for (int axis = 0; axis < 2; axis++) {
+                GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, bloomFarFbo[1 - axis]);
+                GL20C.glUniform2f(bloomBlurStep, axis == 0 ? 1.0f : 0.0f, axis == 0 ? 0.0f : 1.0f);
+                GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, bloomFarTexture[axis]);
+                fullscreenQuad();
+            }
+        }
         GL11C.glViewport(0, 0, bloomWidth, bloomHeight);
         GL20C.glUniform2f(bloomBlurInvSize, 1.0f / bloomWidth, 1.0f / bloomHeight);
         for (int round = 0; round < 3; round++) {
@@ -1649,6 +1681,8 @@ final class VkTerrainRenderer {
         GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, bloomMaskTexture);
         GL13C.glActiveTexture(GL13C.GL_TEXTURE2);
         GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, bloomNearTexture[0]);
+        GL13C.glActiveTexture(GL13C.GL_TEXTURE3);
+        GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, bloomFarTexture[0]);
         GL13C.glActiveTexture(GL13C.GL_TEXTURE0);
         GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, bloomTexture[0]);
         fullscreenQuad();
@@ -1762,6 +1796,21 @@ final class VkTerrainRenderer {
                 return false;
             }
         }
+        bloomFarWidth = Math.max(1, width / 32);
+        bloomFarHeight = Math.max(1, height / 32);
+        for (int i = 0; i < 2; i++) {
+            bloomFarTexture[i] = GL11C.glGenTextures();
+            allocateBloomTexture(bloomFarTexture[i], bloomFarWidth, bloomFarHeight);
+            bloomFarFbo[i] = GL30C.glGenFramebuffers();
+            GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, bloomFarFbo[i]);
+            GL30C.glFramebufferTexture2D(GL30C.GL_FRAMEBUFFER, GL30C.GL_COLOR_ATTACHMENT0,
+                    GL11C.GL_TEXTURE_2D, bloomFarTexture[i], 0);
+            if (GL30C.glCheckFramebufferStatus(GL30C.GL_FRAMEBUFFER) != GL30C.GL_FRAMEBUFFER_COMPLETE) {
+                GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo);
+                GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, prevTexture);
+                return false;
+            }
+        }
         bloomMaskTexture = GL11C.glGenTextures();
         allocateBloomTexture(bloomMaskTexture, maskWidth, maskHeight);
         bloomMaskFbo = GL30C.glGenFramebuffers();
@@ -1809,6 +1858,14 @@ final class VkTerrainRenderer {
             }
         }
         for (int i = 0; i < 2; i++) {
+            if (bloomFarFbo[i] != 0) {
+                GL30C.glDeleteFramebuffers(bloomFarFbo[i]);
+                bloomFarFbo[i] = 0;
+            }
+            if (bloomFarTexture[i] != 0) {
+                GL11C.glDeleteTextures(bloomFarTexture[i]);
+                bloomFarTexture[i] = 0;
+            }
             if (bloomNearFbo[i] != 0) {
                 GL30C.glDeleteFramebuffers(bloomNearFbo[i]);
                 bloomNearFbo[i] = 0;
@@ -2921,11 +2978,14 @@ final class VkTerrainRenderer {
                 "uniform sampler2D uSource;\n"
                         + "uniform sampler2D uScene;\n"
                         + "uniform sampler2D uNear;\n"
+                        + "uniform sampler2D uFar;\n"
                         + "uniform vec2 uInvSize;\n"
                         + "uniform float uStrength;\n"
                         + "void main() {\n"
                         + "    vec2 uv = gl_FragCoord.xy * uInvSize;\n"
-                        + "    vec3 glow = texture2D(uSource, uv).rgb * 2.0 + texture2D(uNear, uv).rgb;\n"
+                        + "    vec3 glow = texture2D(uNear, uv).rgb\n"
+                        + "             + texture2D(uSource, uv).rgb * 2.0\n"
+                        + "             + texture2D(uFar, uv).rgb * 2.5;\n"
                         // Held back on the surfaces producing it, and this is
                         // not taste. Adding light to a pixel that is already
                         // near the top of an eight-bit channel does not make it
@@ -2941,6 +3001,7 @@ final class VkTerrainRenderer {
         GL20C.glUseProgram(bloomAddProgram);
         GL20C.glUniform1i(GL20C.glGetUniformLocation(bloomAddProgram, "uScene"), 1);
         GL20C.glUniform1i(GL20C.glGetUniformLocation(bloomAddProgram, "uNear"), 2);
+        GL20C.glUniform1i(GL20C.glGetUniformLocation(bloomAddProgram, "uFar"), 3);
         GL20C.glUseProgram(0);
         bloomAddInvSize = GL20C.glGetUniformLocation(bloomAddProgram, "uInvSize");
 
