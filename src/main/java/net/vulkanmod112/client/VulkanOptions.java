@@ -1334,6 +1334,28 @@ final class VulkanOptions {
                                     public void set(boolean value) {
                                         VulkanConfig.setShowMotion(value);
                                     }
+                                }),
+                        new VSwitchOption("Motion Over World",
+                                "Show the motion over a dim ghost of the world instead of over "
+                                        + "black. The two answer different questions and both are "
+                                        + "worth having: black answers whether anything is moving "
+                                        + "at all, which is why standing still has to come out "
+                                        + "empty, and the ghost answers which part of the world "
+                                        + "moved — a wall and the floor beside it move quite "
+                                        + "differently, and against black there is no telling "
+                                        + "which of them was which.",
+                                Cost.of(Level.NONE, Level.NONE, Level.NONE),
+                                "Only does anything while Show Motion Vectors is on.",
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return VulkanConfig.isMotionOverWorld();
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        VulkanConfig.setMotionOverWorld(value);
+                                    }
                                 })));
     }
 

@@ -599,6 +599,9 @@ final class VkTerrainRenderer {
             org.lwjgl.BufferUtils.createFloatBuffer(16);
     private final int[] compositeAoOnlyUniforms = {-1, -1};
     private final int[] compositeMotionUniforms = {-1, -1};
+    private final int[] compositeMotionGhostUniforms = {-1, -1};
+    /** Diagnostic: show the motion over a ghost of the world instead of black. */
+    private boolean motionOverWorld;
     private final int[] compositeInvSizeUniforms = {-1, -1};
     /** Diagnostic: draw the occlusion on its own instead of applying it. */
     private boolean showOcclusion;
@@ -1582,6 +1585,8 @@ final class VkTerrainRenderer {
                     ao && showOcclusion ? 1.0f : 0.0f);
             GL20C.glUniform1f(compositeMotionUniforms[depthBlit ? 1 : 0],
                     motion && showMotion ? 1.0f : 0.0f);
+            GL20C.glUniform1f(compositeMotionGhostUniforms[depthBlit ? 1 : 0],
+                    motionOverWorld ? 1.0f : 0.0f);
             if (motion) {
                 GL13C.glActiveTexture(GL13C.GL_TEXTURE3);
                 GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, motionTexture);
@@ -3227,6 +3232,7 @@ final class VkTerrainRenderer {
         showMaterials = "true".equals(System.getProperty("vulkanmod112.showMaterials"));
         showOcclusion = "true".equals(System.getProperty("vulkanmod112.showOcclusion"));
         showMotion = "true".equals(System.getProperty("vulkanmod112.showMotion"));
+        motionOverWorld = "true".equals(System.getProperty("vulkanmod112.motionOverWorld"));
         waterReflection = clampPercent(intProperty("vulkanmod112.waterReflection", 0));
         waterWaves = clampPercent(intProperty("vulkanmod112.waterWaves", 0));
         foliageSway = clampPercent(intProperty("vulkanmod112.foliageSway", 0));
@@ -3808,6 +3814,7 @@ final class VkTerrainRenderer {
                 + "uniform float uAo_on;\n"
                 + "uniform float uAo_only;\n"
                 + "uniform float uMotion_show;\n"
+                + "uniform float uMotion_ghost;\n"
                 + "uniform vec2 uInvSize;\n"
                 + "void main() {\n"
                 + "    vec2 uv = gl_FragCoord.xy * uInvSize;\n"
@@ -3839,7 +3846,14 @@ final class VkTerrainRenderer {
                 + "    float turn = atan(step.y, step.x) * 0.1591549 + 0.5;\n"
                 + "    vec3 wheel = clamp(abs(fract(turn + vec3(0.0, 0.6666667, 0.3333333))\n"
                 + "                       * 6.0 - 3.0) - 1.0, 0.0, 1.0);\n"
-                + "    c.rgb = mix(c.rgb, wheel * speed, uMotion_show);\n"
+                // Optionally over a ghost of the world rather than over
+                // nothing. Black answers "is any of this moving" and the ghost
+                // answers "which part of it" — a wall and the floor beside it
+                // move differently and on black there is no telling which was
+                // which.
+                + "    float grey = dot(c.rgb, vec3(0.299, 0.587, 0.114)) * 0.28;\n"
+                + "    c.rgb = mix(c.rgb, wheel * speed + vec3(grey) * uMotion_ghost,\n"
+                + "                uMotion_show);\n"
                 + (writeDepth ? "    gl_FragDepth = texture2D(uDepth, uv).r;\n" : "")
                 + "    gl_FragColor = vec4(c.rgb, 1.0);\n"
                 + "}\n";
@@ -3865,6 +3879,8 @@ final class VkTerrainRenderer {
         compositeAoUniforms[writeDepth ? 0 : 1] = GL20C.glGetUniformLocation(program, "uAo_on");
         compositeMotionUniforms[writeDepth ? 0 : 1] =
                 GL20C.glGetUniformLocation(program, "uMotion_show");
+        compositeMotionGhostUniforms[writeDepth ? 0 : 1] =
+                GL20C.glGetUniformLocation(program, "uMotion_ghost");
         compositeAoOnlyUniforms[writeDepth ? 0 : 1] =
                 GL20C.glGetUniformLocation(program, "uAo_only");
         compositeInvSizeUniforms[writeDepth ? 0 : 1] =
