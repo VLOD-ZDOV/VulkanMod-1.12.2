@@ -428,6 +428,7 @@ final class VkTerrainRenderer {
     // Composite GL programs: [0] writes gl_FragDepth, [1] colour only (depth
     // came from the hardware blit). Index with depthBlit ? 1 : 0.
     private final int[] compositePrograms = new int[2];
+    private final int[] compositeAoUniforms = new int[2];
     /**
      * Bloom, done on the OpenGL side because the composite already is.
      *
@@ -491,6 +492,7 @@ final class VkTerrainRenderer {
     private int bloomMaskFbo;
     private int bloomMaskProgram;
     private int bloomMaskInvSize = -1;
+    private int bloomMaskAoUniform = -1;
     private int bloomExtractTexel = -1;
     private int bloomDownProgram;
     private int bloomDownInvSize = -1;
@@ -520,6 +522,37 @@ final class VkTerrainRenderer {
      * nothing beyond them. Dropped to eight bits only if the driver refuses.
      */
     private boolean bloomFloat = true;
+
+    /**
+     * Ambient occlusion, worked out from the depth this renderer already has.
+     *
+     * The game shades a block face by which way it points and by nothing else,
+     * so an inside corner is lit exactly like an open wall and a room has no
+     * shape to it. What is missing is how much of the sky a point can actually
+     * see, and that is a question about the neighbourhood rather than about the
+     * surface — which means the depth buffer answers it, and the depth buffer
+     * is already here as a texture.
+     *
+     * Half resolution and blurred, because the answer is low-frequency: it is
+     * about corners and crevices, not about texels, and sampling it densely
+     * would buy noise rather than detail.
+     */
+    private int aoTexture;
+    private int aoFbo;
+    private int aoBlurTexture;
+    private int aoBlurFbo;
+    private int aoProgram;
+    private int aoInvSize = -1;
+    private int aoProjUniform = -1;
+    private int aoRadiusUniform = -1;
+    private int aoStrengthUniform = -1;
+    private int aoWidth;
+    private int aoHeight;
+    private float aoStrength;
+    private float aoRadius = 0.75f;
+    private boolean aoFailed;
+    private final java.nio.FloatBuffer projectionMatrix =
+            org.lwjgl.BufferUtils.createFloatBuffer(16);
     private final int[] compositeInvSizeUniforms = {-1, -1};
     /**
      * Copying depth with glBlitFramebuffer instead of writing gl_FragDepth
@@ -1461,7 +1494,16 @@ final class VkTerrainRenderer {
                 blitDepth();
             }
 
+            // Before the colour goes into the frame: what the frame receives is
+            // the terrain already darkened where it cannot see the sky.
+            boolean ao = aoStrength > 0.0f && !aoFailed && aoPass();
+
             GL20C.glUseProgram(compositePrograms[depthBlit ? 1 : 0]);
+            GL20C.glUniform1f(compositeAoUniforms[depthBlit ? 1 : 0], ao ? 1.0f : 0.0f);
+            if (ao) {
+                GL13C.glActiveTexture(GL13C.GL_TEXTURE2);
+                GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, aoTexture);
+            }
             GL13C.glActiveTexture(GL13C.GL_TEXTURE0);
             GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, glColorTexture);
             GL13C.glActiveTexture(GL13C.GL_TEXTURE1);
@@ -1536,6 +1578,216 @@ final class VkTerrainRenderer {
      * Half resolution. Both uses are comparisons rather than colour, and a
      * boundary two pixels soft is better than a hard one for either of them.
      */
+    /**
+     * How much of its surroundings each terrain pixel can see, into a texture.
+     *
+     * Everything it needs is in the depth buffer. A view-space position comes
+     * back from a depth and the two numbers the projection is made of; the
+     * surface's direction comes from how that position changes across the
+     * screen, which is exact here because every face of a block is flat. Then
+     * eight neighbours are asked whether they stand in front of the surface,
+     * and how much they do is the answer.
+     *
+     * Run inside the composite, while the depth image is still this renderer's
+     * to read, and before the colour is drawn into the frame, because what the
+     * frame receives is the colour already darkened.
+     */
+    private boolean aoPass() {
+        if (!ensureAoTargets()) {
+            return false;
+        }
+        // The projection the world is being drawn with, read rather than
+        // carried: this runs inside the game's own world pass, so it is still
+        // set, and the four numbers wanted from it are all that a depth needs
+        // to become a position again.
+        projectionMatrix.clear();
+        org.lwjgl.opengl.GL11.glGetFloat(org.lwjgl.opengl.GL11.GL_PROJECTION_MATRIX, projectionMatrix);
+        float m0 = projectionMatrix.get(0);
+        float m5 = projectionMatrix.get(5);
+        float m10 = projectionMatrix.get(10);
+        float m14 = projectionMatrix.get(14);
+        if (m0 == 0.0f || m5 == 0.0f || m10 == 1.0f || m10 == -1.0f) {
+            return false; // not a perspective projection; nothing to reconstruct
+        }
+        float near = m14 / (m10 - 1.0f);
+        float far = m14 / (m10 + 1.0f);
+        if (!(near > 0.0f) || !(far > near)) {
+            return false;
+        }
+
+        int prevFbo = GL11C.glGetInteger(GL30C.GL_FRAMEBUFFER_BINDING);
+        org.lwjgl.opengl.GL11.glPushAttrib(org.lwjgl.opengl.GL11.GL_VIEWPORT_BIT);
+        GL11C.glDisable(GL11C.GL_DEPTH_TEST);
+        GL11C.glDepthMask(false);
+        GL11C.glDisable(GL11C.GL_BLEND);
+
+        GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, aoFbo);
+        GL11C.glViewport(0, 0, aoWidth, aoHeight);
+        GL20C.glUseProgram(aoProgram);
+        GL20C.glUniform2f(aoInvSize, 1.0f / aoWidth, 1.0f / aoHeight);
+        GL20C.glUniform4f(aoProjUniform, 1.0f / m0, 1.0f / m5, near, far);
+        GL20C.glUniform1f(aoRadiusUniform, aoRadius);
+        GL20C.glUniform1f(aoStrengthUniform, aoStrength);
+        GL13C.glActiveTexture(GL13C.GL_TEXTURE0);
+        GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, glDepthTexture);
+        fullscreenQuad();
+
+        // Smoothed, because eight samples of a neighbourhood is a noisy answer
+        // to a question whose answer is smooth.
+        GL20C.glUseProgram(bloomBlurProgram);
+        GL20C.glUniform2f(bloomBlurInvSize, 1.0f / aoWidth, 1.0f / aoHeight);
+        GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, aoBlurFbo);
+        GL20C.glUniform2f(bloomBlurStep, 1.0f, 0.0f);
+        GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, aoTexture);
+        fullscreenQuad();
+        GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, aoFbo);
+        GL20C.glUniform2f(bloomBlurStep, 0.0f, 1.0f);
+        GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, aoBlurTexture);
+        fullscreenQuad();
+
+        GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo);
+        org.lwjgl.opengl.GL11.glPopAttrib();
+        return true;
+    }
+
+    private boolean ensureAoTargets() {
+        int wantWidth = Math.max(1, width / 2);
+        int wantHeight = Math.max(1, height / 2);
+        if (aoFbo != 0 && wantWidth == aoWidth && wantHeight == aoHeight) {
+            return true;
+        }
+        destroyAoTargets();
+        aoWidth = wantWidth;
+        aoHeight = wantHeight;
+        int prevFbo = GL11C.glGetInteger(GL30C.GL_FRAMEBUFFER_BINDING);
+        int prevTexture = GL11C.glGetInteger(GL11C.GL_TEXTURE_BINDING_2D);
+        aoTexture = GL11C.glGenTextures();
+        allocateBloomTexture(aoTexture, aoWidth, aoHeight);
+        aoFbo = GL30C.glGenFramebuffers();
+        GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, aoFbo);
+        GL30C.glFramebufferTexture2D(GL30C.GL_FRAMEBUFFER, GL30C.GL_COLOR_ATTACHMENT0,
+                GL11C.GL_TEXTURE_2D, aoTexture, 0);
+        boolean ok = GL30C.glCheckFramebufferStatus(GL30C.GL_FRAMEBUFFER)
+                == GL30C.GL_FRAMEBUFFER_COMPLETE;
+        aoBlurTexture = GL11C.glGenTextures();
+        allocateBloomTexture(aoBlurTexture, aoWidth, aoHeight);
+        aoBlurFbo = GL30C.glGenFramebuffers();
+        GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, aoBlurFbo);
+        GL30C.glFramebufferTexture2D(GL30C.GL_FRAMEBUFFER, GL30C.GL_COLOR_ATTACHMENT0,
+                GL11C.GL_TEXTURE_2D, aoBlurTexture, 0);
+        ok &= GL30C.glCheckFramebufferStatus(GL30C.GL_FRAMEBUFFER)
+                == GL30C.GL_FRAMEBUFFER_COMPLETE;
+        GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo);
+        GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, prevTexture);
+        if (!ok) {
+            LOGGER.error("Ambient occlusion targets incomplete; the effect is off for this session");
+            destroyAoTargets();
+            aoFailed = true;
+            return false;
+        }
+        try {
+            buildAoProgram();
+        } catch (RuntimeException e) {
+            LOGGER.error("Ambient occlusion program failed to build; off for this session", e);
+            destroyAoTargets();
+            aoFailed = true;
+            return false;
+        }
+        return true;
+    }
+
+    private void buildAoProgram() {
+        if (aoProgram != 0) {
+            return;
+        }
+        aoProgram = buildQuadProgram(
+                "uniform sampler2D uSource;\n"
+                        + "uniform vec2 uInvSize;\n"
+                        // x, y: how wide the view is at unit distance; z, w: the
+                        // near and far planes. Everything else follows.
+                        + "uniform vec4 uProj;\n"
+                        + "uniform float uRadius;\n"
+                        + "uniform float uStrength;\n"
+                        + "float linearZ(float d) {\n"
+                        + "    return 2.0 * uProj.z * uProj.w\n"
+                        + "         / (uProj.w + uProj.z - (2.0 * d - 1.0) * (uProj.w - uProj.z));\n"
+                        + "}\n"
+                        + "vec3 viewPos(vec2 uv) {\n"
+                        + "    float z = linearZ(texture2D(uSource, uv).r);\n"
+                        + "    vec2 ndc = uv * 2.0 - 1.0;\n"
+                        + "    return vec3(ndc.x * uProj.x * z, ndc.y * uProj.y * z, -z);\n"
+                        + "}\n"
+                        + "void main() {\n"
+                        + "    vec2 uv = gl_FragCoord.xy * uInvSize;\n"
+                        + "    float d = texture2D(uSource, uv).r;\n"
+                        // Nothing was drawn here, so there is nothing to shade.
+                        + "    if (d >= 0.9999) { gl_FragColor = vec4(1.0); return; }\n"
+                        + "    vec3 p = viewPos(uv);\n"
+                        // Exact rather than approximate: every face of a block is
+                        // flat, so the cross product of the two screen-space
+                        // derivatives is the face, not an estimate of it.
+                        + "    vec3 n = normalize(cross(dFdx(p), dFdy(p)));\n"
+                        + "    if (dot(n, p) > 0.0) n = -n;\n"
+                        // A radius in blocks becomes a radius on screen by
+                        // dividing by distance, which is the whole of
+                        // perspective.
+                        + "    float scale = uRadius / (uProj.x * 2.0 * max(-p.z, 0.1));\n"
+                        // Turned by a different angle at every pixel, so what
+                        // eight samples cannot cover comes out as noise the blur
+                        // removes rather than as eight rings nothing removes.
+                        + "    float a = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) * 6.2831853;\n"
+                        + "    vec2 rot = vec2(cos(a), sin(a));\n"
+                        + "    float occlusion = 0.0;\n"
+                        + "    for (int i = 0; i < 8; i++) {\n"
+                        + "        float t = float(i) * 0.7853982;\n"
+                        + "        vec2 dir = vec2(cos(t), sin(t));\n"
+                        + "        dir = vec2(dir.x * rot.x - dir.y * rot.y, dir.x * rot.y + dir.y * rot.x);\n"
+                        // Rings rather than a disc: samples spread out with the
+                        // index so the near neighbourhood is not oversampled.
+                        + "        float step = 0.35 + 0.65 * float(i) / 7.0;\n"
+                        + "        vec2 suv = uv + dir * scale * step;\n"
+                        + "        float sd = texture2D(uSource, suv).r;\n"
+                        + "        if (sd >= 0.9999) continue;\n"
+                        + "        vec3 q = viewPos(suv);\n"
+                        + "        vec3 diff = q - p;\n"
+                        + "        float len = length(diff);\n"
+                        + "        if (len < 0.0001) continue;\n"
+                        // In front of the surface and near enough to matter. The
+                        // bias keeps a flat wall from shading itself, which is
+                        // what the depth buffer's own steps would otherwise do.
+                        + "        float front = max(0.0, dot(n, diff / len) - 0.06);\n"
+                        + "        occlusion += front * clamp(uRadius / len, 0.0, 1.0);\n"
+                        + "    }\n"
+                        + "    float ao = 1.0 - uStrength * occlusion * 0.18;\n"
+                        + "    gl_FragColor = vec4(clamp(ao, 0.0, 1.0));\n"
+                        + "}\n");
+        aoInvSize = GL20C.glGetUniformLocation(aoProgram, "uInvSize");
+        aoProjUniform = GL20C.glGetUniformLocation(aoProgram, "uProj");
+        aoRadiusUniform = GL20C.glGetUniformLocation(aoProgram, "uRadius");
+        aoStrengthUniform = GL20C.glGetUniformLocation(aoProgram, "uStrength");
+    }
+
+    private void destroyAoTargets() {
+        if (aoFbo != 0) {
+            GL30C.glDeleteFramebuffers(aoFbo);
+            aoFbo = 0;
+        }
+        if (aoBlurFbo != 0) {
+            GL30C.glDeleteFramebuffers(aoBlurFbo);
+            aoBlurFbo = 0;
+        }
+        if (aoTexture != 0) {
+            GL11C.glDeleteTextures(aoTexture);
+            aoTexture = 0;
+        }
+        if (aoBlurTexture != 0) {
+            GL11C.glDeleteTextures(aoBlurTexture);
+            aoBlurTexture = 0;
+        }
+        aoWidth = 0;
+        aoHeight = 0;
+    }
+
     private void bloomPrepare() {
         if (!ensureBloomTargets()) {
             return;
@@ -1550,6 +1802,12 @@ final class VkTerrainRenderer {
         GL11C.glViewport(0, 0, Math.max(1, width / 2), Math.max(1, height / 2));
         GL20C.glUseProgram(bloomMaskProgram);
         GL20C.glUniform2f(bloomMaskInvSize, 2.0f / width, 2.0f / height);
+        // The reference has to be what the frame actually received, occlusion
+        // and all, or the comparison that decides whether a light is covered
+        // would fail everywhere and the glow would vanish.
+        GL20C.glUniform1f(bloomMaskAoUniform, aoStrength > 0.0f && !aoFailed ? 1.0f : 0.0f);
+        GL13C.glActiveTexture(GL13C.GL_TEXTURE1);
+        GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, aoTexture);
         GL13C.glActiveTexture(GL13C.GL_TEXTURE0);
         GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, glColorTexture);
         fullscreenQuad();
@@ -2512,6 +2770,7 @@ final class VkTerrainRenderer {
         waterWaves = clampPercent(intProperty("vulkanmod112.waterWaves", 0));
         foliageSway = clampPercent(intProperty("vulkanmod112.foliageSway", 0));
         bloomStrength = clampPercent(intProperty("vulkanmod112.bloom", 0));
+        aoStrength = clampPercent(intProperty("vulkanmod112.ambientOcclusion", 0));
     }
 
     private static float clampPercent(int value) {
@@ -3009,6 +3268,8 @@ final class VkTerrainRenderer {
         // target has been handed back.
         bloomMaskProgram = buildQuadProgram(
                 "uniform sampler2D uSource;\n"
+                        + "uniform sampler2D uAo;\n"
+                        + "uniform float uAo_on;\n"
                         + "uniform vec2 uInvSize;\n"
                         + "void main() {\n"
                         + "    vec2 uv = gl_FragCoord.xy * uInvSize;\n"
@@ -3022,9 +3283,14 @@ final class VkTerrainRenderer {
                         // Colour and mask together in one texture: the colour
                         // to recognise the terrain again in the finished frame,
                         // the mask to say which of it is a light.
+                        + "    c.rgb *= mix(1.0, texture2D(uAo, uv).r, uAo_on);\n"
                         + "    gl_FragColor = vec4(c.rgb, clamp((c.a - 0.5) * 2.0, 0.0, 1.0));\n"
                         + "}\n");
         bloomMaskInvSize = GL20C.glGetUniformLocation(bloomMaskProgram, "uInvSize");
+        bloomMaskAoUniform = GL20C.glGetUniformLocation(bloomMaskProgram, "uAo_on");
+        GL20C.glUseProgram(bloomMaskProgram);
+        GL20C.glUniform1i(GL20C.glGetUniformLocation(bloomMaskProgram, "uAo"), 1);
+        GL20C.glUseProgram(0);
 
         // Four to one on each axis, as four bilinear reads of a texture this
         // renderer owns and filters linearly — so each read is already the
@@ -3075,11 +3341,17 @@ final class VkTerrainRenderer {
         String fragSrc = "#version 120\n"
                 + "uniform sampler2D uColor;\n"
                 + "uniform sampler2D uDepth;\n"
+                + "uniform sampler2D uAo;\n"
+                + "uniform float uAo_on;\n"
                 + "uniform vec2 uInvSize;\n"
                 + "void main() {\n"
                 + "    vec2 uv = gl_FragCoord.xy * uInvSize;\n"
                 + "    vec4 c = texture2D(uColor, uv);\n"
                 + "    if (c.a < 0.004) discard;\n"
+                // How much of its surroundings this point can see. The game
+                // shades a face by which way it points and by nothing else, so
+                // without this an inside corner is lit exactly like open wall.
+                + "    c.rgb *= mix(1.0, texture2D(uAo, uv).r, uAo_on);\n"
                 + (writeDepth ? "    gl_FragDepth = texture2D(uDepth, uv).r;\n" : "")
                 + "    gl_FragColor = vec4(c.rgb, 1.0);\n"
                 + "}\n";
@@ -3100,6 +3372,8 @@ final class VkTerrainRenderer {
         GL20C.glUseProgram(program);
         GL20C.glUniform1i(GL20C.glGetUniformLocation(program, "uColor"), 0);
         GL20C.glUniform1i(GL20C.glGetUniformLocation(program, "uDepth"), 1);
+        GL20C.glUniform1i(GL20C.glGetUniformLocation(program, "uAo"), 2);
+        compositeAoUniforms[writeDepth ? 0 : 1] = GL20C.glGetUniformLocation(program, "uAo_on");
         compositeInvSizeUniforms[writeDepth ? 0 : 1] =
                 GL20C.glGetUniformLocation(program, "uInvSize");
         GL20C.glUseProgram(prev);
@@ -3661,8 +3935,9 @@ final class VkTerrainRenderer {
         }
         vkDeviceWaitIdle(device());
         if (glColorTexture != -1 && glContextCurrent()) {
-            // Sized from this target, so it goes with it.
+            // Sized from this target, so they go with it.
             destroyBloomTargets();
+            destroyAoTargets();
             GL11C.glDeleteTextures(glColorTexture);
             GL11C.glDeleteTextures(glDepthTexture);
             EXTMemoryObject.glDeleteMemoryObjectsEXT(glColorMemoryObject);

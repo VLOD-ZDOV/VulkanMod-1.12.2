@@ -314,6 +314,15 @@ public final class VulkanConfig {
      * a burning creature does not.
      */
     static final int DEF_BLOOM = 0;
+    /**
+     * How much a point is darkened by how little of its surroundings it can see.
+     *
+     * Off by default. The game shades a block face by which way it points and
+     * by nothing else, so an inside corner is lit exactly like an open wall.
+     * Worked out from the depth buffer this renderer already has, so it costs
+     * no geometry and no second pass over the world.
+     */
+    static final int DEF_AMBIENT_OCCLUSION = 0;
     static final boolean DEF_FOG = true;
     static final boolean DEF_ZOOM = true;
     /** Stored as an integer so it fits the config and the slider; 4 = quarter FOV. */
@@ -359,6 +368,7 @@ public final class VulkanConfig {
     private static int waterWaves = DEF_WATER_WAVES;
     private static int foliageSway = DEF_FOLIAGE_SWAY;
     private static int bloom = DEF_BLOOM;
+    private static int ambientOcclusion = DEF_AMBIENT_OCCLUSION;
     private static boolean fogEnabled = DEF_FOG;
     private static boolean zoomEnabled = DEF_ZOOM;
     private static int zoomFactor = DEF_ZOOM_FACTOR;
@@ -579,6 +589,13 @@ public final class VulkanConfig {
                         + "0 is off. Lava, torches, glowstone and any modded block that gives off "
                         + "light. Terrain only: this mod's frame is finished before the game draws "
                         + "entities and particles, so a burning creature does not glow.");
+        ambientOcclusion = config.getInt("ambientOcclusion", CATEGORY_GENERAL,
+                DEF_AMBIENT_OCCLUSION, 0, 100,
+                "How much a point is darkened by how little of its surroundings it can see, in "
+                        + "percent. 0 is off. Corners, the undersides of overhangs and the join "
+                        + "between a wall and a floor pick up shadow the game has no way to "
+                        + "express. Terrain only, and worked out from the depth buffer this "
+                        + "renderer already has.");
         fogEnabled = config.getBoolean("fog", CATEGORY_GENERAL, DEF_FOG,
                 "Fade Vulkan terrain into the distance the way the rest of the scene already does. "
                         + "Off leaves the world ending in a hard edge, which is a little faster.");
@@ -633,6 +650,7 @@ public final class VulkanConfig {
         setWaterWaves(DEF_WATER_WAVES);
         setFoliageSway(DEF_FOLIAGE_SWAY);
         setBloom(DEF_BLOOM);
+        setAmbientOcclusion(DEF_AMBIENT_OCCLUSION);
         setFogEnabled(DEF_FOG);
         setZoomEnabled(DEF_ZOOM);
         setZoomFactor(DEF_ZOOM_FACTOR);
@@ -805,6 +823,16 @@ public final class VulkanConfig {
     public static void setWaterReflection(int value) {
         waterReflection = value;
         store(CATEGORY_GENERAL, "waterReflection", value);
+        applySystemProperties();
+    }
+
+    public static int getAmbientOcclusion() {
+        return ambientOcclusion;
+    }
+
+    public static void setAmbientOcclusion(int value) {
+        ambientOcclusion = value;
+        store(CATEGORY_GENERAL, "ambientOcclusion", value);
         applySystemProperties();
     }
 
@@ -1042,6 +1070,7 @@ public final class VulkanConfig {
         System.setProperty("vulkanmod112.waterWaves", Integer.toString(waterWaves));
         System.setProperty("vulkanmod112.foliageSway", Integer.toString(foliageSway));
         System.setProperty("vulkanmod112.bloom", Integer.toString(bloom));
+        System.setProperty("vulkanmod112.ambientOcclusion", Integer.toString(ambientOcclusion));
         System.setProperty("vulkanmod112.showMaterials", Boolean.toString(showMaterials));
     }
 

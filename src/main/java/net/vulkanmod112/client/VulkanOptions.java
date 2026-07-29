@@ -427,6 +427,35 @@ final class VulkanOptions {
                                         VulkanConfig.setWaterReflection(value);
                                     }
                                 }),
+                        new VRangeOption("Ambient Occlusion",
+                                "How much a point is darkened by how little of its surroundings it "
+                                        + "can see. The game shades a face by which way it points "
+                                        + "and by nothing else, so an inside corner is lit exactly "
+                                        + "like an open wall and a room has no shape to it. What is "
+                                        + "missing is a question about the neighbourhood rather "
+                                        + "than about the surface, which is what a depth buffer "
+                                        + "answers — and the depth buffer is already here, so this "
+                                        + "costs no geometry and no second pass over the world. "
+                                        + "Eight neighbours are asked whether they stand in front "
+                                        + "of the surface, at half resolution and blurred, because "
+                                        + "the answer is about corners and crevices rather than "
+                                        + "about texels. Terrain only: entities are drawn by the "
+                                        + "game after this renderer has finished, so a creature "
+                                        + "casts no shadow into the corner it stands in.",
+                                Cost.of(Level.NONE, Level.LOW, Level.LOW),
+                                "Needs Vulkan Terrain on.",
+                                0, 100, 5, "%", "OFF",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getAmbientOcclusion();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setAmbientOcclusion(value);
+                                    }
+                                }),
                         new VRangeOption("Bloom",
                                 "How much light spills off a glowing surface into the pixels "
                                         + "around it. Lava, torches, glowstone and any modded "
