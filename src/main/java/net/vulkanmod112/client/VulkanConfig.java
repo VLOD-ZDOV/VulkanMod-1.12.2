@@ -333,6 +333,7 @@ public final class VulkanConfig {
     static final boolean DEF_SHOW_OCCLUSION = false;
     static final boolean DEF_SHOW_MOTION = false;
     static final boolean DEF_MOTION_OVER_WORLD = false;
+    static final boolean DEF_SHOW_REFLECTIONS = false;
     static final boolean DEF_FOG = true;
     static final boolean DEF_ZOOM = true;
     /** Stored as an integer so it fits the config and the slider; 4 = quarter FOV. */
@@ -365,6 +366,7 @@ public final class VulkanConfig {
     private static boolean showOcclusion = DEF_SHOW_OCCLUSION;
     private static boolean showMotion = DEF_SHOW_MOTION;
     private static boolean motionOverWorld = DEF_MOTION_OVER_WORLD;
+    private static boolean showReflections = DEF_SHOW_REFLECTIONS;
     private static boolean buildNearOffThread = DEF_BUILD_NEAR_OFF_THREAD;
     private static boolean fastFrustumTest = DEF_FAST_FRUSTUM_TEST;
     private static boolean vulkanTranslucent = DEF_VULKAN_TRANSLUCENT;
@@ -508,6 +510,11 @@ public final class VulkanConfig {
                 "Show the motion over a dim ghost of the world instead of over black. Black "
                         + "answers whether anything is moving; the ghost answers which part of "
                         + "it is.");
+        showReflections = config.getBoolean("showReflections", CATEGORY_ADVANCED,
+                DEF_SHOW_REFLECTIONS,
+                "Paint the water with what the reflected ray found and nothing else: no fresnel "
+                        + "deciding how much of it to show, no water colour under it, deep blue "
+                        + "wherever the ray found nothing. Needs Screen Reflections above zero.");
         buildNearOffThread = config.getBoolean("buildNearOffThread", CATEGORY_OPTIMIZATION,
                 DEF_BUILD_NEAR_OFF_THREAD,
                 "Queue a chunk that changed close to you for a builder thread instead of "
@@ -804,6 +811,16 @@ public final class VulkanConfig {
     public static void setMotionOverWorld(boolean value) {
         motionOverWorld = value;
         store(CATEGORY_ADVANCED, "motionOverWorld", value);
+        applySystemProperties();
+    }
+
+    public static boolean isShowReflections() {
+        return showReflections;
+    }
+
+    public static void setShowReflections(boolean value) {
+        showReflections = value;
+        store(CATEGORY_ADVANCED, "showReflections", value);
         applySystemProperties();
     }
 
@@ -1173,6 +1190,7 @@ public final class VulkanConfig {
         System.setProperty("vulkanmod112.showOcclusion", Boolean.toString(showOcclusion));
         System.setProperty("vulkanmod112.showMotion", Boolean.toString(showMotion));
         System.setProperty("vulkanmod112.motionOverWorld", Boolean.toString(motionOverWorld));
+        System.setProperty("vulkanmod112.showReflections", Boolean.toString(showReflections));
     }
 
     private static void store(String category, String key, int value) {

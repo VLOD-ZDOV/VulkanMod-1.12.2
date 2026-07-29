@@ -1393,6 +1393,32 @@ final class VulkanOptions {
                                     public void set(boolean value) {
                                         VulkanConfig.setMotionOverWorld(value);
                                     }
+                                }),
+                        new VSwitchOption("Show Reflections",
+                                "Paint the water with what the reflected ray found and nothing "
+                                        + "else: no fresnel deciding how much of it to show, no "
+                                        + "water colour underneath, and deep blue wherever the ray "
+                                        + "found nothing at all. A reflection on water is stretched "
+                                        + "even when it is perfectly right — an eye a metre or two "
+                                        + "above the surface sends the reflected ray off at a very "
+                                        + "shallow angle, so it travels a long way before it "
+                                        + "reaches anything, and a tree on the far bank arrives as "
+                                        + "a long streak rather than a tree. Which means the "
+                                        + "question of whether this is working cannot be settled "
+                                        + "by how it looks over the water, and this is how to "
+                                        + "settle it instead.",
+                                Cost.of(Level.NONE, Level.NONE, Level.NONE),
+                                "Needs Screen Reflections above zero.",
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return VulkanConfig.isShowReflections();
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        VulkanConfig.setShowReflections(value);
+                                    }
                                 })));
     }
 

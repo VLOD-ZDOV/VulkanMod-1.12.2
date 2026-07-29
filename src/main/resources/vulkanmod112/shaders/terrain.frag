@@ -34,7 +34,8 @@ layout(set = 0, binding = 3, std140) uniform Frame {
     // modulo the wave lattice. See waveGradient for what that is for.
     vec4 water;
     // x = how much of a reflection is traced against the scene rather than
-    // taken from the fog colour, 0 = off.
+    // taken from the fog colour, 0 = off. y = 1 to paint the water with what
+    // the ray found and nothing else.
     vec4 screenMirror;
 } frame;
 
@@ -628,17 +629,32 @@ void main() {
             // What the surface shows: the horizon by default, and whatever is
             // actually standing there when the ray finds it.
             vec3 mirrored = frame.fogColor.rgb;
-            if (frame.screenMirror.x > 0.0) {
+            // Only the top of the water reflects. The sides of a water block
+            // are the walls of the channel it runs in, and a ray sent off one
+            // of those travels along the surface rather than away from it —
+            // which is where a good part of the smearing was coming from. The
+            // waves have always known this; the mirror did not.
+            if (frame.screenMirror.x > 0.0 && normal.y > 0.9) {
                 vec3 toEye = normalize(-vRelative);
                 vec3 ray = reflect(-toEye, mirrorNormal);
                 // A ray heading back towards the eye is looking at the side of
                 // the world that was never drawn. Faded rather than cut, so a
                 // surface does not change its mind along a line.
                 float outward = clamp(1.0 - dot(ray, toEye) * 2.5, 0.0, 1.0);
-                if (outward > 0.0) {
-                    vec4 found = traceReflection(vRelative, ray);
-                    mirrored = mix(mirrored, found.rgb,
-                                   found.a * outward * frame.screenMirror.x);
+                vec4 found = outward > 0.0 ? traceReflection(vRelative, ray)
+                                           : vec4(0.0);
+                mirrored = mix(mirrored, found.rgb,
+                               found.a * outward * frame.screenMirror.x);
+                // Shown on its own when asked. What the ray found, at full
+                // strength, with no fresnel deciding how much of it to use and
+                // no water colour under it — deep blue wherever it found
+                // nothing at all. Three rounds have now been spent describing
+                // this to each other in words, which is two more than a
+                // picture costs.
+                if (frame.screenMirror.y > 0.5) {
+                    shaded = found.a > 0.0 ? found.rgb : vec3(0.02, 0.02, 0.22);
+                    outColor = vec4(shaded, 1.0);
+                    return;
                 }
             }
             // Both together, because they are the same fact: where the surface

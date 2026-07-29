@@ -350,6 +350,8 @@ final class VkTerrainRenderer {
     private float screenReflections;
     /** Set when the sets must be rewritten because the effect went on or off. */
     private boolean reflectionBindingsDirty;
+    /** Diagnostic: paint the water with what the ray found and nothing else. */
+    private boolean showReflections;
     /** How far the water surface is tilted by the wave pattern; 0 is off. */
     private float waterWaves;
     /** How far the top of a plant leans in the wind; 0 is off. */
@@ -3246,6 +3248,7 @@ final class VkTerrainRenderer {
         // How much of the reflection is traced against what is on screen
         // rather than taken from the fog colour.
         MemoryUtil.memPutFloat(base + 928, screenReflections);
+        MemoryUtil.memPutFloat(base + 932, showReflections ? 1.0f : 0.0f);
     }
 
     /** The wave lattice from terrain.frag, which this side has to agree with. */
@@ -3278,6 +3281,7 @@ final class VkTerrainRenderer {
         showOcclusion = "true".equals(System.getProperty("vulkanmod112.showOcclusion"));
         showMotion = "true".equals(System.getProperty("vulkanmod112.showMotion"));
         motionOverWorld = "true".equals(System.getProperty("vulkanmod112.motionOverWorld"));
+        showReflections = "true".equals(System.getProperty("vulkanmod112.showReflections"));
         waterReflection = clampPercent(intProperty("vulkanmod112.waterReflection", 0));
         waterWaves = clampPercent(intProperty("vulkanmod112.waterWaves", 0));
         foliageSway = clampPercent(intProperty("vulkanmod112.foliageSway", 0));
