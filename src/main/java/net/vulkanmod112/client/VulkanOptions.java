@@ -214,6 +214,105 @@ final class VulkanOptions {
                                         VulkanConfig.setFrameGraphInterval(value);
                                     }
                                 }),
+                        new VSwitchOption("Fog",
+                                "Fade the Vulkan-drawn world into the distance the way the rest of "
+                                        + "the scene already does. Without it the terrain is the "
+                                        + "one thing in view with no fog at all, which shows up "
+                                        + "worst underwater: fish and mobs take on the colour of "
+                                        + "the water while the blocks behind them stay perfectly "
+                                        + "clear. Off leaves the world ending in a hard edge and is "
+                                        + "very slightly faster.",
+                                Cost.gpu(Level.LOW), null,
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return VulkanConfig.isFogEnabled();
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        VulkanConfig.setFogEnabled(value);
+                                    }
+                                }),
+                        new VSwitchOption("Zoom",
+                                "Hold the zoom key to narrow the field of view, the way OptiFine "
+                                        + "does it. Mouse sensitivity is scaled to match while it is "
+                                        + "held, otherwise the view would sweep across the screen far "
+                                        + "too fast to aim with. Rebind the key under Controls.",
+                                Cost.FREE, null,
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return VulkanConfig.isZoomEnabled();
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        VulkanConfig.setZoomEnabled(value);
+                                    }
+                                }),
+                        new VRangeOption("Zoom Level",
+                                "How far the zoom key narrows the field of view. 4 means a quarter "
+                                        + "of it, which is what OptiFine uses.",
+                                Cost.FREE, null, 2, 10, 1, "x", null,
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return (int) VulkanConfig.getZoomFactor();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setZoomFactor(value);
+                                    }
+                                }),
+                        new VSwitchOption("VSync",
+                                "Lock the framerate to the monitor's refresh rate. Removes tearing, "
+                                        + "and caps FPS at your refresh rate.",
+                                Cost.of(Level.MEDIUM, Level.MEDIUM, Level.NONE), null,
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return mc.gameSettings.enableVsync;
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        mc.gameSettings.enableVsync = value;
+                                        // What vanilla's own toggle does.
+                                        org.lwjgl.opengl.Display.setVSyncEnabled(value);
+                                        mc.gameSettings.saveOptions();
+                                    }
+                        })),
+                new VOptionBlock("Shaders",
+                        new VSwitchOption("Material Tags",
+                                "Record what each stretch of a chunk is made of while the chunk is "
+                                        + "being built. On its own this changes nothing you can "
+                                        + "see: it is the groundwork the effects still to come are "
+                                        + "waiting on. The game draws terrain in four layers and a "
+                                        + "layer is not a material — water and stained glass are "
+                                        + "the same layer, so are grass and torches and rails — "
+                                        + "and the vertex carries position, colour, texture and "
+                                        + "light and nothing else. The one moment anything knows "
+                                        + "that a particular block is water is while that block is "
+                                        + "being turned into triangles, so that is where it is "
+                                        + "written down. Costs a branch per block on the building "
+                                        + "threads, and the diagnostics log says what it measured "
+                                        + "rather than leaving that to be believed.",
+                                Cost.of(Level.NONE, Level.NONE, Level.LOW),
+                                "Everything below it in this section that tells one block from "
+                                        + "another needs it, starting with how foliage is lit.",
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return VulkanConfig.isMaterialTags();
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        VulkanConfig.setMaterialTags(value);
+                                    }
+                                }),
                         new VSwitchOption("Dynamic Lights",
                                 "Let a carried torch, a dropped glowing block or a burning "
                                         + "creature light the ground around it. The light is added "
@@ -406,77 +505,8 @@ final class VulkanOptions {
                                     public void set(int value) {
                                         VulkanConfig.setDynamicLightDistance(value);
                                     }
-                                }),
-                        new VSwitchOption("Fog",
-                                "Fade the Vulkan-drawn world into the distance the way the rest of "
-                                        + "the scene already does. Without it the terrain is the "
-                                        + "one thing in view with no fog at all, which shows up "
-                                        + "worst underwater: fish and mobs take on the colour of "
-                                        + "the water while the blocks behind them stay perfectly "
-                                        + "clear. Off leaves the world ending in a hard edge and is "
-                                        + "very slightly faster.",
-                                Cost.gpu(Level.LOW), null,
-                                new VSwitchOption.Access() {
-                                    @Override
-                                    public boolean get() {
-                                        return VulkanConfig.isFogEnabled();
-                                    }
-
-                                    @Override
-                                    public void set(boolean value) {
-                                        VulkanConfig.setFogEnabled(value);
-                                    }
-                                }),
-                        new VSwitchOption("Zoom",
-                                "Hold the zoom key to narrow the field of view, the way OptiFine "
-                                        + "does it. Mouse sensitivity is scaled to match while it is "
-                                        + "held, otherwise the view would sweep across the screen far "
-                                        + "too fast to aim with. Rebind the key under Controls.",
-                                Cost.FREE, null,
-                                new VSwitchOption.Access() {
-                                    @Override
-                                    public boolean get() {
-                                        return VulkanConfig.isZoomEnabled();
-                                    }
-
-                                    @Override
-                                    public void set(boolean value) {
-                                        VulkanConfig.setZoomEnabled(value);
-                                    }
-                                }),
-                        new VRangeOption("Zoom Level",
-                                "How far the zoom key narrows the field of view. 4 means a quarter "
-                                        + "of it, which is what OptiFine uses.",
-                                Cost.FREE, null, 2, 10, 1, "x", null,
-                                new VRangeOption.Access() {
-                                    @Override
-                                    public int get() {
-                                        return (int) VulkanConfig.getZoomFactor();
-                                    }
-
-                                    @Override
-                                    public void set(int value) {
-                                        VulkanConfig.setZoomFactor(value);
-                                    }
-                                }),
-                        new VSwitchOption("VSync",
-                                "Lock the framerate to the monitor's refresh rate. Removes tearing, "
-                                        + "and caps FPS at your refresh rate.",
-                                Cost.of(Level.MEDIUM, Level.MEDIUM, Level.NONE), null,
-                                new VSwitchOption.Access() {
-                                    @Override
-                                    public boolean get() {
-                                        return mc.gameSettings.enableVsync;
-                                    }
-
-                                    @Override
-                                    public void set(boolean value) {
-                                        mc.gameSettings.enableVsync = value;
-                                        // What vanilla's own toggle does.
-                                        org.lwjgl.opengl.Display.setVSyncEnabled(value);
-                                        mc.gameSettings.saveOptions();
-                                    }
-                                })));
+                                })
+                        ));
     }
 
     private static VOptionPage optimizationsPage(final Minecraft mc) {
@@ -762,33 +792,6 @@ final class VulkanOptions {
                                     @Override
                                     public void set(boolean value) {
                                         VulkanConfig.setFastRebuildNear(value);
-                                    }
-                                }),
-                        new VSwitchOption("Material Tags",
-                                "Record what each stretch of a chunk is made of while the chunk is "
-                                        + "being built. On its own this changes nothing you can "
-                                        + "see: it is the groundwork the effects still to come are "
-                                        + "waiting on. The game draws terrain in four layers and a "
-                                        + "layer is not a material — water and stained glass are "
-                                        + "the same layer, so are grass and torches and rails — "
-                                        + "and the vertex carries position, colour, texture and "
-                                        + "light and nothing else. The one moment anything knows "
-                                        + "that a particular block is water is while that block is "
-                                        + "being turned into triangles, so that is where it is "
-                                        + "written down. Costs a branch per block on the building "
-                                        + "threads, and the diagnostics log says what it measured "
-                                        + "rather than leaving that to be believed.",
-                                Cost.of(Level.NONE, Level.NONE, Level.LOW),
-                                "Nothing uses this yet; it is here to be measured.",
-                                new VSwitchOption.Access() {
-                                    @Override
-                                    public boolean get() {
-                                        return VulkanConfig.isMaterialTags();
-                                    }
-
-                                    @Override
-                                    public void set(boolean value) {
-                                        VulkanConfig.setMaterialTags(value);
                                     }
                                 }),
                         new VSwitchOption("Build Near Chunks Off Thread",
