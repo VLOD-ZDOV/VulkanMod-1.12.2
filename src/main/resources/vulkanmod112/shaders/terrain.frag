@@ -2,6 +2,17 @@
 
 layout(set = 0, binding = 0) uniform sampler2D atlas;
 layout(set = 0, binding = 1) uniform sampler2D lightmap;
+/*
+ * The world as it stood a moment ago, colour and depth, for the water to look
+ * at. Only the translucent pass is given the scene here — every other pass has
+ * the block atlas bound in these two places instead, because in those passes
+ * this colour image is the thing being drawn into and reading what you are
+ * writing is not allowed. The water pass is the one that runs after the opaque
+ * world is finished and handed over, which is exactly what makes this possible
+ * at all: the picture the reflection needs is already made.
+ */
+layout(set = 0, binding = 4) uniform sampler2D sceneColor;
+layout(set = 0, binding = 5) uniform sampler2D sceneDepth;
 
 // Same block as the vertex stage; see terrain.vert for why it is a buffer.
 layout(set = 0, binding = 3, std140) uniform Frame {
@@ -22,6 +33,9 @@ layout(set = 0, binding = 3, std140) uniform Frame {
     // x = wave strength (0 = off), yz = the camera's own world x and z reduced
     // modulo the wave lattice. See waveGradient for what that is for.
     vec4 water;
+    // x = how much of a reflection is traced against the scene rather than
+    // taken from the fog colour, 0 = off.
+    vec4 screenMirror;
 } frame;
 
 layout(push_constant) uniform Draw {
@@ -309,6 +323,77 @@ vec3 foliageNormal(vec3 geometric) {
  * computed here instead would be the one surface in the scene disagreeing
  * with the sky above it.
  */
+
+/*
+ * Follows a reflected ray across the picture that is already drawn.
+ *
+ * The whole of this rests on one accident of the frame's order. Water is drawn
+ * in a pass of its own, after the opaque world has been finished and handed
+ * back — so by the time a water fragment is being shaded, the colour and depth
+ * of everything behind it exist and can be read. Nothing has to be traced
+ * against the world itself, which is what makes this cost a loop rather than an
+ * acceleration structure.
+ *
+ * The ray is walked in the same space the fragment is in, camera-relative
+ * world, and each step is put back on screen with the frame's own matrix. That
+ * is not a shortcut for a screen-space walk, it is the accurate version of it:
+ * equal steps on screen are wildly unequal steps in the world, and it is the
+ * world the ray is travelling through. Steps grow as they go, because a metre
+ * near the eye covers far more of the screen than a metre far from it.
+ *
+ * What comes back is a colour and how much to believe it. The honest part is
+ * the believing: this can only ever reflect what is on the screen, so a ray
+ * that leaves the frame, or turns back towards the eye where nothing can be
+ * behind it, has no answer and says so rather than inventing one. The caller
+ * falls back to the fog colour, which is the horizon, which is what flat water
+ * shows at that angle anyway.
+ */
+vec4 traceReflection(vec3 origin, vec3 dir) {
+    // Away from the surface before the first step, or the surface finds itself.
+    float t = 0.3;
+    float step = 0.5;
+    float lastMiss = t;
+    for (int i = 0; i < 28; i++) {
+        vec4 clip = frame.mvp * vec4(origin + dir * t, 1.0);
+        if (clip.w <= 0.0001) {
+            return vec4(0.0);
+        }
+        vec3 onScreen = vec3(clip.xy / clip.w * 0.5 + 0.5, clip.z / clip.w);
+        if (onScreen.x < 0.0 || onScreen.x > 1.0 || onScreen.y < 0.0 || onScreen.y > 1.0) {
+            return vec4(0.0);
+        }
+        if (onScreen.z > texture(sceneDepth, onScreen.xy).r) {
+            // Between the last step that was still in front of everything and
+            // this one, which is behind something. Halving four times puts the
+            // crossing within a sixteenth of a step, which at these sizes is
+            // closer than the surface it landed on is thick.
+            float near = lastMiss;
+            float far = t;
+            for (int j = 0; j < 4; j++) {
+                float mid = 0.5 * (near + far);
+                vec4 c = frame.mvp * vec4(origin + dir * mid, 1.0);
+                vec3 s = vec3(c.xy / c.w * 0.5 + 0.5, c.z / c.w);
+                if (s.z > texture(sceneDepth, s.xy).r) {
+                    far = mid;
+                    onScreen = s;
+                } else {
+                    near = mid;
+                }
+            }
+            // Faded out towards the edges of the picture, because that is where
+            // the picture stops knowing. A reflection that ended in a hard line
+            // along the edge of the screen would announce how it was made.
+            vec2 edge = smoothstep(vec2(0.0), vec2(0.14), onScreen.xy)
+                      * smoothstep(vec2(0.0), vec2(0.14), vec2(1.0) - onScreen.xy);
+            return vec4(texture(sceneColor, onScreen.xy).rgb, edge.x * edge.y);
+        }
+        lastMiss = t;
+        t += step;
+        step *= 1.19;
+    }
+    return vec4(0.0);
+}
+
 float fresnel(vec3 normal) {
     float facing = clamp(dot(normal, normalize(-vRelative)), 0.0, 1.0);
     float f = 1.0 - facing;
@@ -528,11 +613,27 @@ void main() {
         float water = frame.heightFog.w;
         if (water > 0.0 && material == MATERIAL_WATER) {
             float mirror = fresnel(mirrorNormal) * water;
+            // What the surface shows: the horizon by default, and whatever is
+            // actually standing there when the ray finds it.
+            vec3 mirrored = frame.fogColor.rgb;
+            if (frame.screenMirror.x > 0.0) {
+                vec3 toEye = normalize(-vRelative);
+                vec3 ray = reflect(-toEye, mirrorNormal);
+                // A ray heading back towards the eye is looking at the side of
+                // the world that was never drawn. Faded rather than cut, so a
+                // surface does not change its mind along a line.
+                float outward = clamp(1.0 - dot(ray, toEye) * 2.5, 0.0, 1.0);
+                if (outward > 0.0) {
+                    vec4 found = traceReflection(vRelative, ray);
+                    mirrored = mix(mirrored, found.rgb,
+                                   found.a * outward * frame.screenMirror.x);
+                }
+            }
             // Both together, because they are the same fact: where the surface
             // turns into a mirror it stops showing what is under it, and a
             // reflection that let the riverbed through would be a colour laid
             // over water rather than water behaving like water.
-            shaded = mix(shaded, frame.fogColor.rgb, mirror);
+            shaded = mix(shaded, mirrored, mirror);
             alpha = mix(alpha, 1.0, mirror);
         }
         outColor = vec4(shaded * alpha, alpha);

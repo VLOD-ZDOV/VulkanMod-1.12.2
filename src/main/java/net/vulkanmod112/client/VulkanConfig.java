@@ -322,6 +322,7 @@ public final class VulkanConfig {
      * Worked out from the depth buffer this renderer already has, so it costs
      * no geometry and no second pass over the world.
      */
+    static final int DEF_SCREEN_REFLECTIONS = 0;
     static final int DEF_AMBIENT_OCCLUSION = 0;
     /**
      * How far a corner's shadow reaches, in blocks. Two is a little under the
@@ -380,6 +381,7 @@ public final class VulkanConfig {
     private static int waterWaves = DEF_WATER_WAVES;
     private static int foliageSway = DEF_FOLIAGE_SWAY;
     private static int bloom = DEF_BLOOM;
+    private static int screenReflections = DEF_SCREEN_REFLECTIONS;
     private static int ambientOcclusion = DEF_AMBIENT_OCCLUSION;
     private static int aoRadius = DEF_AO_RADIUS;
     private static boolean fogEnabled = DEF_FOG;
@@ -619,6 +621,14 @@ public final class VulkanConfig {
                         + "0 is off. Lava, torches, glowstone and any modded block that gives off "
                         + "light. Terrain only: this mod's frame is finished before the game draws "
                         + "entities and particles, so a burning creature does not glow.");
+        screenReflections = config.getInt("screenReflections", CATEGORY_GENERAL,
+                DEF_SCREEN_REFLECTIONS, 0, 100,
+                "How much of a water reflection is the world actually standing there rather than "
+                        + "the fog colour, in percent. 0 is off. The ray is followed across the "
+                        + "picture already drawn, so it can only find what is on screen: nothing "
+                        + "off the edge of it, nothing hidden behind something nearer, and no "
+                        + "creatures, which this renderer does not draw. Where the ray finds "
+                        + "nothing the fog colour answers, as it did before.");
         ambientOcclusion = config.getInt("ambientOcclusion", CATEGORY_GENERAL,
                 DEF_AMBIENT_OCCLUSION, 0, 100,
                 "How much a point is darkened by how little of its surroundings it can see, in "
@@ -684,6 +694,7 @@ public final class VulkanConfig {
         setWaterWaves(DEF_WATER_WAVES);
         setFoliageSway(DEF_FOLIAGE_SWAY);
         setBloom(DEF_BLOOM);
+        setScreenReflections(DEF_SCREEN_REFLECTIONS);
         setAmbientOcclusion(DEF_AMBIENT_OCCLUSION);
         setAoRadius(DEF_AO_RADIUS);
         setFogEnabled(DEF_FOG);
@@ -888,6 +899,16 @@ public final class VulkanConfig {
     public static void setWaterReflection(int value) {
         waterReflection = value;
         store(CATEGORY_GENERAL, "waterReflection", value);
+        applySystemProperties();
+    }
+
+    public static int getScreenReflections() {
+        return screenReflections;
+    }
+
+    public static void setScreenReflections(int value) {
+        screenReflections = value;
+        store(CATEGORY_GENERAL, "screenReflections", value);
         applySystemProperties();
     }
 
@@ -1146,6 +1167,7 @@ public final class VulkanConfig {
         System.setProperty("vulkanmod112.foliageSway", Integer.toString(foliageSway));
         System.setProperty("vulkanmod112.bloom", Integer.toString(bloom));
         System.setProperty("vulkanmod112.ambientOcclusion", Integer.toString(ambientOcclusion));
+        System.setProperty("vulkanmod112.screenReflections", Integer.toString(screenReflections));
         System.setProperty("vulkanmod112.aoRadius", Integer.toString(aoRadius));
         System.setProperty("vulkanmod112.showMaterials", Boolean.toString(showMaterials));
         System.setProperty("vulkanmod112.showOcclusion", Boolean.toString(showOcclusion));

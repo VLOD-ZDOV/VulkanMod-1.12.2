@@ -269,6 +269,8 @@ final class VkTerrainRenderer {
     private final long[] pipelines = new long[TERRAIN_PIPELINES.length];
     private long atlasSampler;
     private long lightmapSampler;
+    /** Clamped and unfiltered, for the reflection reading the finished frame. */
+    private long sceneSampler;
 
     // Atlas / lightmap
     private long atlasImage;
@@ -345,6 +347,7 @@ final class VkTerrainRenderer {
     private boolean showMaterials;
     /** How much of a water surface becomes sky at a grazing angle; 0 is off. */
     private float waterReflection;
+    private float screenReflections;
     /** How far the water surface is tilted by the wave pattern; 0 is off. */
     private float waterWaves;
     /** How far the top of a plant leans in the wind; 0 is off. */
@@ -2913,9 +2916,25 @@ final class VkTerrainRenderer {
         check(vkCreateSampler(device(), samplerInfo, null, pSampler), "vkCreateSampler(lightmap)");
         lightmapSampler = pSampler.get(0);
 
+        // Held at the edge and unfiltered. A ray walking off the side of the
+        // picture must not come back with the other side of it — the same
+        // default that had the corner shading reading the far edge of the
+        // screen, and the reason that one is now said out loud everywhere.
+        VkSamplerCreateInfo sceneSamplerInfo = VkSamplerCreateInfo.calloc(stack)
+                .sType(VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO)
+                .magFilter(VK_FILTER_NEAREST).minFilter(VK_FILTER_NEAREST)
+                .addressModeU(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
+                .addressModeV(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
+                .addressModeW(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
+                .mipmapMode(VK_SAMPLER_MIPMAP_MODE_NEAREST).maxLod(0.0f);
+        LongBuffer pSceneSampler = stack.mallocLong(1);
+        check(vkCreateSampler(device(), sceneSamplerInfo, null, pSceneSampler),
+                "vkCreateSampler(scene)");
+        sceneSampler = pSceneSampler.get(0);
+
         createFrameUniforms(stack);
 
-        VkDescriptorSetLayoutBinding.Buffer bindings = VkDescriptorSetLayoutBinding.calloc(4, stack);
+        VkDescriptorSetLayoutBinding.Buffer bindings = VkDescriptorSetLayoutBinding.calloc(6, stack);
         bindings.get(0).binding(0)
                 .descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
                 .descriptorCount(1)
@@ -2934,6 +2953,19 @@ final class VkTerrainRenderer {
                 .descriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
                 .descriptorCount(1)
                 .stageFlags(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
+        // The finished picture behind the water, colour and depth, for the
+        // reflection to walk across. Declared for every pipeline because the
+        // layout is one, and pointed at the block atlas in all the passes that
+        // must not read it — during those this colour image is the attachment
+        // being written, and a pass may not read what it is writing.
+        bindings.get(4).binding(4)
+                .descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+                .descriptorCount(1)
+                .stageFlags(VK_SHADER_STAGE_FRAGMENT_BIT);
+        bindings.get(5).binding(5)
+                .descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+                .descriptorCount(1)
+                .stageFlags(VK_SHADER_STAGE_FRAGMENT_BIT);
         VkDescriptorSetLayoutCreateInfo layoutInfo = VkDescriptorSetLayoutCreateInfo.calloc(stack)
                 .sType(VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO)
                 .pBindings(bindings);
@@ -2942,7 +2974,7 @@ final class VkTerrainRenderer {
         descriptorSetLayout = pLayout.get(0);
 
         VkDescriptorPoolSize.Buffer poolSizes = VkDescriptorPoolSize.calloc(3, stack);
-        poolSizes.get(0).type(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER).descriptorCount(drawDescriptorSets.length * 2);
+        poolSizes.get(0).type(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER).descriptorCount(drawDescriptorSets.length * 4);
         poolSizes.get(1).type(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER).descriptorCount(drawDescriptorSets.length);
         poolSizes.get(2).type(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER).descriptorCount(drawDescriptorSets.length);
         VkDescriptorPoolCreateInfo poolInfo = VkDescriptorPoolCreateInfo.calloc(stack)
@@ -3201,6 +3233,9 @@ final class VkTerrainRenderer {
         MemoryUtil.memPutFloat(base + 920, (float) waveWrap(viewWorldZ));
         // w: how far a plant leans away from where the game put it.
         MemoryUtil.memPutFloat(base + 924, foliageSway);
+        // How much of the reflection is traced against what is on screen
+        // rather than taken from the fog colour.
+        MemoryUtil.memPutFloat(base + 928, screenReflections);
     }
 
     /** The wave lattice from terrain.frag, which this side has to agree with. */
@@ -3239,6 +3274,7 @@ final class VkTerrainRenderer {
         bloomStrength = clampPercent(intProperty("vulkanmod112.bloom", 0));
         aoStrength = clampPercent(intProperty("vulkanmod112.ambientOcclusion", 0));
         aoRadius = Math.max(1, Math.min(6, intProperty("vulkanmod112.aoRadius", 2)));
+        screenReflections = clampPercent(intProperty("vulkanmod112.screenReflections", 0));
     }
 
     private static float clampPercent(int value) {
@@ -3281,7 +3317,23 @@ final class VkTerrainRenderer {
                     .imageView(lightmapView)
                     .imageLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
-            VkWriteDescriptorSet.Buffer writes = VkWriteDescriptorSet.calloc(drawDescriptorSets.length * 4, stack);
+            // Only the translucent set is shown the scene. The sets are laid
+            // out one per layer per frame in flight, so which one that is falls
+            // straight out of the index — no separate layout, no second pool.
+            VkDescriptorImageInfo.Buffer sceneColorInfo = VkDescriptorImageInfo.calloc(1, stack);
+            sceneColorInfo.get(0)
+                    .sampler(sceneSampler)
+                    .imageView(colorView != 0 ? colorView : atlasView)
+                    .imageLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+            VkDescriptorImageInfo.Buffer sceneDepthInfo = VkDescriptorImageInfo.calloc(1, stack);
+            sceneDepthInfo.get(0)
+                    .sampler(sceneSampler)
+                    .imageView(depthView != 0 ? depthView : atlasView)
+                    .imageLayout(depthView != 0
+                            ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL
+                            : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+            VkWriteDescriptorSet.Buffer writes = VkWriteDescriptorSet.calloc(drawDescriptorSets.length * 6, stack);
             for (int i = 0; i < drawDescriptorSets.length; i++) {
                 VkDescriptorBufferInfo.Buffer bufferInfo = VkDescriptorBufferInfo.calloc(1, stack);
                 bufferInfo.get(0).buffer(drawBatchBuffers[i]).offset(0).range(drawCommandOffset);
@@ -3289,7 +3341,8 @@ final class VkTerrainRenderer {
                 // read the same frame constants.
                 VkDescriptorBufferInfo.Buffer frameInfo = VkDescriptorBufferInfo.calloc(1, stack);
                 frameInfo.get(0).buffer(frameUniformBuffers[i / BATCHES_PER_FRAME]).offset(0).range(FRAME_UNIFORM_BYTES);
-                int write = i * 4;
+                boolean waterSet = (i % BATCHES_PER_FRAME) == LAYER_TRANSLUCENT;
+                int write = i * 6;
                 writes.get(write)
                         .sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET)
                         .dstSet(drawDescriptorSets[i]).dstBinding(0).descriptorCount(1)
@@ -3306,6 +3359,16 @@ final class VkTerrainRenderer {
                         .sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET)
                         .dstSet(drawDescriptorSets[i]).dstBinding(3).descriptorCount(1)
                         .descriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER).pBufferInfo(frameInfo);
+                writes.get(write + 4)
+                        .sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET)
+                        .dstSet(drawDescriptorSets[i]).dstBinding(4).descriptorCount(1)
+                        .descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+                        .pImageInfo(waterSet ? sceneColorInfo : atlasInfo);
+                writes.get(write + 5)
+                        .sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET)
+                        .dstSet(drawDescriptorSets[i]).dstBinding(5).descriptorCount(1)
+                        .descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+                        .pImageInfo(waterSet ? sceneDepthInfo : atlasInfo);
             }
             vkUpdateDescriptorSets(device(), writes, null);
         }
@@ -4006,6 +4069,10 @@ final class VkTerrainRenderer {
             readbackMapped = ppRb.get(0);
         }
         firstFrame = true;
+        // The water's view of the scene is these two images, and they are new.
+        // Without this the reflection would go on reading whatever the sets
+        // were filled with before — the block atlas, in a puddle.
+        updateDescriptors();
         LOGGER.info("Terrain targets (re)created: {}x{} color+depth shared with GL (textures {}/{})",
                 width, height, glColorTexture, glDepthTexture);
     }
@@ -4557,6 +4624,10 @@ final class VkTerrainRenderer {
         }
         vkDestroyRenderPass(device(), renderPass, null);
         vkDestroyDescriptorPool(device(), descriptorPool, null);
+        if (sceneSampler != 0) {
+            vkDestroySampler(device(), sceneSampler, null);
+            sceneSampler = 0;
+        }
         vkDestroyDescriptorSetLayout(device(), descriptorSetLayout, null);
         vkDestroySampler(device(), atlasSampler, null);
         vkDestroySampler(device(), lightmapSampler, null);

@@ -427,6 +427,43 @@ final class VulkanOptions {
                                         VulkanConfig.setWaterReflection(value);
                                     }
                                 }),
+                        new VRangeOption("Screen Reflections",
+                                "How much of a water reflection is the world that is actually "
+                                        + "standing there, rather than the flat fog colour the "
+                                        + "row above puts on it. The reflected ray is followed "
+                                        + "across the picture that has already been drawn — which "
+                                        + "is possible at all only because water is drawn in a "
+                                        + "pass of its own, after the opaque world is finished and "
+                                        + "handed back, so the colour and depth of everything "
+                                        + "behind the surface exist by the time a water pixel is "
+                                        + "being shaded. Nothing is traced against the world "
+                                        + "itself, which is what makes this cost a loop rather "
+                                        + "than a second copy of the world in memory. What it can "
+                                        + "find is exactly what is on screen and no more: a ray "
+                                        + "leaving the edge of the frame, or turning back towards "
+                                        + "you where nothing was ever drawn, has no answer, and "
+                                        + "the fog colour finishes it — which is not a patch, "
+                                        + "since the fog colour is the horizon and the horizon is "
+                                        + "what flat water shows at that angle anyway. Creatures "
+                                        + "are missing from it for the same reason they are "
+                                        + "missing from everything else here: the game draws them "
+                                        + "after this renderer has finished. Reflecting what is "
+                                        + "off screen needs rays into the world itself, which is a "
+                                        + "different thing entirely and is not this.",
+                                Cost.of(Level.NONE, Level.MEDIUM, Level.NONE),
+                                "Needs Vulkan Water and Glass on, and Water Reflection above zero.",
+                                0, 100, 5, "%", "OFF",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getScreenReflections();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setScreenReflections(value);
+                                    }
+                                }),
                         new VRangeOption("Ambient Occlusion",
                                 "How much a point is darkened by how little of its surroundings it "
                                         + "can see. The game shades a face by which way it points "
