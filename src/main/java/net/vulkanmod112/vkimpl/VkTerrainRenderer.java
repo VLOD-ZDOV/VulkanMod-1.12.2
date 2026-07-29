@@ -1768,19 +1768,63 @@ final class VkTerrainRenderer {
                         // Nothing was drawn here, so there is nothing to shade.
                         + "    if (d >= 0.9999) { gl_FragColor = vec4(1.0); return; }\n"
                         + "    vec3 p = viewPos(uv, d);\n"
-                        // Exact rather than approximate: every face of a block is
-                        // flat, so the cross product of the two screen-space
-                        // derivatives is the face, not an estimate of it.
-                        + "    vec3 n = normalize(cross(dFdx(p), dFdy(p)));\n"
+                        // Two neighbours an axis, and the nearer of each pair
+                        // wins. The hardware's own derivative would be cheaper
+                        // and is what this used to do, but it is taken across a
+                        // block of four pixels, and a block lying across the
+                        // seam where a wall meets a ceiling takes its difference
+                        // over both surfaces at once. What comes out is not a
+                        // rough normal, it is a direction belonging to neither
+                        // face — and with the wrong direction nearly every
+                        // neighbour counts as standing in front of the surface
+                        // instead of half of them, so the seam went black. One
+                        // pixel wide, along every seam in the world, and no
+                        // slider touched it because it was never a matter of
+                        // how much.
+                        + "    vec2 ex = vec2(uInvSize.x, 0.0);\n"
+                        + "    vec2 ey = vec2(0.0, uInvSize.y);\n"
+                        + "    float dl = texture2D(uSource, uv - ex).r;\n"
+                        + "    float dr = texture2D(uSource, uv + ex).r;\n"
+                        + "    float dd = texture2D(uSource, uv - ey).r;\n"
+                        + "    float du = texture2D(uSource, uv + ey).r;\n"
+                        // Written so both branches step the same way round the
+                        // surface, or the cross product would face backwards
+                        // wherever the near neighbour happened to be behind.
+                        + "    vec3 gx = abs(dr - d) < abs(dl - d)\n"
+                        + "            ? viewPos(uv + ex, dr) - p : p - viewPos(uv - ex, dl);\n"
+                        + "    vec3 gy = abs(du - d) < abs(dd - d)\n"
+                        + "            ? viewPos(uv + ey, du) - p : p - viewPos(uv - ey, dd);\n"
+                        + "    vec3 n = normalize(cross(gx, gy));\n"
                         + "    if (dot(n, p) > 0.0) n = -n;\n"
                         // A radius in blocks becomes a radius on screen by
                         // dividing by distance, which is the whole of
                         // perspective.
                         + "    float scale = uRadius / (uProj.x * 2.0 * max(-p.z, 0.1));\n"
+                        // Capped, because standing with your nose against a wall
+                        // projects a radius of several blocks across more than
+                        // the whole screen, and a neighbourhood spread that wide
+                        // is not a neighbourhood — it is the rest of the picture.
+                        + "    scale = min(scale, 0.15);\n"
                         // Turned by a different angle at every pixel, so what
                         // sixteen samples cannot cover comes out as noise the
                         // blur removes rather than as rings nothing removes.
-                        + "    float a = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) * 6.2831853;\n"
+                        //
+                        // The usual fract(sin(dot(...))) was here and it is
+                        // exactly wrong at this size. Its argument grows with
+                        // the pixel's coordinate, and on a large screen it
+                        // reaches six figures, where a 32-bit float no longer
+                        // holds a sine's argument finely enough to answer
+                        // differently for neighbouring pixels. The angles stop
+                        // being unrelated and lay themselves out in faint bands
+                        // across the whole picture — visible, and not something
+                        // a five-tap blur can take out, being wider than the
+                        // grain it was written to remove. This one never takes a
+                        // sine and never lets a number grow: it is fractions
+                        // multiplied by fractions, which stay exact whatever the
+                        // screen size.
+                        + "    vec3 h3 = fract(vec3(gl_FragCoord.xyx) * vec3(0.1031, 0.1030, 0.0973));\n"
+                        + "    h3 += dot(h3, h3.yzx + 33.33);\n"
+                        + "    float a = fract((h3.x + h3.y) * h3.z) * 6.2831853;\n"
                         + "    float occlusion = 0.0;\n"
                         + "    for (int i = 0; i < 16; i++) {\n"
                         // The golden angle, so consecutive samples never line up
@@ -1789,6 +1833,15 @@ final class VkTerrainRenderer {
                         // instead of crowding its middle.
                         + "        float t = a + float(i) * 2.3999632;\n"
                         + "        float reach = sqrt((float(i) + 0.5) * 0.0625);\n"
+                        // The share of the answer this sample speaks for, known
+                        // before anything is read and the same every frame. It
+                        // is what makes the total a fraction rather than a sum:
+                        // these add up to exactly 8 for sixteen samples laid out
+                        // this way, so dividing by 8 gives the part of the
+                        // neighbourhood that is in the way — a number between
+                        // zero and one whatever the geometry does, and one that
+                        // does not change if the sample count ever does.
+                        + "        float share = 1.0 - reach * reach;\n"
                         + "        vec2 suv = uv + vec2(cos(t), sin(t)) * scale * reach;\n"
                         + "        float sd = texture2D(uSource, suv).r;\n"
                         + "        if (sd >= 0.9999) continue;\n"
@@ -1803,11 +1856,20 @@ final class VkTerrainRenderer {
                         // than being cut off there. A sample that counts in full
                         // right up to the edge and then stops is a step in the
                         // shading, and a handful of such steps is what a corner
-                        // shaded in bands rather than softly is made of.
-                        + "        float near = clamp(1.0 - (len * len) / (uRadius * uRadius), 0.0, 1.0);\n"
-                        + "        occlusion += front * near;\n"
+                        // shaded in bands rather than softly is made of. This
+                        // rejects a distant occluder; it is not the sample's
+                        // share, which is fixed and settled above — the two were
+                        // one term before, and where a seam brought a neighbour
+                        // closer than its place on the disc implied, the share
+                        // it was allowed grew with it.
+                        + "        float range = clamp(1.0 - (len * len) / (uRadius * uRadius), 0.0, 1.0);\n"
+                        + "        occlusion += front * share * range;\n"
                         + "    }\n"
-                        + "    float ao = 1.0 - uStrength * occlusion * 0.18;\n"
+                        // Divided by the shares, so what multiplies the strength
+                        // is how much of the neighbourhood is in the way. A
+                        // fully enclosed pocket reaches black at full strength
+                        // and nothing else does.
+                        + "    float ao = 1.0 - uStrength * (occlusion * 0.125) * 1.2;\n"
                         + "    gl_FragColor = vec4(clamp(ao, 0.0, 1.0));\n"
                         + "}\n");
         aoInvSize = GL20C.glGetUniformLocation(aoProgram, "uInvSize");
@@ -3669,6 +3731,16 @@ final class VkTerrainRenderer {
                 EXTMemoryObject.GL_OPTIMAL_TILING_EXT);
         GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_MIN_FILTER, GL11C.GL_NEAREST);
         GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_MAG_FILTER, GL11C.GL_NEAREST);
+        // Held at the edge rather than repeated, and OpenGL's own default is the
+        // reason this has to be said out loud: a fresh texture wraps. Nothing
+        // noticed while every read was a composite reading the pixel under
+        // itself, but a pass that looks at a neighbour can ask for one past the
+        // edge of the screen — and a wrapping texture answers with the far side
+        // of the picture, so occlusion at the left edge was being decided by
+        // whatever stood at the right. Anything that samples with an offset
+        // later — motion vectors, reflections — would have inherited it.
+        GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_WRAP_S, GL12C.GL_CLAMP_TO_EDGE);
+        GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_WRAP_T, GL12C.GL_CLAMP_TO_EDGE);
         EXTMemoryObject.glTexStorageMem2DEXT(GL11C.GL_TEXTURE_2D, 1, internalFormat,
                 width, height, memoryObject, 0);
         GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, previous);
