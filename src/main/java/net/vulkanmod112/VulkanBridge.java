@@ -138,10 +138,14 @@ public interface VulkanBridge {
 
     /**
      * Draws the terrain's glow into the game's frame, once the game has drawn
-     * everything else in the world into it. Does nothing when bloom is off or
-     * when no glow was prepared this frame.
+     * everything else in the world into it.
+     *
+     * The frame is handed in as an OpenGL texture because the glow is worked
+     * out from it: a light with a creature standing in front of it is not
+     * visible in the finished picture, and so must not spill. Does nothing when
+     * bloom is off or when no glow was prepared this frame.
      */
-    void applySceneBloom();
+    void applySceneBloom(int sceneGlTexture);
 
     /** Tells the Vulkan side which GL texture holds the 16x16 lightmap. */
     void setLightmap(int lightmapGlTextureId);

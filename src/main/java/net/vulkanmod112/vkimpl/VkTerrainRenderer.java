@@ -1477,52 +1477,34 @@ final class VkTerrainRenderer {
      * the silhouette of a lava lake would be a lake with a hard edge. Added
      * separately and blended, it reaches over the sky the way light does.
      */
+    /**
+     * Keeps what the last passes will need after the Vulkan target is gone.
+     *
+     * By the time the glow is drawn, the colour target has been handed back
+     * through a semaphore and reading it would race the next frame. What the
+     * glow needs from it is two things, and both are copied here into a texture
+     * of this renderer's own: which pixels are lights, and what the terrain
+     * looked like before the game drew anything over it. The second is what
+     * makes a creature block the light behind it instead of being lit through.
+     *
+     * Half resolution. Both uses are comparisons rather than colour, and a
+     * boundary two pixels soft is better than a hard one for either of them.
+     */
     private void bloomPrepare() {
         if (!ensureBloomTargets()) {
             return;
         }
         int prevFbo = GL11C.glGetInteger(GL30C.GL_FRAMEBUFFER_BINDING);
-        // Pushed rather than read back: the viewport is four numbers and the
-        // query for it returns them into a buffer, where this needs none of
-        // them — only for the game's to be exactly what it was.
         org.lwjgl.opengl.GL11.glPushAttrib(org.lwjgl.opengl.GL11.GL_VIEWPORT_BIT);
-
         GL11C.glDisable(GL11C.GL_DEPTH_TEST);
         GL11C.glDepthMask(false);
         GL11C.glDisable(GL11C.GL_BLEND);
-        GL11C.glViewport(0, 0, bloomWidth, bloomHeight);
 
-        // What glows, at half resolution.
-        GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, bloomFbo[0]);
-        GL20C.glUseProgram(bloomExtractProgram);
-        GL20C.glUniform2f(bloomExtractInvSize, 1.0f / bloomWidth, 1.0f / bloomHeight);
-        GL13C.glActiveTexture(GL13C.GL_TEXTURE0);
-        GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, glColorTexture);
-        fullscreenQuad();
-
-        // Across, then down. Separable: two passes of n taps instead of one of
-        // n squared, and the same answer for a gaussian.
-        GL20C.glUseProgram(bloomBlurProgram);
-        GL20C.glUniform2f(bloomBlurInvSize, 1.0f / bloomWidth, 1.0f / bloomHeight);
-        // Twice, and it ends where it started because each round is two passes.
-        // Blurring a blur widens it: what a second round buys is a falloff that
-        // fades out instead of ending, which is the difference between light
-        // spilling and a bright ring drawn round a block.
-        for (int round = 0; round < 3; round++) {
-            for (int axis = 0; axis < 2; axis++) {
-                GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, bloomFbo[1 - axis]);
-                GL20C.glUniform2f(bloomBlurStep, axis == 0 ? 1.0f : 0.0f, axis == 0 ? 0.0f : 1.0f);
-                GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, bloomTexture[axis]);
-                fullscreenQuad();
-            }
-        }
-
-        // The mask, at half resolution, taken here because this is the last
-        // moment the Vulkan target may be read.
         GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, bloomMaskFbo);
         GL11C.glViewport(0, 0, Math.max(1, width / 2), Math.max(1, height / 2));
         GL20C.glUseProgram(bloomMaskProgram);
         GL20C.glUniform2f(bloomMaskInvSize, 2.0f / width, 2.0f / height);
+        GL13C.glActiveTexture(GL13C.GL_TEXTURE0);
         GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, glColorTexture);
         fullscreenQuad();
 
@@ -1546,24 +1528,64 @@ final class VkTerrainRenderer {
      * still ours to read; reading that target at this point would race the next
      * frame, because the semaphore handing it back has already been signalled.
      */
-    void applySceneBloom() {
-        if (!bloomReady || bloomStrength <= 0.0f || bloomFailed || bloomTexture[0] == 0) {
+    void applySceneBloom(int sceneTexture) {
+        if (!bloomReady || bloomStrength <= 0.0f || bloomFailed
+                || bloomTexture[0] == 0 || sceneTexture == 0) {
             return;
         }
         bloomReady = false;
         int prevProgram = GL11C.glGetInteger(GL20C.GL_CURRENT_PROGRAM);
         int prevActive = GL11C.glGetInteger(GL13C.GL_ACTIVE_TEXTURE);
+        int prevFbo = GL11C.glGetInteger(GL30C.GL_FRAMEBUFFER_BINDING);
         org.lwjgl.opengl.GL11.glPushAttrib(org.lwjgl.opengl.GL11.GL_ENABLE_BIT
                 | org.lwjgl.opengl.GL11.GL_DEPTH_BUFFER_BIT
                 | org.lwjgl.opengl.GL11.GL_COLOR_BUFFER_BIT
                 | org.lwjgl.opengl.GL11.GL_TEXTURE_BIT
                 | org.lwjgl.opengl.GL11.GL_CURRENT_BIT
-                | org.lwjgl.opengl.GL11.GL_POLYGON_BIT);
+                | org.lwjgl.opengl.GL11.GL_POLYGON_BIT
+                | org.lwjgl.opengl.GL11.GL_VIEWPORT_BIT);
         GL11C.glDisable(org.lwjgl.opengl.GL11.GL_ALPHA_TEST);
         GL11C.glDisable(GL11C.GL_CULL_FACE);
         GL11C.glDisable(GL11C.GL_SCISSOR_TEST);
         GL11C.glDisable(GL11C.GL_DEPTH_TEST);
+        GL11C.glDisable(GL11C.GL_BLEND);
         GL11C.glDepthMask(false);
+
+        // What glows, taken from the finished frame rather than from this
+        // renderer's own picture of the world.
+        //
+        // This is the whole of why a creature stops being lit through. The
+        // terrain image has no creatures in it, so a glowstone block behind one
+        // was still visible in it and its glow was added straight over whatever
+        // stood in front — the block appeared to shine through the mob, and
+        // through a pane of glass put in front of lava. The finished frame has
+        // everything in it, so a covered source simply is not there any more.
+        // Whether it is covered is decided by comparing the frame against what
+        // the terrain looked like before the game drew into it: equal means
+        // nothing was put in the way.
+        GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, bloomFbo[0]);
+        GL11C.glViewport(0, 0, bloomWidth, bloomHeight);
+        GL20C.glUseProgram(bloomExtractProgram);
+        GL20C.glUniform2f(bloomExtractInvSize, 1.0f / bloomWidth, 1.0f / bloomHeight);
+        GL13C.glActiveTexture(GL13C.GL_TEXTURE1);
+        GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, bloomMaskTexture);
+        GL13C.glActiveTexture(GL13C.GL_TEXTURE0);
+        GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, sceneTexture);
+        fullscreenQuad();
+
+        GL20C.glUseProgram(bloomBlurProgram);
+        GL20C.glUniform2f(bloomBlurInvSize, 1.0f / bloomWidth, 1.0f / bloomHeight);
+        for (int round = 0; round < 3; round++) {
+            for (int axis = 0; axis < 2; axis++) {
+                GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, bloomFbo[1 - axis]);
+                GL20C.glUniform2f(bloomBlurStep, axis == 0 ? 1.0f : 0.0f, axis == 0 ? 0.0f : 1.0f);
+                GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, bloomTexture[axis]);
+                fullscreenQuad();
+            }
+        }
+
+        GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo);
+        GL11C.glViewport(0, 0, width, height);
         GL11C.glEnable(GL11C.GL_BLEND);
         GL11C.glBlendFunc(GL11C.GL_ONE, GL11C.GL_ONE);
         GL20C.glUseProgram(bloomAddProgram);
@@ -1574,6 +1596,7 @@ final class VkTerrainRenderer {
         GL13C.glActiveTexture(GL13C.GL_TEXTURE0);
         GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, bloomTexture[0]);
         fullscreenQuad();
+
         org.lwjgl.opengl.GL11.glPopAttrib();
         GL20C.glUseProgram(prevProgram);
         GL13C.glActiveTexture(prevActive);
@@ -2733,13 +2756,25 @@ final class VkTerrainRenderer {
         // alpha it was spending on the constant 1.0.
         bloomExtractProgram = buildQuadProgram(
                 "uniform sampler2D uSource;\n"
+                        + "uniform sampler2D uTerrain;\n"
                         + "uniform vec2 uInvSize;\n"
                         + "void main() {\n"
-                        + "    vec4 c = texture2D(uSource, gl_FragCoord.xy * uInvSize);\n"
-                        + "    float emissive = clamp((c.a - 0.5) * 2.0, 0.0, 1.0);\n"
-                        + "    gl_FragColor = vec4(c.rgb * emissive, 1.0);\n"
+                        + "    vec2 uv = gl_FragCoord.xy * uInvSize;\n"
+                        + "    vec3 scene = texture2D(uSource, uv).rgb;\n"
+                        + "    vec4 ref = texture2D(uTerrain, uv);\n"
+                        // Covered by something the game drew afterwards? Then
+                        // there is no light here to spill. The frame holds
+                        // exactly what the terrain wrote wherever nothing was
+                        // put over it, so a plain comparison answers it, and
+                        // the tolerance is there for the filtering rather than
+                        // for any real difference.
+                        + "    float visible = step(length(scene - ref.rgb), 0.06);\n"
+                        + "    gl_FragColor = vec4(scene * ref.a * visible, 1.0);\n"
                         + "}\n");
         bloomExtractInvSize = GL20C.glGetUniformLocation(bloomExtractProgram, "uInvSize");
+        GL20C.glUseProgram(bloomExtractProgram);
+        GL20C.glUniform1i(GL20C.glGetUniformLocation(bloomExtractProgram, "uTerrain"), 1);
+        GL20C.glUseProgram(0);
 
         // One axis per pass. A gaussian is separable, so two passes of five
         // taps do what one of twenty-five would, and the offsets sit between
@@ -2781,7 +2816,7 @@ final class VkTerrainRenderer {
                         // orange with its pattern gone. What a glow is, is the
                         // light that landed somewhere else, so that is what is
                         // added — the source keeps the look it earned.
-                        + "    float self = texture2D(uScene, uv).r;\n"
+                        + "    float self = texture2D(uScene, uv).a;\n"
                         + "    gl_FragColor = vec4(glow * uStrength * 1.8 * (1.0 - self), 0.0);\n"
                         + "}\n");
         GL20C.glUseProgram(bloomAddProgram);
@@ -2795,8 +2830,11 @@ final class VkTerrainRenderer {
                 "uniform sampler2D uSource;\n"
                         + "uniform vec2 uInvSize;\n"
                         + "void main() {\n"
-                        + "    float a = texture2D(uSource, gl_FragCoord.xy * uInvSize).a;\n"
-                        + "    gl_FragColor = vec4(clamp((a - 0.5) * 2.0, 0.0, 1.0));\n"
+                        + "    vec4 c = texture2D(uSource, gl_FragCoord.xy * uInvSize);\n"
+                        // Colour and mask together in one texture: the colour
+                        // to recognise the terrain again in the finished frame,
+                        // the mask to say which of it is a light.
+                        + "    gl_FragColor = vec4(c.rgb, clamp((c.a - 0.5) * 2.0, 0.0, 1.0));\n"
                         + "}\n");
         bloomMaskInvSize = GL20C.glGetUniformLocation(bloomMaskProgram, "uInvSize");
         bloomAddStrength = GL20C.glGetUniformLocation(bloomAddProgram, "uStrength");

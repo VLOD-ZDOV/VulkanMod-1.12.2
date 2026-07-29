@@ -421,7 +421,11 @@ public final class TerrainHooks {
         if (bridge == null || !VulkanConfig.isTerrainEnabled()) {
             return;
         }
-        bridge.applySceneBloom();
+        net.minecraft.client.shader.Framebuffer frame = Minecraft.getMinecraft().getFramebuffer();
+        if (frame == null || frame.framebufferTexture == 0) {
+            return;
+        }
+        bridge.applySceneBloom(frame.framebufferTexture);
     }
 
     public static void flushAtlasAnimations() {
