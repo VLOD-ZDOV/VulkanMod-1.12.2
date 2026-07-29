@@ -193,7 +193,15 @@ const float SOURCE_RADIUS = 0.6;
 // drawn at 0.5 of the top, not black — so a face out of the light here dims
 // rather than dropping out of the scene, which is a thing that happens to
 // nothing else in this game.
-const float BACK_FACE_LIGHT = 0.35;
+// Vanilla's own number, and now exactly it: the underside of a block is drawn
+// at half the brightness of the top, and that is the whole range this game
+// has ever used for which way a surface points. Going below it was mine, and
+// it cost more than it bought — the light a player carries sweeps its own
+// terminator across every nearby face whenever they move, and the wider the
+// range, the more that reads as the world blinking rather than as a lamp
+// being lifted. Nothing else in Minecraft does that, so the eye has no
+// practice at reading it.
+const float BACK_FACE_LIGHT = 0.5;
 
 // The same for foliage, which keeps far more: a leaf is thin enough to be lit
 // from behind, and a torch on the far side of a bush lights the whole bush.

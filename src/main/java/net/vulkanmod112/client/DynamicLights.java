@@ -300,6 +300,18 @@ public final class DynamicLights {
             return 0;
         }
         Item item = stack.getItem();
+        // Two things that plainly glow and are not blocks, so asking the block
+        // registry about them returns air. A named list is what the rule below
+        // was written to avoid, and it stays as short as it can be: everything
+        // that has a block form is still answered by the block itself, modded
+        // or not. Redstone blocks and enchantment tables are not here because
+        // they give off no light in this game either — that one is not a gap.
+        if (item == net.minecraft.init.Items.LAVA_BUCKET) {
+            return 15;
+        }
+        if (item == net.minecraft.init.Items.BLAZE_ROD) {
+            return 10;
+        }
         Block block = Block.getBlockFromItem(item);
         if (block == null || block == net.minecraft.init.Blocks.AIR) {
             return 0;

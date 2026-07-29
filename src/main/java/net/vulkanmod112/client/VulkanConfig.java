@@ -230,7 +230,13 @@ public final class VulkanConfig {
      * How far dynamic light goes towards caring which way a surface is turned,
      * in percent.
      *
-     * Full by default. Vanilla's light is a number per block with no idea of
+     * Half by default, which is a measured choice rather than a shrug. A light
+     * the player carries drags its own terminator across every nearby surface
+     * whenever they move, and nothing else in this game does that, so at full
+     * strength a jump reads as the world blinking rather than as a lamp being
+     * lifted. Tested down to a sixth, where the effect is gone entirely; half
+     * keeps the part worth having and lands the swing where it stops drawing
+     * the eye. Vanilla's light is a number per block with no idea of
      * orientation, so a dropped torch lit the underside of the floor it was
      * lying on exactly as brightly as the top of it. This renderer can work the
      * face normal out from how the world position changes across the screen —
@@ -244,7 +250,7 @@ public final class VulkanConfig {
      * direction, and because the difference between the two ends is a thing you
      * judge by standing in a lit room rather than by reading about it.
      */
-    static final int DEF_DIRECTIONAL_LIGHT = 100;
+    static final int DEF_DIRECTIONAL_LIGHT = 50;
     /**
      * How much colour the ground below the camera gives up to fog, in percent.
      *
