@@ -1496,7 +1496,23 @@ final class VkTerrainRenderer {
 
             // Before the colour goes into the frame: what the frame receives is
             // the terrain already darkened where it cannot see the sky.
-            boolean ao = aoStrength > 0.0f && !aoFailed && aoPass();
+            //
+            // Fenced off from the rest of the composite on purpose. Corners in
+            // the world are decoration; the world itself is not. Whatever goes
+            // wrong in here costs this one effect for the session and the frame
+            // carries on undarkened, rather than taking the terrain renderer
+            // down with it and dropping the player back to vanilla GL.
+            boolean ao = false;
+            if (aoStrength > 0.0f && !aoFailed) {
+                int frameFbo = GL11C.glGetInteger(GL30C.GL_FRAMEBUFFER_BINDING);
+                try {
+                    ao = aoPass();
+                } catch (Throwable t) {
+                    LOGGER.error("Ambient occlusion failed; off for this session", t);
+                    aoFailed = true;
+                    GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, frameFbo);
+                }
+            }
 
             GL20C.glUseProgram(compositePrograms[depthBlit ? 1 : 0]);
             GL20C.glUniform1f(compositeAoUniforms[depthBlit ? 1 : 0], ao ? 1.0f : 0.0f);
@@ -1600,8 +1616,16 @@ final class VkTerrainRenderer {
         // carried: this runs inside the game's own world pass, so it is still
         // set, and the four numbers wanted from it are all that a depth needs
         // to become a position again.
+        //
+        // Through GL11C, not GL11, and this is not a style choice. The two
+        // libraries name this call differently — LWJGL 2 has
+        // glGetFloat(int, FloatBuffer), LWJGL 3 has glGetFloatv — and this
+        // side of the mod compiles with both on the path but runs only with
+        // LWJGL 3. The LWJGL 2 spelling compiles here and then fails to link
+        // in the game. GL11C has no counterpart in LWJGL 2 at all, so naming
+        // it is the compiler checking that this is the right library.
         projectionMatrix.clear();
-        org.lwjgl.opengl.GL11.glGetFloat(org.lwjgl.opengl.GL11.GL_PROJECTION_MATRIX, projectionMatrix);
+        GL11C.glGetFloatv(org.lwjgl.opengl.GL11.GL_PROJECTION_MATRIX, projectionMatrix);
         float m0 = projectionMatrix.get(0);
         float m5 = projectionMatrix.get(5);
         float m10 = projectionMatrix.get(10);
@@ -1617,36 +1641,41 @@ final class VkTerrainRenderer {
 
         int prevFbo = GL11C.glGetInteger(GL30C.GL_FRAMEBUFFER_BINDING);
         org.lwjgl.opengl.GL11.glPushAttrib(org.lwjgl.opengl.GL11.GL_VIEWPORT_BIT);
-        GL11C.glDisable(GL11C.GL_DEPTH_TEST);
-        GL11C.glDepthMask(false);
-        GL11C.glDisable(GL11C.GL_BLEND);
+        // Balanced whatever happens: an attribute pushed and never popped is a
+        // leak the driver keeps for the rest of the session, and the caller is
+        // still holding a push of its own around this one.
+        try {
+            GL11C.glDisable(GL11C.GL_DEPTH_TEST);
+            GL11C.glDepthMask(false);
+            GL11C.glDisable(GL11C.GL_BLEND);
 
-        GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, aoFbo);
-        GL11C.glViewport(0, 0, aoWidth, aoHeight);
-        GL20C.glUseProgram(aoProgram);
-        GL20C.glUniform2f(aoInvSize, 1.0f / aoWidth, 1.0f / aoHeight);
-        GL20C.glUniform4f(aoProjUniform, 1.0f / m0, 1.0f / m5, near, far);
-        GL20C.glUniform1f(aoRadiusUniform, aoRadius);
-        GL20C.glUniform1f(aoStrengthUniform, aoStrength);
-        GL13C.glActiveTexture(GL13C.GL_TEXTURE0);
-        GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, glDepthTexture);
-        fullscreenQuad();
+            GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, aoFbo);
+            GL11C.glViewport(0, 0, aoWidth, aoHeight);
+            GL20C.glUseProgram(aoProgram);
+            GL20C.glUniform2f(aoInvSize, 1.0f / aoWidth, 1.0f / aoHeight);
+            GL20C.glUniform4f(aoProjUniform, 1.0f / m0, 1.0f / m5, near, far);
+            GL20C.glUniform1f(aoRadiusUniform, aoRadius);
+            GL20C.glUniform1f(aoStrengthUniform, aoStrength);
+            GL13C.glActiveTexture(GL13C.GL_TEXTURE0);
+            GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, glDepthTexture);
+            fullscreenQuad();
 
-        // Smoothed, because eight samples of a neighbourhood is a noisy answer
-        // to a question whose answer is smooth.
-        GL20C.glUseProgram(bloomBlurProgram);
-        GL20C.glUniform2f(bloomBlurInvSize, 1.0f / aoWidth, 1.0f / aoHeight);
-        GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, aoBlurFbo);
-        GL20C.glUniform2f(bloomBlurStep, 1.0f, 0.0f);
-        GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, aoTexture);
-        fullscreenQuad();
-        GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, aoFbo);
-        GL20C.glUniform2f(bloomBlurStep, 0.0f, 1.0f);
-        GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, aoBlurTexture);
-        fullscreenQuad();
-
-        GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo);
-        org.lwjgl.opengl.GL11.glPopAttrib();
+            // Smoothed, because eight samples of a neighbourhood is a noisy
+            // answer to a question whose answer is smooth.
+            GL20C.glUseProgram(bloomBlurProgram);
+            GL20C.glUniform2f(bloomBlurInvSize, 1.0f / aoWidth, 1.0f / aoHeight);
+            GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, aoBlurFbo);
+            GL20C.glUniform2f(bloomBlurStep, 1.0f, 0.0f);
+            GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, aoTexture);
+            fullscreenQuad();
+            GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, aoFbo);
+            GL20C.glUniform2f(bloomBlurStep, 0.0f, 1.0f);
+            GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, aoBlurTexture);
+            fullscreenQuad();
+        } finally {
+            GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo);
+            org.lwjgl.opengl.GL11.glPopAttrib();
+        }
         return true;
     }
 
