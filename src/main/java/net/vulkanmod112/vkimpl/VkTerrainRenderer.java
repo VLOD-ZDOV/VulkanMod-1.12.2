@@ -442,6 +442,22 @@ final class VkTerrainRenderer {
      */
     private final int[] bloomTexture = new int[2];
     private final int[] bloomFbo = new int[2];
+    /**
+     * A second, tighter blur at half resolution, summed with the wide one.
+     *
+     * One scale cannot do this. A blur spreads a source's light over its area,
+     * so the wider it reaches the dimmer it gets, and a lamp post — a column of
+     * glowstone a few pixels across at an eighth of the screen — has so little
+     * light to spread that a wide blur leaves nothing anyone can see. It was
+     * reported as a fifth of a block of glow where a sphere of light was
+     * expected. Two scales added together give what a real one looks like: a
+     * bright core close in, from the tight blur, and a faint reach from the
+     * wide one.
+     */
+    private final int[] bloomNearTexture = new int[2];
+    private final int[] bloomNearFbo = new int[2];
+    private int bloomNearWidth;
+    private int bloomNearHeight;
     private int bloomWidth;
     private int bloomHeight;
     /**
@@ -1563,17 +1579,22 @@ final class VkTerrainRenderer {
         // Whether it is covered is decided by comparing the frame against what
         // the terrain looked like before the game drew into it: equal means
         // nothing was put in the way.
-        GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, bloomFbo[0]);
-        GL11C.glViewport(0, 0, bloomWidth, bloomHeight);
         GL20C.glUseProgram(bloomExtractProgram);
-        GL20C.glUniform2f(bloomExtractInvSize, 1.0f / bloomWidth, 1.0f / bloomHeight);
         GL13C.glActiveTexture(GL13C.GL_TEXTURE1);
         GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, bloomMaskTexture);
         GL13C.glActiveTexture(GL13C.GL_TEXTURE0);
         GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, sceneTexture);
+        GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, bloomFbo[0]);
+        GL11C.glViewport(0, 0, bloomWidth, bloomHeight);
+        GL20C.glUniform2f(bloomExtractInvSize, 1.0f / bloomWidth, 1.0f / bloomHeight);
+        fullscreenQuad();
+        GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, bloomNearFbo[0]);
+        GL11C.glViewport(0, 0, bloomNearWidth, bloomNearHeight);
+        GL20C.glUniform2f(bloomExtractInvSize, 1.0f / bloomNearWidth, 1.0f / bloomNearHeight);
         fullscreenQuad();
 
         GL20C.glUseProgram(bloomBlurProgram);
+        GL11C.glViewport(0, 0, bloomWidth, bloomHeight);
         GL20C.glUniform2f(bloomBlurInvSize, 1.0f / bloomWidth, 1.0f / bloomHeight);
         for (int round = 0; round < 3; round++) {
             for (int axis = 0; axis < 2; axis++) {
@@ -1582,6 +1603,16 @@ final class VkTerrainRenderer {
                 GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, bloomTexture[axis]);
                 fullscreenQuad();
             }
+        }
+        // The tight one, once across and once down. More rounds here would
+        // only turn it into the wide one again.
+        GL11C.glViewport(0, 0, bloomNearWidth, bloomNearHeight);
+        GL20C.glUniform2f(bloomBlurInvSize, 1.0f / bloomNearWidth, 1.0f / bloomNearHeight);
+        for (int axis = 0; axis < 2; axis++) {
+            GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, bloomNearFbo[1 - axis]);
+            GL20C.glUniform2f(bloomBlurStep, axis == 0 ? 1.0f : 0.0f, axis == 0 ? 0.0f : 1.0f);
+            GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, bloomNearTexture[axis]);
+            fullscreenQuad();
         }
 
         GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo);
@@ -1593,6 +1624,8 @@ final class VkTerrainRenderer {
         GL20C.glUniform1f(bloomAddStrength, bloomStrength);
         GL13C.glActiveTexture(GL13C.GL_TEXTURE1);
         GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, bloomMaskTexture);
+        GL13C.glActiveTexture(GL13C.GL_TEXTURE2);
+        GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, bloomNearTexture[0]);
         GL13C.glActiveTexture(GL13C.GL_TEXTURE0);
         GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, bloomTexture[0]);
         fullscreenQuad();
@@ -1670,6 +1703,30 @@ final class VkTerrainRenderer {
         }
         int maskWidth = Math.max(1, width / 2);
         int maskHeight = Math.max(1, height / 2);
+        bloomNearWidth = maskWidth;
+        bloomNearHeight = maskHeight;
+        for (int i = 0; i < 2; i++) {
+            bloomNearTexture[i] = GL11C.glGenTextures();
+            GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, bloomNearTexture[i]);
+            GL11C.glTexImage2D(GL11C.GL_TEXTURE_2D, 0, GL11C.GL_RGBA8, bloomNearWidth, bloomNearHeight,
+                    0, GL11C.GL_RGBA, GL11C.GL_UNSIGNED_BYTE, (java.nio.ByteBuffer) null);
+            GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_MIN_FILTER, GL11C.GL_LINEAR);
+            GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_MAG_FILTER, GL11C.GL_LINEAR);
+            GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_WRAP_S, GL12C.GL_CLAMP_TO_EDGE);
+            GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_WRAP_T, GL12C.GL_CLAMP_TO_EDGE);
+            bloomNearFbo[i] = GL30C.glGenFramebuffers();
+            GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, bloomNearFbo[i]);
+            GL30C.glFramebufferTexture2D(GL30C.GL_FRAMEBUFFER, GL30C.GL_COLOR_ATTACHMENT0,
+                    GL11C.GL_TEXTURE_2D, bloomNearTexture[i], 0);
+            if (GL30C.glCheckFramebufferStatus(GL30C.GL_FRAMEBUFFER) != GL30C.GL_FRAMEBUFFER_COMPLETE) {
+                LOGGER.error("Bloom framebuffer incomplete; the effect is off for this session");
+                GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo);
+                GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, prevTexture);
+                destroyBloomTargets();
+                bloomFailed = true;
+                return false;
+            }
+        }
         bloomMaskTexture = GL11C.glGenTextures();
         GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, bloomMaskTexture);
         GL11C.glTexImage2D(GL11C.GL_TEXTURE_2D, 0, GL11C.GL_RGBA8, maskWidth, maskHeight,
@@ -1712,6 +1769,16 @@ final class VkTerrainRenderer {
             if (bloomTexture[i] != 0) {
                 GL11C.glDeleteTextures(bloomTexture[i]);
                 bloomTexture[i] = 0;
+            }
+        }
+        for (int i = 0; i < 2; i++) {
+            if (bloomNearFbo[i] != 0) {
+                GL30C.glDeleteFramebuffers(bloomNearFbo[i]);
+                bloomNearFbo[i] = 0;
+            }
+            if (bloomNearTexture[i] != 0) {
+                GL11C.glDeleteTextures(bloomNearTexture[i]);
+                bloomNearTexture[i] = 0;
             }
         }
         if (bloomMaskFbo != 0) {
@@ -2802,11 +2869,12 @@ final class VkTerrainRenderer {
         bloomAddProgram = buildQuadProgram(
                 "uniform sampler2D uSource;\n"
                         + "uniform sampler2D uScene;\n"
+                        + "uniform sampler2D uNear;\n"
                         + "uniform vec2 uInvSize;\n"
                         + "uniform float uStrength;\n"
                         + "void main() {\n"
                         + "    vec2 uv = gl_FragCoord.xy * uInvSize;\n"
-                        + "    vec3 glow = texture2D(uSource, uv).rgb;\n"
+                        + "    vec3 glow = texture2D(uSource, uv).rgb + texture2D(uNear, uv).rgb;\n"
                         // Held back on the surfaces producing it, and this is
                         // not taste. Adding light to a pixel that is already
                         // near the top of an eight-bit channel does not make it
@@ -2821,6 +2889,7 @@ final class VkTerrainRenderer {
                         + "}\n");
         GL20C.glUseProgram(bloomAddProgram);
         GL20C.glUniform1i(GL20C.glGetUniformLocation(bloomAddProgram, "uScene"), 1);
+        GL20C.glUniform1i(GL20C.glGetUniformLocation(bloomAddProgram, "uNear"), 2);
         GL20C.glUseProgram(0);
         bloomAddInvSize = GL20C.glGetUniformLocation(bloomAddProgram, "uInvSize");
 
