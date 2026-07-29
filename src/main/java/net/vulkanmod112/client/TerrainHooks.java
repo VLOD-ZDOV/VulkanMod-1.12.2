@@ -408,6 +408,22 @@ public final class TerrainHooks {
      * that never brings Vulkan up would otherwise grow this buffer forever, and
      * frames that arrive late are of no use to anyone.
      */
+    /**
+     * Adds the terrain's glow once the game has drawn the rest of the world.
+     *
+     * Late on purpose: at this point the frame holds entities, particles,
+     * weather and water as well as terrain, so a mob in front of a lava lake
+     * is inside the glow rather than pasted over it, and a torch throws light
+     * onto the sky, which is drawn long after this mod's own frame is finished.
+     */
+    public static void applySceneBloom() {
+        VulkanBridge bridge = VulkanLoader.bridgeIfReady();
+        if (bridge == null || !VulkanConfig.isTerrainEnabled()) {
+            return;
+        }
+        bridge.applySceneBloom();
+    }
+
     public static void flushAtlasAnimations() {
         VulkanBridge bridge = VulkanLoader.bridgeIfReady();
         if (bridge == null || !VulkanConfig.isTerrainEnabled()) {

@@ -14,7 +14,11 @@
 
   The glow is held back on the surfaces producing it, which the first build did not do and looked it: lava and glowstone came out as sheets of flat colour with their patterns gone. Adding light to a pixel already near the top of an eight-bit channel does not make it brighter, it makes it flat — there is no headroom anywhere in this frame, so the only thing the addition can spend is the texture's own detail. And a glow is not the source being brighter, it is light that landed somewhere else, so that is what is added now and the source keeps the look it earned.
 
-  Terrain only, and there is no way around that in this version: this mod's frame is composited into the game's before the game has drawn a single entity or particle, so a torch in the world glows and a burning creature does not, and a mob standing in front of lava is drawn over the glow rather than in it.
+  The glow is added once the game has finished drawing the world — after entities, particles, weather and water, and before the hand — rather than in this mod's own composite, which happens before the game has drawn a single creature. So a mob standing in front of lava is inside the glow rather than pasted over it, and a torch throws light onto the sky, which is not drawn until long after this renderer is done. The frame's own analysis said a full-scene effect was impossible here and it was wrong: the game binds one framebuffer for the whole world and its own profiler names the boundary, a section called "hand" opened once the world is finished, so the injection is on that label rather than on a line number.
+
+  Nothing Vulkan owns is read at that point, which is what the shape of this is really about. By then the colour target has been handed back through a semaphore and reading it would race the next frame, so the one thing the last pass still needed from it — which pixels are lights, to keep the glow off the surfaces making it — is copied into a texture of this renderer's own while the target is still safe to read.
+
+  What still does not glow is the creatures themselves: a burning creeper spills no light. Knowing which pixels of an entity are a light needs something the game does not record anywhere this can reach.
 
 - **Foliage Sway**, off by default. Grass, flowers, saplings and crops lean in the wind. The vertex is moved rather than the shading faked, and only the top pair of corners of each quad — the bottom of a plant is in the ground and stays there.
 

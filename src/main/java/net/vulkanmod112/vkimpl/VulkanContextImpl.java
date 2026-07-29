@@ -561,6 +561,18 @@ public final class VulkanContextImpl implements VulkanBridge {
     }
 
     @Override
+    public void applySceneBloom() {
+        // Not synchronized: this runs on the render thread inside the game's
+        // own world pass, and it touches only OpenGL objects this renderer
+        // owns. Taking the monitor here would put it behind whatever a chunk
+        // builder is doing, in the middle of a frame.
+        if (!initialized || terrainRenderer == null) {
+            return;
+        }
+        terrainRenderer.applySceneBloom();
+    }
+
+    @Override
     public synchronized void updateAtlasRegions(int[] header, int headerCount,
                                                 int[] pixels, int pixelCount) {
         if (!initialized || terrainRenderer == null) {

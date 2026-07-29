@@ -441,11 +441,17 @@ final class VulkanOptions {
                                         + "of an opaque pixel that was carrying a constant, and "
                                         + "the glow is pulled out of that. Three passes over half "
                                         + "the screen, on the GPU only. "
-                                        + "Terrain only. This mod's frame is composited into the "
-                                        + "game's before the game has drawn a single entity or "
-                                        + "particle, so a torch in the world glows and a burning "
-                                        + "creature does not, and a mob standing in front of lava "
-                                        + "is drawn over the glow rather than in it.",
+                                        + "The glow is added once the game has finished drawing "
+                                        + "the world — after entities, particles, weather and "
+                                        + "water, and before the hand — so a mob standing in front "
+                                        + "of lava is inside the glow rather than pasted over it, "
+                                        + "and a torch throws light onto the sky, which is not "
+                                        + "drawn until long after this mod's own frame is "
+                                        + "finished. What still does not glow is the creatures "
+                                        + "themselves: a burning creeper spills no light, because "
+                                        + "knowing which pixels of an entity are a light needs "
+                                        + "something the game does not record anywhere this can "
+                                        + "reach.",
                                 Cost.of(Level.NONE, Level.LOW, Level.LOW),
                                 "Needs Vulkan Terrain and Material Tags on.",
                                 0, 100, 5, "%", "OFF",

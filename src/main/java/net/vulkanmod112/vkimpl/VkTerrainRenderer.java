@@ -444,6 +444,24 @@ final class VkTerrainRenderer {
     private final int[] bloomFbo = new int[2];
     private int bloomWidth;
     private int bloomHeight;
+    /**
+     * A copy of the emissive mask, taken while the Vulkan target may still be
+     * read, at half resolution.
+     *
+     * The glow is now added after the game has drawn its whole world, and by
+     * then the colour target has been handed back to Vulkan through a
+     * semaphore — reading it there would be a race with the next frame. The
+     * mask is the only thing the last pass still needed from it, so it is taken
+     * inside the window and kept here. Half resolution because all it decides
+     * is how much of the glow a pixel is allowed to receive, and a boundary two
+     * pixels soft on that is better than a hard one, not worse.
+     */
+    private int bloomMaskTexture;
+    private int bloomMaskFbo;
+    private int bloomMaskProgram;
+    private int bloomMaskInvSize = -1;
+    /** Set when the glow is blurred and waiting; cleared when it is added. */
+    private boolean bloomReady;
     private int bloomExtractProgram;
     private int bloomBlurProgram;
     private int bloomAddProgram;
@@ -1422,7 +1440,7 @@ final class VkTerrainRenderer {
             // After the terrain is in the frame and before the game draws
             // anything else into it.
             if (bloomStrength > 0.0f && !bloomFailed) {
-                bloomPass();
+                bloomPrepare();
             }
 
             org.lwjgl.opengl.GL11.glPopAttrib();
@@ -1459,7 +1477,7 @@ final class VkTerrainRenderer {
      * the silhouette of a lava lake would be a lake with a hard edge. Added
      * separately and blended, it reaches over the sky the way light does.
      */
-    private void bloomPass() {
+    private void bloomPrepare() {
         if (!ensureBloomTargets()) {
             return;
         }
@@ -1499,20 +1517,66 @@ final class VkTerrainRenderer {
             }
         }
 
-        // Back into the game's frame, added rather than laid over it.
+        // The mask, at half resolution, taken here because this is the last
+        // moment the Vulkan target may be read.
+        GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, bloomMaskFbo);
+        GL11C.glViewport(0, 0, Math.max(1, width / 2), Math.max(1, height / 2));
+        GL20C.glUseProgram(bloomMaskProgram);
+        GL20C.glUniform2f(bloomMaskInvSize, 2.0f / width, 2.0f / height);
+        GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, glColorTexture);
+        fullscreenQuad();
+
         GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo);
         org.lwjgl.opengl.GL11.glPopAttrib();
+        bloomReady = true;
+    }
+
+    /**
+     * Adds the glow to the frame, once the game has drawn everything into it.
+     *
+     * Called from the world render, after terrain, entities, particles, weather
+     * and water and before the hand — which is the one moment the frame holds
+     * the whole scene. Doing it here rather than in the composite is what puts
+     * a mob standing in front of lava *in* the glow instead of on top of it,
+     * and what lets a torch throw light onto the sky behind it, which it could
+     * not before: the sky is not drawn until long after the composite.
+     *
+     * Nothing owned by Vulkan is read here. The blurred glow and the mask are
+     * both ordinary OpenGL textures of ours, filled while the colour target was
+     * still ours to read; reading that target at this point would race the next
+     * frame, because the semaphore handing it back has already been signalled.
+     */
+    void applySceneBloom() {
+        if (!bloomReady || bloomStrength <= 0.0f || bloomFailed || bloomTexture[0] == 0) {
+            return;
+        }
+        bloomReady = false;
+        int prevProgram = GL11C.glGetInteger(GL20C.GL_CURRENT_PROGRAM);
+        int prevActive = GL11C.glGetInteger(GL13C.GL_ACTIVE_TEXTURE);
+        org.lwjgl.opengl.GL11.glPushAttrib(org.lwjgl.opengl.GL11.GL_ENABLE_BIT
+                | org.lwjgl.opengl.GL11.GL_DEPTH_BUFFER_BIT
+                | org.lwjgl.opengl.GL11.GL_COLOR_BUFFER_BIT
+                | org.lwjgl.opengl.GL11.GL_TEXTURE_BIT
+                | org.lwjgl.opengl.GL11.GL_CURRENT_BIT
+                | org.lwjgl.opengl.GL11.GL_POLYGON_BIT);
+        GL11C.glDisable(org.lwjgl.opengl.GL11.GL_ALPHA_TEST);
+        GL11C.glDisable(GL11C.GL_CULL_FACE);
+        GL11C.glDisable(GL11C.GL_SCISSOR_TEST);
+        GL11C.glDisable(GL11C.GL_DEPTH_TEST);
+        GL11C.glDepthMask(false);
         GL11C.glEnable(GL11C.GL_BLEND);
         GL11C.glBlendFunc(GL11C.GL_ONE, GL11C.GL_ONE);
         GL20C.glUseProgram(bloomAddProgram);
         GL20C.glUniform2f(bloomAddInvSize, 1.0f / width, 1.0f / height);
         GL20C.glUniform1f(bloomAddStrength, bloomStrength);
         GL13C.glActiveTexture(GL13C.GL_TEXTURE1);
-        GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, glColorTexture);
+        GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, bloomMaskTexture);
         GL13C.glActiveTexture(GL13C.GL_TEXTURE0);
         GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, bloomTexture[0]);
         fullscreenQuad();
-        GL11C.glDisable(GL11C.GL_BLEND);
+        org.lwjgl.opengl.GL11.glPopAttrib();
+        GL20C.glUseProgram(prevProgram);
+        GL13C.glActiveTexture(prevActive);
     }
 
     private void fullscreenQuad() {
@@ -1581,6 +1645,28 @@ final class VkTerrainRenderer {
                 return false;
             }
         }
+        int maskWidth = Math.max(1, width / 2);
+        int maskHeight = Math.max(1, height / 2);
+        bloomMaskTexture = GL11C.glGenTextures();
+        GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, bloomMaskTexture);
+        GL11C.glTexImage2D(GL11C.GL_TEXTURE_2D, 0, GL11C.GL_RGBA8, maskWidth, maskHeight,
+                0, GL11C.GL_RGBA, GL11C.GL_UNSIGNED_BYTE, (java.nio.ByteBuffer) null);
+        GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_MIN_FILTER, GL11C.GL_LINEAR);
+        GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_MAG_FILTER, GL11C.GL_LINEAR);
+        GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_WRAP_S, GL12C.GL_CLAMP_TO_EDGE);
+        GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_WRAP_T, GL12C.GL_CLAMP_TO_EDGE);
+        bloomMaskFbo = GL30C.glGenFramebuffers();
+        GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, bloomMaskFbo);
+        GL30C.glFramebufferTexture2D(GL30C.GL_FRAMEBUFFER, GL30C.GL_COLOR_ATTACHMENT0,
+                GL11C.GL_TEXTURE_2D, bloomMaskTexture, 0);
+        if (GL30C.glCheckFramebufferStatus(GL30C.GL_FRAMEBUFFER) != GL30C.GL_FRAMEBUFFER_COMPLETE) {
+            LOGGER.error("Bloom mask framebuffer incomplete; the effect is off for this session");
+            GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo);
+            GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, prevTexture);
+            destroyBloomTargets();
+            bloomFailed = true;
+            return false;
+        }
         GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo);
         GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, prevTexture);
         try {
@@ -1605,8 +1691,17 @@ final class VkTerrainRenderer {
                 bloomTexture[i] = 0;
             }
         }
+        if (bloomMaskFbo != 0) {
+            GL30C.glDeleteFramebuffers(bloomMaskFbo);
+            bloomMaskFbo = 0;
+        }
+        if (bloomMaskTexture != 0) {
+            GL11C.glDeleteTextures(bloomMaskTexture);
+            bloomMaskTexture = 0;
+        }
         bloomWidth = 0;
         bloomHeight = 0;
+        bloomReady = false;
     }
 
     /**
@@ -2686,13 +2781,24 @@ final class VkTerrainRenderer {
                         // orange with its pattern gone. What a glow is, is the
                         // light that landed somewhere else, so that is what is
                         // added — the source keeps the look it earned.
-                        + "    float self = clamp((texture2D(uScene, uv).a - 0.5) * 2.0, 0.0, 1.0);\n"
+                        + "    float self = texture2D(uScene, uv).r;\n"
                         + "    gl_FragColor = vec4(glow * uStrength * 1.8 * (1.0 - self), 0.0);\n"
                         + "}\n");
         GL20C.glUseProgram(bloomAddProgram);
         GL20C.glUniform1i(GL20C.glGetUniformLocation(bloomAddProgram, "uScene"), 1);
         GL20C.glUseProgram(0);
         bloomAddInvSize = GL20C.glGetUniformLocation(bloomAddProgram, "uInvSize");
+
+        // Nothing but the mask, kept for the pass that runs after the Vulkan
+        // target has been handed back.
+        bloomMaskProgram = buildQuadProgram(
+                "uniform sampler2D uSource;\n"
+                        + "uniform vec2 uInvSize;\n"
+                        + "void main() {\n"
+                        + "    float a = texture2D(uSource, gl_FragCoord.xy * uInvSize).a;\n"
+                        + "    gl_FragColor = vec4(clamp((a - 0.5) * 2.0, 0.0, 1.0));\n"
+                        + "}\n");
+        bloomMaskInvSize = GL20C.glGetUniformLocation(bloomMaskProgram, "uInvSize");
         bloomAddStrength = GL20C.glGetUniformLocation(bloomAddProgram, "uStrength");
     }
 

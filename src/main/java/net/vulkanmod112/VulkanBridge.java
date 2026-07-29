@@ -136,6 +136,13 @@ public interface VulkanBridge {
      */
     void updateAtlasRegions(int[] header, int headerCount, int[] pixels, int pixelCount);
 
+    /**
+     * Draws the terrain's glow into the game's frame, once the game has drawn
+     * everything else in the world into it. Does nothing when bloom is off or
+     * when no glow was prepared this frame.
+     */
+    void applySceneBloom();
+
     /** Tells the Vulkan side which GL texture holds the 16x16 lightmap. */
     void setLightmap(int lightmapGlTextureId);
 

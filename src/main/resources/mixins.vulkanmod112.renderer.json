@@ -28,6 +28,7 @@
     "EntityBrightnessMixin",
     "ParticleBrightnessMixin",
     "HeldItemLightMixin",
-    "MaterialTagMixin"
+    "MaterialTagMixin",
+    "SceneBloomMixin"
   ]
 }
