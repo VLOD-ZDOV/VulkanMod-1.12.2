@@ -328,6 +328,36 @@ final class VulkanOptions {
                                         VulkanConfig.setWaterReflection(value);
                                     }
                                 }),
+                        new VRangeOption("Water Waves",
+                                "How much a moving wave pattern tilts the surface of water. "
+                                        + "Nothing is displaced and nothing is built: the water "
+                                        + "stays exactly where the game put it, a boat floats where "
+                                        + "it always did, and what moves is only which way the "
+                                        + "surface is treated as facing. That is enough, because "
+                                        + "every answer this renderer has about water already comes "
+                                        + "from that direction — the sky reflection breaks up along "
+                                        + "the crests instead of lying flat, and a torch held over "
+                                        + "the water scatters across it rather than landing as one "
+                                        + "smooth patch. Only the top of a water block waves; the "
+                                        + "sides are the walls of the channel it runs in. The "
+                                        + "pattern repeats every sixteen blocks, which is the price "
+                                        + "of it staying still while you walk instead of swimming "
+                                        + "along behind you.",
+                                Cost.of(Level.NONE, Level.LOW, Level.NONE),
+                                "Needs Vulkan Water and Glass on; the OpenGL copy of the water "
+                                        + "knows nothing about this.",
+                                0, 100, 5, "%", "OFF",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getWaterWaves();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setWaterWaves(value);
+                                    }
+                                }),
                         new VRangeOption("Height Fog Depth",
                                 "How far below you the ground has to be before height fog has "
                                         + "taken nearly all of the colour the setting above lets "

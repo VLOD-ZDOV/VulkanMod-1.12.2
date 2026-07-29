@@ -287,6 +287,16 @@ public final class VulkanConfig {
      * knows nothing about this.
      */
     static final int DEF_WATER_REFLECTION = 0;
+    /**
+     * How much the water surface is tilted by a moving wave pattern.
+     *
+     * Off by default. Nothing is displaced — the water stays exactly where the
+     * game put it and a boat floats where it always did; what moves is which
+     * way the surface is treated as facing, so the reflection breaks up along
+     * the crests and light scatters across it. Needs the translucent layer
+     * drawn in Vulkan.
+     */
+    static final int DEF_WATER_WAVES = 0;
     static final boolean DEF_FOG = true;
     static final boolean DEF_ZOOM = true;
     /** Stored as an integer so it fits the config and the slider; 4 = quarter FOV. */
@@ -329,6 +339,7 @@ public final class VulkanConfig {
     private static int heightFog = DEF_HEIGHT_FOG;
     private static int heightFogDepth = DEF_HEIGHT_FOG_DEPTH;
     private static int waterReflection = DEF_WATER_REFLECTION;
+    private static int waterWaves = DEF_WATER_WAVES;
     private static boolean fogEnabled = DEF_FOG;
     private static boolean zoomEnabled = DEF_ZOOM;
     private static int zoomFactor = DEF_ZOOM_FACTOR;
@@ -533,6 +544,12 @@ public final class VulkanConfig {
                         + "colour, which at a grazing angle is what the horizon is, so it follows "
                         + "sunrise, weather and being underwater by itself. Needs Vulkan Water "
                         + "and Glass on.");
+        waterWaves = config.getInt("waterWaves", CATEGORY_GENERAL, DEF_WATER_WAVES, 0, 100,
+                "How much a moving wave pattern tilts the water surface, in percent. 0 is off. "
+                        + "Nothing is displaced: the water stays flat and only the direction it "
+                        + "is treated as facing moves, so the sky reflection breaks up along the "
+                        + "crests and a torch scatters across it. Needs Vulkan Water and Glass "
+                        + "on.");
         fogEnabled = config.getBoolean("fog", CATEGORY_GENERAL, DEF_FOG,
                 "Fade Vulkan terrain into the distance the way the rest of the scene already does. "
                         + "Off leaves the world ending in a hard edge, which is a little faster.");
@@ -584,6 +601,7 @@ public final class VulkanConfig {
         setHeightFog(DEF_HEIGHT_FOG);
         setHeightFogDepth(DEF_HEIGHT_FOG_DEPTH);
         setWaterReflection(DEF_WATER_REFLECTION);
+        setWaterWaves(DEF_WATER_WAVES);
         setFogEnabled(DEF_FOG);
         setZoomEnabled(DEF_ZOOM);
         setZoomFactor(DEF_ZOOM_FACTOR);
@@ -756,6 +774,16 @@ public final class VulkanConfig {
     public static void setWaterReflection(int value) {
         waterReflection = value;
         store(CATEGORY_GENERAL, "waterReflection", value);
+        applySystemProperties();
+    }
+
+    public static int getWaterWaves() {
+        return waterWaves;
+    }
+
+    public static void setWaterWaves(int value) {
+        waterWaves = value;
+        store(CATEGORY_GENERAL, "waterWaves", value);
         applySystemProperties();
     }
 
@@ -960,6 +988,7 @@ public final class VulkanConfig {
         System.setProperty("vulkanmod112.heightFog", Integer.toString(heightFog));
         System.setProperty("vulkanmod112.heightFogDepth", Integer.toString(heightFogDepth));
         System.setProperty("vulkanmod112.waterReflection", Integer.toString(waterReflection));
+        System.setProperty("vulkanmod112.waterWaves", Integer.toString(waterWaves));
         System.setProperty("vulkanmod112.showMaterials", Boolean.toString(showMaterials));
     }
 

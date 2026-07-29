@@ -19,6 +19,9 @@ layout(set = 0, binding = 3, std140) uniform Frame {
     // Pairs: a rectangle of the block atlas, then the material it stands for
     // in .x. See spriteMaterial for why the translucent layer needs these.
     vec4 materialSprites[16];
+    // x = wave strength (0 = off), yz = the camera's own world x and z reduced
+    // modulo the wave lattice. See waveGradient for what that is for.
+    vec4 water;
 } frame;
 
 layout(push_constant) uniform Draw {
@@ -305,6 +308,64 @@ float fresnel(vec3 normal) {
     return f2 * f2 * f;
 }
 
+// The wave lattice, in blocks. Every wave below repeats exactly over this
+// distance on both horizontal axes, and that is not decoration: see waveXZ.
+const float WAVE_LATTICE = 16.0;
+const float WAVE_K = 6.2831853 / WAVE_LATTICE;
+// The steepest slope the surface is tilted to at full strength, as a rise over
+// a run. Water in this game is flat and stays flat — nothing is displaced, so
+// this is what the surface is shaded as, not what it is.
+const float WAVE_SLOPE = 0.3;
+// How much of the sky a tilted facet gains or loses, at full strength.
+const float WAVE_SHADE = 0.14;
+
+/**
+ * A horizontal position that does not travel with the player.
+ *
+ * vRelative is the surface with the eye at the origin, so using it directly
+ * would drag every wave along behind the camera. The world position it came
+ * from is not available in full and could not be used if it were: Minecraft
+ * coordinates reach tens of millions, where a 32-bit float can no longer
+ * separate one block from the next.
+ *
+ * Neither is needed. What a wave wants is a phase, and a phase is periodic —
+ * so the camera's world position is reduced modulo the lattice on the Java
+ * side, in double precision where that is exact, and only the remainder is
+ * sent. Adding it back gives the world position shifted by some whole number
+ * of lattice steps, which every wave here is built to be blind to: each phase
+ * is a whole multiple of 2*pi over the lattice, along a direction with whole
+ * components. Continuous across chunk borders, identical from anywhere, and
+ * two adds.
+ */
+vec2 waveXZ() {
+    return vRelative.xz + frame.water.yz;
+}
+
+/**
+ * The slope of the water surface at this point, as a rise over a run on each
+ * horizontal axis, at most 1 in each.
+ *
+ * Four travelling sine waves crossing at unrelated angles. The derivative is
+ * written out rather than sampled, because the sines are already being
+ * evaluated and a cosine of the same argument is free next to them — and a
+ * normal taken from screen-space derivatives of a height field would be a
+ * measurement of the pixel grid rather than of the water.
+ *
+ * The directions are whole-numbered pairs on purpose (see waveXZ). What that
+ * costs is that the pattern repeats every sixteen blocks; what it buys is that
+ * it never swims when the player walks, which is the failure that would be
+ * noticed.
+ */
+vec2 waveGradient(vec2 p, float t) {
+    vec2 g = vec2(1.0, 0.0) * cos(WAVE_K * p.x + 0.9 * t);
+    g += 0.60 * vec2(0.0, 2.0) * cos(WAVE_K * 2.0 * p.y + 1.5 * t);
+    g += 0.45 * vec2(2.0, 1.0) * cos(WAVE_K * (2.0 * p.x + p.y) + 1.9 * t);
+    g += 0.28 * vec2(1.0, -3.0) * cos(WAVE_K * (p.x - 3.0 * p.y) + 2.6 * t);
+    // The sum of the four amplitudes times their own directions, so the result
+    // reaches one only where every wave crests along the same axis at once.
+    return g * (1.0 / 4.09);
+}
+
 /**
  * Thickens the fog towards the ground below the camera.
  *
@@ -357,6 +418,26 @@ void main() {
     if (foliage) {
         normal = foliageNormal(normal);
     }
+    // Waves, before anything asks which way the water faces. They are a change
+    // to the normal and to nothing else, so every answer already built on the
+    // normal moves with them: the reflection breaks up along the crests, and a
+    // torch held over water is scattered across it instead of landing as one
+    // smooth patch. Only the top: the sides of a water block are the walls of
+    // the channel it runs in, and a wave has no business tilting those.
+    float waveShade = 1.0;
+    if (frame.water.x > 0.0 && material == MATERIAL_WATER && normal.y > 0.9) {
+        vec2 g = waveGradient(waveXZ(), frame.frameInfo.x);
+        vec2 slope = g * (WAVE_SLOPE * frame.water.x);
+        normal = normalize(vec3(-slope.x, 1.0, -slope.y));
+        // What the tilt does to the light the surface catches. The fresnel term
+        // alone would leave the water flat wherever the reflection is weak —
+        // looking down at it, which is most of the time — so a facet turned
+        // towards the light also brightens. The direction is fixed rather than
+        // taken from the sun, which is what vanilla does for its own faces: it
+        // shades the four sides of a block differently and none of them follow
+        // the sky.
+        waveShade = 1.0 + WAVE_SHADE * frame.water.x * dot(g, vec2(-0.82, -0.57));
+    }
     float backFace = foliage ? BACK_FACE_LIGHT_FOLIAGE : BACK_FACE_LIGHT;
     for (int i = 0; i < lightCount; ++i) {
         vec4 source = frame.lights[i];
@@ -381,7 +462,7 @@ void main() {
         }
     }
     vec3 light = texture(lightmap, vec2(blockLight, vLight.y)).rgb;
-    vec3 shaded = tex.rgb * vColor.rgb * light;
+    vec3 shaded = tex.rgb * vColor.rgb * light * waveShade;
     if (frame.frameInfo.w > 0.5) {
         shaded = materialColor(material) * light;
     }

@@ -340,6 +340,18 @@ final class VkTerrainRenderer {
     private boolean showMaterials;
     /** How much of a water surface becomes sky at a grazing angle; 0 is off. */
     private float waterReflection;
+    /** How far the water surface is tilted by the wave pattern; 0 is off. */
+    private float waterWaves;
+    /**
+     * The camera in world coordinates, kept as doubles.
+     *
+     * Everything else here is camera-relative, which is what the shaders want
+     * and what keeps them in single precision. The waves are the one thing that
+     * must not be: a pattern anchored to the camera swims along behind the
+     * player. Only the remainder modulo the wave lattice ever leaves this side.
+     */
+    private double viewWorldX;
+    private double viewWorldZ;
 
     /**
      * Atlas rectangles the translucent shader classifies its fragments by.
@@ -574,6 +586,10 @@ final class VkTerrainRenderer {
         }
         ctx.ensureGlCapabilities();
         ensureBaseResources();
+        // Before the first layer opens the frame, because that is where the
+        // uniforms are written and the translucent pass reuses them.
+        viewWorldX = viewX;
+        viewWorldZ = viewZ;
         if (layerOrdinal == LAYER_TRANSLUCENT) {
             // Its own pass, its own submission, and it runs after the opaque
             // frame has already been composited — so none of the state machine
@@ -1788,6 +1804,23 @@ final class VkTerrainRenderer {
         for (int i = 0; i < materialSpriteCount * 8; i++) {
             MemoryUtil.memPutFloat(base + 656 + i * 4L, materialSprites[i]);
         }
+        // vec4 water at 912, straight after the sprite table's sixteen vec4s.
+        MemoryUtil.memPutFloat(base + 912, waterWaves);
+        // yz: where the camera is on the wave lattice. The reduction happens
+        // here, in double precision, because that is the only place it can:
+        // world coordinates in this game reach tens of millions, and a float
+        // stops being able to separate one block from the next long before
+        // that. What crosses into the shader is a remainder under sixteen.
+        MemoryUtil.memPutFloat(base + 916, (float) waveWrap(viewWorldX));
+        MemoryUtil.memPutFloat(base + 920, (float) waveWrap(viewWorldZ));
+        MemoryUtil.memPutFloat(base + 924, 0.0f);
+    }
+
+    /** The wave lattice from terrain.frag, which this side has to agree with. */
+    private static final double WAVE_LATTICE = 16.0;
+
+    private static double waveWrap(double world) {
+        return world - Math.floor(world / WAVE_LATTICE) * WAVE_LATTICE;
     }
 
     /**
@@ -1811,6 +1844,7 @@ final class VkTerrainRenderer {
         heightFogFalloff = 2.0f / depth;
         showMaterials = "true".equals(System.getProperty("vulkanmod112.showMaterials"));
         waterReflection = clampPercent(intProperty("vulkanmod112.waterReflection", 0));
+        waterWaves = clampPercent(intProperty("vulkanmod112.waterWaves", 0));
     }
 
     private static float clampPercent(int value) {
