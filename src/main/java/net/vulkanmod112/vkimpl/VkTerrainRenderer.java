@@ -1314,11 +1314,17 @@ final class VkTerrainRenderer {
         // n squared, and the same answer for a gaussian.
         GL20C.glUseProgram(bloomBlurProgram);
         GL20C.glUniform2f(bloomBlurInvSize, 1.0f / bloomWidth, 1.0f / bloomHeight);
-        for (int axis = 0; axis < 2; axis++) {
-            GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, bloomFbo[1 - axis]);
-            GL20C.glUniform2f(bloomBlurStep, axis == 0 ? 1.0f : 0.0f, axis == 0 ? 0.0f : 1.0f);
-            GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, bloomTexture[axis]);
-            fullscreenQuad();
+        // Twice, and it ends where it started because each round is two passes.
+        // Blurring a blur widens it: what a second round buys is a falloff that
+        // fades out instead of ending, which is the difference between light
+        // spilling and a bright ring drawn round a block.
+        for (int round = 0; round < 2; round++) {
+            for (int axis = 0; axis < 2; axis++) {
+                GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, bloomFbo[1 - axis]);
+                GL20C.glUniform2f(bloomBlurStep, axis == 0 ? 1.0f : 0.0f, axis == 0 ? 0.0f : 1.0f);
+                GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, bloomTexture[axis]);
+                fullscreenQuad();
+            }
         }
 
         // Back into the game's frame, added rather than laid over it.
@@ -1348,8 +1354,15 @@ final class VkTerrainRenderer {
 
     /** Half-resolution targets and the three programs; built once per size. */
     private boolean ensureBloomTargets() {
-        int wantWidth = Math.max(1, width / 2);
-        int wantHeight = Math.max(1, height / 2);
+        // A quarter of the screen on each axis, not a half. What makes a glow
+        // read as a glow is how far it reaches, and a blur of a fixed number of
+        // taps reaches twice as far across the frame for every halving of the
+        // target it runs on — while costing a quarter as much. At half
+        // resolution the halo stopped about six pixels out, which is close
+        // enough to the edge of the block to be taken for the block being
+        // brighter, which is exactly the thing it must not be taken for.
+        int wantWidth = Math.max(1, width / 4);
+        int wantHeight = Math.max(1, height / 4);
         if (bloomFbo[0] != 0 && wantWidth == bloomWidth && wantHeight == bloomHeight) {
             return true;
         }
@@ -2491,7 +2504,7 @@ final class VkTerrainRenderer {
                         // light that landed somewhere else, so that is what is
                         // added — the source keeps the look it earned.
                         + "    float self = clamp((texture2D(uScene, uv).a - 0.5) * 2.0, 0.0, 1.0);\n"
-                        + "    gl_FragColor = vec4(glow * uStrength * (1.0 - 0.85 * self), 0.0);\n"
+                        + "    gl_FragColor = vec4(glow * uStrength * (1.0 - self), 0.0);\n"
                         + "}\n");
         GL20C.glUseProgram(bloomAddProgram);
         GL20C.glUniform1i(GL20C.glGetUniformLocation(bloomAddProgram, "uScene"), 1);
