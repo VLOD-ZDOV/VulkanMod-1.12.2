@@ -710,6 +710,33 @@ final class VulkanOptions {
                                         VulkanConfig.setOwnVisibilityWalk(value);
                                     }
                                 }),
+                        new VSwitchOption("Visibility Seed Cache",
+                                "Remember which way out of the camera's own chunk the search is "
+                                        + "allowed to start. Working that out means reading all "
+                                        + "4096 block states of the section the eye is in, and the "
+                                        + "search does it every time it runs — which while the "
+                                        + "world fills in is every frame. The answer changes only "
+                                        + "when the camera moves to a different block or that "
+                                        + "section is rebuilt, and both are what it is keyed on. No "
+                                        + "measurable framerate change in testing; it is here "
+                                        + "because hundreds of thousands of repeated block reads a "
+                                        + "second are worth removing whether or not they show up in "
+                                        + "a frame time. Turn it off alongside Own Visibility "
+                                        + "Search if a chunk is missing from one spot and comes "
+                                        + "back when you step off it — this is the other thing that "
+                                        + "can decide a chunk is not reachable.",
+                                Cost.of(Level.NONE, Level.NONE, Level.NONE), null,
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return VulkanConfig.isVisibilitySeedCacheEnabled();
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        VulkanConfig.setVisibilitySeedCacheEnabled(value);
+                                    }
+                                }),
                         new VSwitchOption("Fast Rebuild Scan",
                                 "Hand the last step of the terrain setup only the chunks it can do "
                                         + "anything with. That step walks every chunk on screen "
