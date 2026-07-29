@@ -317,7 +317,14 @@ public final class MaterialRuns {
                     || block instanceof net.minecraft.block.BlockReed
                     // Flat on the water: all four of its corners are level, and
                     // the rule that moves the top pair would tear it in half.
-                    || block instanceof net.minecraft.block.BlockLilyPad;
+                    || block instanceof net.minecraft.block.BlockLilyPad
+                    // Boxes rather than crossed quads. A cocoa pod is a small
+                    // block fixed to the side of a trunk and chorus is a
+                    // structure of joined boxes: shearing the top of either
+                    // away from its bottom pulls it off what it is growing on.
+                    || block instanceof net.minecraft.block.BlockCocoa
+                    || block instanceof net.minecraft.block.BlockChorusPlant
+                    || block instanceof net.minecraft.block.BlockChorusFlower;
             return still ? FOLIAGE : PLANT;
         }
         // Leaves: lit as a volume like the rest, never moved. A leaf block is a
