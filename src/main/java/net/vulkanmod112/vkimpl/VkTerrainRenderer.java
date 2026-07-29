@@ -6,6 +6,7 @@ import org.lwjgl.PointerBuffer;
 import org.lwjgl.opengl.EXTMemoryObject;
 import org.lwjgl.opengl.EXTSemaphore;
 import org.lwjgl.opengl.GL11C;
+import org.lwjgl.opengl.GL12C;
 import org.lwjgl.opengl.GL13C;
 import org.lwjgl.opengl.GL20C;
 import org.lwjgl.opengl.GL30C;
@@ -423,6 +424,34 @@ final class VkTerrainRenderer {
     // Composite GL programs: [0] writes gl_FragDepth, [1] colour only (depth
     // came from the hardware blit). Index with depthBlit ? 1 : 0.
     private final int[] compositePrograms = new int[2];
+    /**
+     * Bloom, done on the OpenGL side because the composite already is.
+     *
+     * The Vulkan colour target is exported as a GL texture and drawn as a
+     * fullscreen quad, so light spilling off a bright surface is three more
+     * quads over the same texture rather than a second renderer: pull out what
+     * is glowing, blur it across, add it back. Two half-resolution targets,
+     * ping-ponged, because a separable blur needs somewhere to put the first
+     * half — and blurring at half resolution is most of the blur for a quarter
+     * of the work, which matters because what a blur costs is reading
+     * neighbours.
+     */
+    private final int[] bloomTexture = new int[2];
+    private final int[] bloomFbo = new int[2];
+    private int bloomWidth;
+    private int bloomHeight;
+    private int bloomExtractProgram;
+    private int bloomBlurProgram;
+    private int bloomAddProgram;
+    private int bloomExtractInvSize = -1;
+    private int bloomBlurStep = -1;
+    private int bloomBlurInvSize = -1;
+    private int bloomAddInvSize = -1;
+    private int bloomAddStrength = -1;
+    /** How much of the glow is added back; 0 is off and skips every pass. */
+    private float bloomStrength;
+    /** Set once if anything about the bloom targets fails; never retried. */
+    private boolean bloomFailed;
     private final int[] compositeInvSizeUniforms = {-1, -1};
     /**
      * Copying depth with glBlitFramebuffer instead of writing gl_FragDepth
@@ -1218,6 +1247,12 @@ final class VkTerrainRenderer {
             org.lwjgl.opengl.GL11.glVertex2f(-1.0f, 1.0f);
             org.lwjgl.opengl.GL11.glEnd();
 
+            // After the terrain is in the frame and before the game draws
+            // anything else into it.
+            if (bloomStrength > 0.0f && !bloomFailed) {
+                bloomPass();
+            }
+
             org.lwjgl.opengl.GL11.glPopAttrib();
             GL20C.glUseProgram(prevProgram);
             GL13C.glActiveTexture(prevActive);
@@ -1234,6 +1269,145 @@ final class VkTerrainRenderer {
                 }
             }
         }
+    }
+
+    /**
+     * Pull the glow out of the terrain, blur it, add it back.
+     *
+     * Three fullscreen quads, all of them on targets the composite already had
+     * to make. What is glowing does not have to be guessed at from brightness:
+     * the terrain shader writes it into the alpha of every opaque pixel, which
+     * was carrying the constant 1.0 and nothing else. Guessing would have meant
+     * bloom on snow and on sand in sunlight, which are as bright on screen as
+     * lava and are not lights.
+     *
+     * The glow is added with a quad of its own rather than folded into the
+     * composite, and that is not tidiness: the composite discards where there
+     * is no terrain, so that the sky shows through, and a glow that stopped at
+     * the silhouette of a lava lake would be a lake with a hard edge. Added
+     * separately and blended, it reaches over the sky the way light does.
+     */
+    private void bloomPass() {
+        if (!ensureBloomTargets()) {
+            return;
+        }
+        int prevFbo = GL11C.glGetInteger(GL30C.GL_FRAMEBUFFER_BINDING);
+        // Pushed rather than read back: the viewport is four numbers and the
+        // query for it returns them into a buffer, where this needs none of
+        // them — only for the game's to be exactly what it was.
+        org.lwjgl.opengl.GL11.glPushAttrib(org.lwjgl.opengl.GL11.GL_VIEWPORT_BIT);
+
+        GL11C.glDisable(GL11C.GL_DEPTH_TEST);
+        GL11C.glDepthMask(false);
+        GL11C.glDisable(GL11C.GL_BLEND);
+        GL11C.glViewport(0, 0, bloomWidth, bloomHeight);
+
+        // What glows, at half resolution.
+        GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, bloomFbo[0]);
+        GL20C.glUseProgram(bloomExtractProgram);
+        GL20C.glUniform2f(bloomExtractInvSize, 1.0f / bloomWidth, 1.0f / bloomHeight);
+        GL13C.glActiveTexture(GL13C.GL_TEXTURE0);
+        GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, glColorTexture);
+        fullscreenQuad();
+
+        // Across, then down. Separable: two passes of n taps instead of one of
+        // n squared, and the same answer for a gaussian.
+        GL20C.glUseProgram(bloomBlurProgram);
+        GL20C.glUniform2f(bloomBlurInvSize, 1.0f / bloomWidth, 1.0f / bloomHeight);
+        for (int axis = 0; axis < 2; axis++) {
+            GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, bloomFbo[1 - axis]);
+            GL20C.glUniform2f(bloomBlurStep, axis == 0 ? 1.0f : 0.0f, axis == 0 ? 0.0f : 1.0f);
+            GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, bloomTexture[axis]);
+            fullscreenQuad();
+        }
+
+        // Back into the game's frame, added rather than laid over it.
+        GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo);
+        org.lwjgl.opengl.GL11.glPopAttrib();
+        GL11C.glEnable(GL11C.GL_BLEND);
+        GL11C.glBlendFunc(GL11C.GL_ONE, GL11C.GL_ONE);
+        GL20C.glUseProgram(bloomAddProgram);
+        GL20C.glUniform2f(bloomAddInvSize, 1.0f / width, 1.0f / height);
+        GL20C.glUniform1f(bloomAddStrength, bloomStrength);
+        GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, bloomTexture[0]);
+        fullscreenQuad();
+        GL11C.glDisable(GL11C.GL_BLEND);
+    }
+
+    private void fullscreenQuad() {
+        org.lwjgl.opengl.GL11.glBegin(org.lwjgl.opengl.GL11.GL_QUADS);
+        org.lwjgl.opengl.GL11.glVertex2f(-1.0f, -1.0f);
+        org.lwjgl.opengl.GL11.glVertex2f(1.0f, -1.0f);
+        org.lwjgl.opengl.GL11.glVertex2f(1.0f, 1.0f);
+        org.lwjgl.opengl.GL11.glVertex2f(-1.0f, 1.0f);
+        org.lwjgl.opengl.GL11.glEnd();
+    }
+
+    /** Half-resolution targets and the three programs; built once per size. */
+    private boolean ensureBloomTargets() {
+        int wantWidth = Math.max(1, width / 2);
+        int wantHeight = Math.max(1, height / 2);
+        if (bloomFbo[0] != 0 && wantWidth == bloomWidth && wantHeight == bloomHeight) {
+            return true;
+        }
+        destroyBloomTargets();
+        bloomWidth = wantWidth;
+        bloomHeight = wantHeight;
+        GL11C.glGetError();
+        int prevFbo = GL11C.glGetInteger(GL30C.GL_FRAMEBUFFER_BINDING);
+        int prevTexture = GL11C.glGetInteger(GL11C.GL_TEXTURE_BINDING_2D);
+        for (int i = 0; i < 2; i++) {
+            bloomTexture[i] = GL11C.glGenTextures();
+            GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, bloomTexture[i]);
+            GL11C.glTexImage2D(GL11C.GL_TEXTURE_2D, 0, GL11C.GL_RGBA8, bloomWidth, bloomHeight,
+                    0, GL11C.GL_RGBA, GL11C.GL_UNSIGNED_BYTE, (java.nio.ByteBuffer) null);
+            // Linear, and the extract pass leans on it: reading the full-size
+            // frame into a half-size target is a box filter for free.
+            GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_MIN_FILTER, GL11C.GL_LINEAR);
+            GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_MAG_FILTER, GL11C.GL_LINEAR);
+            // Clamped, so a blur tap off the edge repeats the edge instead of
+            // wrapping the glow round to the far side of the screen.
+            GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_WRAP_S, GL12C.GL_CLAMP_TO_EDGE);
+            GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_WRAP_T, GL12C.GL_CLAMP_TO_EDGE);
+            bloomFbo[i] = GL30C.glGenFramebuffers();
+            GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, bloomFbo[i]);
+            GL30C.glFramebufferTexture2D(GL30C.GL_FRAMEBUFFER, GL30C.GL_COLOR_ATTACHMENT0,
+                    GL11C.GL_TEXTURE_2D, bloomTexture[i], 0);
+            if (GL30C.glCheckFramebufferStatus(GL30C.GL_FRAMEBUFFER) != GL30C.GL_FRAMEBUFFER_COMPLETE) {
+                LOGGER.error("Bloom framebuffer incomplete; the effect is off for this session");
+                GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo);
+                GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, prevTexture);
+                destroyBloomTargets();
+                bloomFailed = true;
+                return false;
+            }
+        }
+        GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo);
+        GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, prevTexture);
+        try {
+            buildBloomPrograms();
+        } catch (RuntimeException e) {
+            LOGGER.error("Bloom programs failed to build; the effect is off for this session", e);
+            destroyBloomTargets();
+            bloomFailed = true;
+            return false;
+        }
+        return true;
+    }
+
+    private void destroyBloomTargets() {
+        for (int i = 0; i < 2; i++) {
+            if (bloomFbo[i] != 0) {
+                GL30C.glDeleteFramebuffers(bloomFbo[i]);
+                bloomFbo[i] = 0;
+            }
+            if (bloomTexture[i] != 0) {
+                GL11C.glDeleteTextures(bloomTexture[i]);
+                bloomTexture[i] = 0;
+            }
+        }
+        bloomWidth = 0;
+        bloomHeight = 0;
     }
 
     /**
@@ -1859,6 +2033,7 @@ final class VkTerrainRenderer {
         waterReflection = clampPercent(intProperty("vulkanmod112.waterReflection", 0));
         waterWaves = clampPercent(intProperty("vulkanmod112.waterWaves", 0));
         foliageSway = clampPercent(intProperty("vulkanmod112.foliageSway", 0));
+        bloomStrength = clampPercent(intProperty("vulkanmod112.bloom", 0));
     }
 
     private static float clampPercent(int value) {
@@ -2254,6 +2429,81 @@ final class VkTerrainRenderer {
      * @param writeDepth export the Vulkan depth per fragment; false when the
      *                   depth buffer is filled by glBlitFramebuffer instead
      */
+    private void buildBloomPrograms() {
+        if (bloomExtractProgram != 0) {
+            return;
+        }
+        // What is glowing, at half resolution. The test is not "is this pixel
+        // bright" — snow and sand in sunlight are as bright on screen as lava
+        // and are not lights. It is what the terrain shader wrote into the
+        // alpha it was spending on the constant 1.0.
+        bloomExtractProgram = buildQuadProgram(
+                "uniform sampler2D uSource;\n"
+                        + "uniform vec2 uInvSize;\n"
+                        + "void main() {\n"
+                        + "    vec4 c = texture2D(uSource, gl_FragCoord.xy * uInvSize);\n"
+                        + "    float emissive = clamp((c.a - 0.5) * 2.0, 0.0, 1.0);\n"
+                        + "    gl_FragColor = vec4(c.rgb * emissive, 1.0);\n"
+                        + "}\n");
+        bloomExtractInvSize = GL20C.glGetUniformLocation(bloomExtractProgram, "uInvSize");
+
+        // One axis per pass. A gaussian is separable, so two passes of five
+        // taps do what one of twenty-five would, and the offsets sit between
+        // texels on purpose: linear filtering makes each of those one read
+        // where the weights say two.
+        bloomBlurProgram = buildQuadProgram(
+                "uniform sampler2D uSource;\n"
+                        + "uniform vec2 uInvSize;\n"
+                        + "uniform vec2 uStep;\n"
+                        + "void main() {\n"
+                        + "    vec2 uv = gl_FragCoord.xy * uInvSize;\n"
+                        + "    vec2 d = uStep * uInvSize;\n"
+                        + "    vec3 sum = texture2D(uSource, uv).rgb * 0.227027;\n"
+                        + "    sum += (texture2D(uSource, uv + d * 1.3846154).rgb\n"
+                        + "          + texture2D(uSource, uv - d * 1.3846154).rgb) * 0.3162162;\n"
+                        + "    sum += (texture2D(uSource, uv + d * 3.2307692).rgb\n"
+                        + "          + texture2D(uSource, uv - d * 3.2307692).rgb) * 0.0702703;\n"
+                        + "    gl_FragColor = vec4(sum, 1.0);\n"
+                        + "}\n");
+        bloomBlurInvSize = GL20C.glGetUniformLocation(bloomBlurProgram, "uInvSize");
+        bloomBlurStep = GL20C.glGetUniformLocation(bloomBlurProgram, "uStep");
+
+        // Added, not laid over: the alpha is zero so a blend of one and one
+        // leaves the frame's own alpha alone.
+        bloomAddProgram = buildQuadProgram(
+                "uniform sampler2D uSource;\n"
+                        + "uniform vec2 uInvSize;\n"
+                        + "uniform float uStrength;\n"
+                        + "void main() {\n"
+                        + "    vec3 glow = texture2D(uSource, gl_FragCoord.xy * uInvSize).rgb;\n"
+                        + "    gl_FragColor = vec4(glow * uStrength, 0.0);\n"
+                        + "}\n");
+        bloomAddInvSize = GL20C.glGetUniformLocation(bloomAddProgram, "uInvSize");
+        bloomAddStrength = GL20C.glGetUniformLocation(bloomAddProgram, "uStrength");
+    }
+
+    /** A fragment shader over a fullscreen quad, with uSource on unit 0. */
+    private int buildQuadProgram(String body) {
+        int vert = compileGlShader(GL20C.GL_VERTEX_SHADER, "#version 120\n"
+                + "void main() { gl_Position = vec4(gl_Vertex.xy, 0.0, 1.0); }\n");
+        int frag = compileGlShader(GL20C.GL_FRAGMENT_SHADER, "#version 120\n" + body);
+        int program = GL20C.glCreateProgram();
+        GL20C.glAttachShader(program, vert);
+        GL20C.glAttachShader(program, frag);
+        GL20C.glLinkProgram(program);
+        if (GL20C.glGetProgrami(program, GL20C.GL_LINK_STATUS) == 0) {
+            throw new IllegalStateException("Bloom program link failed: "
+                    + GL20C.glGetProgramInfoLog(program));
+        }
+        GL20C.glDeleteShader(vert);
+        GL20C.glDeleteShader(frag);
+        int prev = GL11C.glGetInteger(GL20C.GL_CURRENT_PROGRAM);
+        GL20C.glUseProgram(program);
+        GL20C.glUniform1i(GL20C.glGetUniformLocation(program, "uSource"), 0);
+        GL20C.glUseProgram(prev);
+        return program;
+    }
+
     private int buildCompositeProgram(boolean writeDepth) {
         String vertSrc = "#version 120\n"
                 + "void main() { gl_Position = vec4(gl_Vertex.xy, 0.0, 1.0); }\n";
@@ -2845,6 +3095,8 @@ final class VkTerrainRenderer {
         }
         vkDeviceWaitIdle(device());
         if (glColorTexture != -1 && glContextCurrent()) {
+            // Sized from this target, so it goes with it.
+            destroyBloomTargets();
             GL11C.glDeleteTextures(glColorTexture);
             GL11C.glDeleteTextures(glDepthTexture);
             EXTMemoryObject.glDeleteMemoryObjectsEXT(glColorMemoryObject);

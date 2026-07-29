@@ -427,6 +427,39 @@ final class VulkanOptions {
                                         VulkanConfig.setWaterReflection(value);
                                     }
                                 }),
+                        new VRangeOption("Bloom",
+                                "How much light spills off a glowing surface into the pixels "
+                                        + "around it. Lava, torches, glowstone and any modded "
+                                        + "block that gives off light — and only those. What "
+                                        + "glows is not guessed at from how bright a pixel is, "
+                                        + "which is the usual way and the wrong one here: snow "
+                                        + "and sand in sunlight are as bright on screen as lava "
+                                        + "and are not lights. The terrain shader knows the "
+                                        + "difference while it is shading — the game's own block "
+                                        + "light says whether a surface is lit from outside or is "
+                                        + "the source — so it writes the answer into the one part "
+                                        + "of an opaque pixel that was carrying a constant, and "
+                                        + "the glow is pulled out of that. Three passes over half "
+                                        + "the screen, on the GPU only. "
+                                        + "Terrain only. This mod's frame is composited into the "
+                                        + "game's before the game has drawn a single entity or "
+                                        + "particle, so a torch in the world glows and a burning "
+                                        + "creature does not, and a mob standing in front of lava "
+                                        + "is drawn over the glow rather than in it.",
+                                Cost.of(Level.NONE, Level.LOW, Level.LOW),
+                                "Needs Vulkan Terrain on.",
+                                0, 100, 5, "%", "OFF",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getBloom();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setBloom(value);
+                                    }
+                                }),
                         new VRangeOption("Foliage Sway",
                                 "How far the top of a plant leans in the wind. The vertex is moved "
                                         + "rather than the shading faked, and only the top pair of "

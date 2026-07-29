@@ -519,6 +519,23 @@ void main() {
         }
         outColor = vec4(shaded * alpha, alpha);
     } else {
-        outColor = vec4(shaded, 1.0);
+        // The alpha of an opaque pixel was the constant 1.0 and nothing else,
+        // and the composite only ever asks whether it is greater than zero —
+        // whether there is terrain here at all. So it carries how much of a
+        // light this surface is, in the upper half of its range, where that
+        // question still answers the same way.
+        //
+        // Bloom is what reads it, and it has to be told rather than left to
+        // guess. Guessing means thresholding on brightness, and snow and sand
+        // in sunlight are as bright on screen as lava is without being lights.
+        // What separates them is here and nowhere later: block light, which is
+        // the game's own answer to "is this lit from outside or is it the
+        // source", and the texture's own colour before anything shaded it.
+        // A torch is bright and at block light 14; the stone it stands on is
+        // at 13 and grey, and grey is what rules it out.
+        float lit = clamp((vLight.x - 0.78) / 0.19, 0.0, 1.0);
+        vec3 own = tex.rgb * vColor.rgb;
+        float bright = clamp((max(max(own.r, own.g), own.b) - 0.5) * 2.0, 0.0, 1.0);
+        outColor = vec4(shaded, 0.5 + 0.5 * lit * bright);
     }
 }
