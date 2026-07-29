@@ -268,6 +268,19 @@ public final class VulkanConfig {
      * number is a valley that turns to haze a few blocks under your feet.
      */
     static final int DEF_HEIGHT_FOG_DEPTH = 24;
+    /**
+     * How much of a water surface turns into a reflection of the sky as you
+     * look along it, in percent.
+     *
+     * Off by default. Looking straight down into water you see the bottom;
+     * looking along it you see the horizon, and the change between the two is
+     * steep and happens near the end. What it reflects is the game's own fog
+     * colour, which is what the horizon actually is, so it follows sunrise,
+     * weather and being underwater without being told about any of them.
+     * Needs the translucent layer drawn in Vulkan; OpenGL's copy of the water
+     * knows nothing about this.
+     */
+    static final int DEF_WATER_REFLECTION = 0;
     static final boolean DEF_FOG = true;
     static final boolean DEF_ZOOM = true;
     /** Stored as an integer so it fits the config and the slider; 4 = quarter FOV. */
@@ -309,6 +322,7 @@ public final class VulkanConfig {
     private static int directionalLight = DEF_DIRECTIONAL_LIGHT;
     private static int heightFog = DEF_HEIGHT_FOG;
     private static int heightFogDepth = DEF_HEIGHT_FOG_DEPTH;
+    private static int waterReflection = DEF_WATER_REFLECTION;
     private static boolean fogEnabled = DEF_FOG;
     private static boolean zoomEnabled = DEF_ZOOM;
     private static int zoomFactor = DEF_ZOOM_FACTOR;
@@ -506,6 +520,13 @@ public final class VulkanConfig {
                         + "of its strength. The strength setting says how much colour the low "
                         + "ground gives up in the end; this says how far down you have to look "
                         + "before it does.");
+        waterReflection = config.getInt("waterReflection", CATEGORY_GENERAL,
+                DEF_WATER_REFLECTION, 0, 100,
+                "How much of a water surface turns into a reflection of the sky as you look "
+                        + "along it, in percent. 0 is off. What it reflects is the game's own fog "
+                        + "colour, which at a grazing angle is what the horizon is, so it follows "
+                        + "sunrise, weather and being underwater by itself. Needs Vulkan Water "
+                        + "and Glass on.");
         fogEnabled = config.getBoolean("fog", CATEGORY_GENERAL, DEF_FOG,
                 "Fade Vulkan terrain into the distance the way the rest of the scene already does. "
                         + "Off leaves the world ending in a hard edge, which is a little faster.");
@@ -556,6 +577,7 @@ public final class VulkanConfig {
         setDirectionalLight(DEF_DIRECTIONAL_LIGHT);
         setHeightFog(DEF_HEIGHT_FOG);
         setHeightFogDepth(DEF_HEIGHT_FOG_DEPTH);
+        setWaterReflection(DEF_WATER_REFLECTION);
         setFogEnabled(DEF_FOG);
         setZoomEnabled(DEF_ZOOM);
         setZoomFactor(DEF_ZOOM_FACTOR);
@@ -718,6 +740,16 @@ public final class VulkanConfig {
     public static void setHeightFogDepth(int value) {
         heightFogDepth = value;
         store(CATEGORY_GENERAL, "heightFogDepth", value);
+        applySystemProperties();
+    }
+
+    public static int getWaterReflection() {
+        return waterReflection;
+    }
+
+    public static void setWaterReflection(int value) {
+        waterReflection = value;
+        store(CATEGORY_GENERAL, "waterReflection", value);
         applySystemProperties();
     }
 
@@ -921,6 +953,7 @@ public final class VulkanConfig {
         System.setProperty("vulkanmod112.directionalLight", Integer.toString(directionalLight));
         System.setProperty("vulkanmod112.heightFog", Integer.toString(heightFog));
         System.setProperty("vulkanmod112.heightFogDepth", Integer.toString(heightFogDepth));
+        System.setProperty("vulkanmod112.waterReflection", Integer.toString(waterReflection));
         System.setProperty("vulkanmod112.showMaterials", Boolean.toString(showMaterials));
     }
 

@@ -338,6 +338,8 @@ final class VkTerrainRenderer {
     private boolean materialsBound;
     /** Diagnostic: paint the terrain by material instead of by texture. */
     private boolean showMaterials;
+    /** How much of a water surface becomes sky at a grazing angle; 0 is off. */
+    private float waterReflection;
 
     /**
      * Atlas rectangles the translucent shader classifies its fragments by.
@@ -1780,7 +1782,8 @@ final class VkTerrainRenderer {
         MemoryUtil.memPutFloat(base + 644, heightFogFalloff);
         // z: how many of the sprite rectangles below are in use.
         MemoryUtil.memPutFloat(base + 648, materialSpriteCount);
-        MemoryUtil.memPutFloat(base + 652, 0.0f);
+        // w: how much of a water surface turns into sky at a grazing angle.
+        MemoryUtil.memPutFloat(base + 652, waterReflection);
         // The sprite table at 656: two vec4s each, rectangle then material.
         for (int i = 0; i < materialSpriteCount * 8; i++) {
             MemoryUtil.memPutFloat(base + 656 + i * 4L, materialSprites[i]);
@@ -1807,6 +1810,7 @@ final class VkTerrainRenderer {
         int depth = Math.max(1, intProperty("vulkanmod112.heightFogDepth", 24));
         heightFogFalloff = 2.0f / depth;
         showMaterials = "true".equals(System.getProperty("vulkanmod112.showMaterials"));
+        waterReflection = clampPercent(intProperty("vulkanmod112.waterReflection", 0));
     }
 
     private static float clampPercent(int value) {

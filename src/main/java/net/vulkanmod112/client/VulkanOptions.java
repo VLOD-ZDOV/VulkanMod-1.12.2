@@ -301,6 +301,33 @@ final class VulkanOptions {
                                         VulkanConfig.setHeightFog(value);
                                     }
                                 }),
+                        new VRangeOption("Water Reflection",
+                                "How much of a water surface turns into a reflection of the sky as "
+                                        + "you look along it. Looking straight down you see the "
+                                        + "bottom; looking along the water you see the horizon, and "
+                                        + "the change between the two is steep and happens near the "
+                                        + "end — which is how water actually behaves and something "
+                                        + "the game has never done. What it reflects is the game's "
+                                        + "own fog colour, and that is not a stand-in: at a grazing "
+                                        + "angle what flat water shows you is the horizon, and the "
+                                        + "fog colour is the horizon, so this follows sunrise, "
+                                        + "weather and being underwater without being told about "
+                                        + "any of them.",
+                                Cost.of(Level.NONE, Level.LOW, Level.NONE),
+                                "Needs Vulkan Water and Glass on; the OpenGL copy of the water "
+                                        + "knows nothing about this.",
+                                0, 100, 5, "%", "OFF",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getWaterReflection();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setWaterReflection(value);
+                                    }
+                                }),
                         new VRangeOption("Height Fog Depth",
                                 "How far below you the ground has to be before height fog has "
                                         + "taken nearly all of the colour the setting above lets "

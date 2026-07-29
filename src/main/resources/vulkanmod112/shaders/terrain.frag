@@ -169,6 +169,23 @@ const float BACK_FACE_LIGHT_FOLIAGE = 0.6;
 // its quad happens to face. See foliageNormal.
 const float FOLIAGE_UPRIGHT = 0.65;
 
+// How quickly a face reaches full brightness once it faces the light at all.
+//
+// Below one, so the lit side saturates fast and what is left of the falloff
+// sits at the terminator and behind it. A straight cosine was tried first and
+// is wrong for this game: it makes the brightness of every lit surface track
+// where the lamp is, so jumping with a torch beside a raised block lit its top
+// face up and dropped it again, and the only way to stop noticing that was to
+// turn the whole effect down to a sixth, which also threw away the part that
+// was worth having.
+//
+// Vanilla shades a face by its direction alone and in three fixed steps — the
+// top of a block at 1.0, the sides at 0.8, the underside at 0.5 — with no
+// regard for where any light is. This curve lands on 1.0, 0.76 and 0.35 for
+// the same three directions, which is that same character rather than a
+// photograph's.
+const float FACING_CURVE = 0.35;
+
 /**
  * How much of a source's light a face turned this way receives.
  *
@@ -189,7 +206,7 @@ const float FOLIAGE_UPRIGHT = 0.65;
 float directionalTerm(vec3 normal, vec3 toSource, float distance, float backFace) {
     float lambert = dot(normal, toSource / max(distance, 0.0001));
     float wrap = SOURCE_RADIUS / max(distance, SOURCE_RADIUS);
-    float shaped = clamp((lambert + wrap) / (1.0 + wrap), 0.0, 1.0);
+    float shaped = pow(clamp((lambert + wrap) / (1.0 + wrap), 0.0, 1.0), FACING_CURVE);
     return mix(backFace, 1.0, shaped);
 }
 
@@ -221,6 +238,29 @@ vec3 foliageNormal(vec3 geometric) {
     // other value of the constant; normalising that is a NaN across the whole
     // surface rather than a wrong shade on one of them.
     return length(bent) < 0.001 ? vec3(0.0, 1.0, 0.0) : normalize(bent);
+}
+
+/**
+ * How much of a water surface is reflection rather than what is under it.
+ *
+ * Looking straight down into water you see the bottom; looking along it you
+ * see the sky, and the change between the two is steep and happens near the
+ * end. That is Fresnel, and Schlick's approximation of it — one minus the
+ * cosine, to the fifth — is the whole of it here.
+ *
+ * What it reflects is the game's own fog colour. That is not a shortcut
+ * standing in for a reflection: at a grazing angle what a flat water surface
+ * shows you *is* the horizon, and the horizon is exactly what the fog colour
+ * is — vanilla's own, read from GL each frame, so it tracks sunrise, weather,
+ * being underwater and whatever a mod has done to it. Reflecting anything
+ * computed here instead would be the one surface in the scene disagreeing
+ * with the sky above it.
+ */
+float fresnel(vec3 normal) {
+    float facing = clamp(dot(normal, normalize(-vRelative)), 0.0, 1.0);
+    float f = 1.0 - facing;
+    float f2 = f * f;
+    return f2 * f2 * f;
 }
 
 /**
@@ -264,7 +304,12 @@ void main() {
     // the draw takes the same branch — which is what makes it safe to ask for
     // derivatives inside it.
     float directional = frame.frameInfo.y;
-    vec3 normal = (lightCount > 0 && directional > 0.0) ? faceNormal() : vec3(0.0, 1.0, 0.0);
+    // BLEND is a compiled-in constant, so adding it here keeps the branch the
+    // same for every fragment of the draw, which is what makes the derivatives
+    // inside it legal. The translucent pipeline always needs the normal: water
+    // is in it, and water is asked which way it faces even in the dark.
+    vec3 normal = (BLEND || (lightCount > 0 && directional > 0.0))
+            ? faceNormal() : vec3(0.0, 1.0, 0.0);
     // After the derivatives and outside their branch: this is arithmetic on the
     // answer, not another question about the neighbourhood.
     if (foliage) {
@@ -312,6 +357,17 @@ void main() {
     }
     if (BLEND) {
         float alpha = tex.a * vColor.a;
+        // frame.heightFog.w: how much of the Fresnel term to believe, 0 off.
+        float water = frame.heightFog.w;
+        if (water > 0.0 && material == MATERIAL_WATER) {
+            float mirror = fresnel(normal) * water;
+            // Both together, because they are the same fact: where the surface
+            // turns into a mirror it stops showing what is under it, and a
+            // reflection that let the riverbed through would be a colour laid
+            // over water rather than water behaving like water.
+            shaded = mix(shaded, frame.fogColor.rgb, mirror);
+            alpha = mix(alpha, 1.0, mirror);
+        }
         outColor = vec4(shaded * alpha, alpha);
     } else {
         outColor = vec4(shaded, 1.0);
