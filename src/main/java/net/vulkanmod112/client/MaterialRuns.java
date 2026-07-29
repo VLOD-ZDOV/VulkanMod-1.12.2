@@ -62,16 +62,23 @@ public final class MaterialRuns {
     /** A cross-shaped plant: lit as a volume like foliage, and the only thing that sways. */
     public static final int PLANT = 6;
     /**
-     * Not a material but a flag beside one: this block gives off light itself.
+     * The block's own light level, 0 to 15, in the upper four bits.
      *
-     * The top bit, so it can be true of any of the above and of none of them —
-     * lava is a material and a light, glowstone is a light and nothing in
-     * particular. Bloom reads it, and it has to be a fact about the block
-     * rather than about the pixel: a glowstone block is a light across its
-     * whole face including the dark texels of its texture, and anything worked
-     * out from what a fragment can see gets that wrong.
+     * Beside the material rather than one more value of it, because the two are
+     * independent: lava is a material and a light, glowstone is a light and
+     * nothing in particular. A level rather than a yes or no, which the first
+     * version had — a brown mushroom gives off light 1 in this game, and as a
+     * yes it lit up like glowstone. As a level it is one fifteenth of one and
+     * disappears, which is what a mushroom should do.
+     *
+     * Bloom reads it, and it has to be a fact about the block rather than about
+     * the pixel: a glowstone block is a light across its whole face including
+     * the dark texels of its texture, and anything worked out from what a
+     * fragment can see gets that wrong.
      */
-    public static final int EMITS = 0x80;
+    public static final int LIGHT_SHIFT = 4;
+    /** The material itself is 0..6, so four bits is room to spare. */
+    public static final int MATERIAL_MASK = 0x0F;
 
     /**
      * A run is two ints: the vertex one past the end of the run, and what the
@@ -294,7 +301,8 @@ public final class MaterialRuns {
      */
     private static int lightOf(IBlockState state) {
         try {
-            return state.getLightValue() > 0 ? EMITS : 0;
+            int level = state.getLightValue();
+            return Math.max(0, Math.min(15, level)) << LIGHT_SHIFT;
         } catch (Throwable t) {
             return 0;
         }

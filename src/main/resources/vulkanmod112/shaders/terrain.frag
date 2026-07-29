@@ -47,10 +47,10 @@ const uint MATERIAL_ICE = 5u;
 // thing — and told apart only because it is the one material that may be
 // moved by the wind. See terrain.vert.
 const uint MATERIAL_PLANT = 6u;
-// The block emits light. A flag rather than a value: it is true of blocks of
-// several different materials and of none in particular.
-const uint MATERIAL_EMITS = 0x80u;
-const uint MATERIAL_MASK = 0x7Fu;
+// The block's own light level lives in the upper four bits, and the material
+// in the lower four. Independent of each other: lava is a material and a
+// light, glowstone is a light and nothing in particular.
+const uint MATERIAL_MASK = 0x0Fu;
 
 /**
  * The material of a surface read off the atlas rather than off the vertex.
@@ -413,7 +413,7 @@ void main() {
     // from gives off light of its own. Kept beside the material rather than as
     // one more value of it, because the two are independent: lava is a material
     // and a light, glowstone is a light and nothing in particular.
-    bool emits = (vMaterial & MATERIAL_EMITS) != 0u;
+    float emits = float(vMaterial >> 4u) * (1.0 / 15.0);
     uint material = vMaterial & MATERIAL_MASK;
     if (BLEND && material == MATERIAL_PLAIN) {
         material = spriteMaterial(vUV);
@@ -549,6 +549,6 @@ void main() {
         // decided it, which multiplies the sides of a block by 0.8 and 0.6 and
         // its underside by 0.5 — so a block glowed from its top and two sides
         // and not the other two. Both were reported from a screenshot.
-        outColor = vec4(shaded, emits ? 1.0 : 0.5);
+        outColor = vec4(shaded, 0.5 + 0.5 * emits);
     }
 }
