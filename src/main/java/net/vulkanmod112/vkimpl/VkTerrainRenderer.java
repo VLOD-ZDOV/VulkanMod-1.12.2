@@ -1318,7 +1318,7 @@ final class VkTerrainRenderer {
         // Blurring a blur widens it: what a second round buys is a falloff that
         // fades out instead of ending, which is the difference between light
         // spilling and a bright ring drawn round a block.
-        for (int round = 0; round < 2; round++) {
+        for (int round = 0; round < 3; round++) {
             for (int axis = 0; axis < 2; axis++) {
                 GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, bloomFbo[1 - axis]);
                 GL20C.glUniform2f(bloomBlurStep, axis == 0 ? 1.0f : 0.0f, axis == 0 ? 0.0f : 1.0f);
@@ -1354,15 +1354,26 @@ final class VkTerrainRenderer {
 
     /** Half-resolution targets and the three programs; built once per size. */
     private boolean ensureBloomTargets() {
-        // A quarter of the screen on each axis, not a half. What makes a glow
-        // read as a glow is how far it reaches, and a blur of a fixed number of
-        // taps reaches twice as far across the frame for every halving of the
-        // target it runs on — while costing a quarter as much. At half
-        // resolution the halo stopped about six pixels out, which is close
-        // enough to the edge of the block to be taken for the block being
-        // brighter, which is exactly the thing it must not be taken for.
-        int wantWidth = Math.max(1, width / 4);
-        int wantHeight = Math.max(1, height / 4);
+        // An eighth of the screen on each axis, and the number was reached by
+        // being told twice that the effect could not be seen.
+        //
+        // What makes a glow read as a glow is how far it reaches, and a blur of
+        // a fixed number of taps reaches twice as far across the frame for
+        // every halving of the target it runs on — while costing a quarter as
+        // much, so reach here is not a trade against speed but the same lever
+        // as speed. At half resolution the halo stopped about six pixels out,
+        // close enough to the edge of a block to be taken for the block being
+        // brighter, which is the one thing it must not be taken for. At a
+        // quarter it was a rim drawn round the block: visible, and still not
+        // light falling on anything. What has to happen is that the ground
+        // beside a lava lake changes colour, and that is tens of pixels.
+        //
+        // Small sources do not get lost at this size the way they look as
+        // though they should. A torch is a texel here, but a blur moves energy
+        // rather than discarding it, so what a torch becomes is a wide faint
+        // glow — which is what a torch across a room actually looks like.
+        int wantWidth = Math.max(1, width / 8);
+        int wantHeight = Math.max(1, height / 8);
         if (bloomFbo[0] != 0 && wantWidth == bloomWidth && wantHeight == bloomHeight) {
             return true;
         }
@@ -2504,7 +2515,7 @@ final class VkTerrainRenderer {
                         // light that landed somewhere else, so that is what is
                         // added — the source keeps the look it earned.
                         + "    float self = clamp((texture2D(uScene, uv).a - 0.5) * 2.0, 0.0, 1.0);\n"
-                        + "    gl_FragColor = vec4(glow * uStrength * (1.0 - self), 0.0);\n"
+                        + "    gl_FragColor = vec4(glow * uStrength * 1.8 * (1.0 - self), 0.0);\n"
                         + "}\n");
         GL20C.glUseProgram(bloomAddProgram);
         GL20C.glUniform1i(GL20C.glGetUniformLocation(bloomAddProgram, "uScene"), 1);
