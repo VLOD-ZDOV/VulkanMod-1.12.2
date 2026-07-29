@@ -476,6 +476,10 @@ final class VkTerrainRenderer {
     private int bloomMaskFbo;
     private int bloomMaskProgram;
     private int bloomMaskInvSize = -1;
+    private int bloomExtractTexel = -1;
+    private int bloomDownProgram;
+    private int bloomDownInvSize = -1;
+    private int bloomDownTexel = -1;
     /** Set when the glow is blurred and waiting; cleared when it is added. */
     private boolean bloomReady;
     private int bloomExtractProgram;
@@ -1590,18 +1594,26 @@ final class VkTerrainRenderer {
         // Whether it is covered is decided by comparing the frame against what
         // the terrain looked like before the game drew into it: equal means
         // nothing was put in the way.
+        // Once, at half size, where the grid is fine enough that a source a
+        // few pixels wide cannot fall between the samples.
         GL20C.glUseProgram(bloomExtractProgram);
         GL13C.glActiveTexture(GL13C.GL_TEXTURE1);
         GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, bloomMaskTexture);
         GL13C.glActiveTexture(GL13C.GL_TEXTURE0);
         GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, sceneTexture);
-        GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, bloomFbo[0]);
-        GL11C.glViewport(0, 0, bloomWidth, bloomHeight);
-        GL20C.glUniform2f(bloomExtractInvSize, 1.0f / bloomWidth, 1.0f / bloomHeight);
-        fullscreenQuad();
         GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, bloomNearFbo[0]);
         GL11C.glViewport(0, 0, bloomNearWidth, bloomNearHeight);
         GL20C.glUniform2f(bloomExtractInvSize, 1.0f / bloomNearWidth, 1.0f / bloomNearHeight);
+        GL20C.glUniform2f(bloomExtractTexel, 1.0f / width, 1.0f / height);
+        fullscreenQuad();
+
+        // And down to the wide chain by averaging rather than by picking.
+        GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, bloomFbo[0]);
+        GL11C.glViewport(0, 0, bloomWidth, bloomHeight);
+        GL20C.glUseProgram(bloomDownProgram);
+        GL20C.glUniform2f(bloomDownInvSize, 1.0f / bloomWidth, 1.0f / bloomHeight);
+        GL20C.glUniform2f(bloomDownTexel, 1.0f / bloomNearWidth, 1.0f / bloomNearHeight);
+        GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, bloomNearTexture[0]);
         fullscreenQuad();
 
         GL20C.glUseProgram(bloomBlurProgram);
@@ -2850,9 +2862,22 @@ final class VkTerrainRenderer {
                 "uniform sampler2D uSource;\n"
                         + "uniform sampler2D uTerrain;\n"
                         + "uniform vec2 uInvSize;\n"
+                        + "uniform vec2 uTexel;\n"
                         + "void main() {\n"
                         + "    vec2 uv = gl_FragCoord.xy * uInvSize;\n"
-                        + "    vec3 scene = texture2D(uSource, uv).rgb;\n"
+                        // The four full-size pixels this one covers, averaged
+                        // by hand. The game's frame is filtered nearest and has
+                        // no mip chain, so asking for one sample of it returns
+                        // one pixel however far the target has been shrunk —
+                        // and a lamp post a few pixels wide falls between the
+                        // samples and contributes nothing at all, while a lava
+                        // lake covers so many that it cannot be missed. That
+                        // was the whole of why small lights had no reach.
+                        + "    vec2 h = uTexel * 0.5;\n"
+                        + "    vec3 scene = 0.25 * (texture2D(uSource, uv + vec2( h.x,  h.y)).rgb\n"
+                        + "                      + texture2D(uSource, uv + vec2(-h.x,  h.y)).rgb\n"
+                        + "                      + texture2D(uSource, uv + vec2( h.x, -h.y)).rgb\n"
+                        + "                      + texture2D(uSource, uv + vec2(-h.x, -h.y)).rgb);\n"
                         + "    vec4 ref = texture2D(uTerrain, uv);\n"
                         // Covered by something the game drew afterwards? Then
                         // there is no light here to spill. The frame holds
@@ -2864,6 +2889,7 @@ final class VkTerrainRenderer {
                         + "    gl_FragColor = vec4(scene * ref.a * visible, 1.0);\n"
                         + "}\n");
         bloomExtractInvSize = GL20C.glGetUniformLocation(bloomExtractProgram, "uInvSize");
+        bloomExtractTexel = GL20C.glGetUniformLocation(bloomExtractProgram, "uTexel");
         GL20C.glUseProgram(bloomExtractProgram);
         GL20C.glUniform1i(GL20C.glGetUniformLocation(bloomExtractProgram, "uTerrain"), 1);
         GL20C.glUseProgram(0);
@@ -2924,13 +2950,39 @@ final class VkTerrainRenderer {
                 "uniform sampler2D uSource;\n"
                         + "uniform vec2 uInvSize;\n"
                         + "void main() {\n"
-                        + "    vec4 c = texture2D(uSource, gl_FragCoord.xy * uInvSize);\n"
+                        + "    vec2 uv = gl_FragCoord.xy * uInvSize;\n"
+                        + "    vec2 h = uInvSize * 0.25;\n"
+                        // Averaged for the same reason as the extract: the
+                        // Vulkan target is filtered nearest as well.
+                        + "    vec4 c = 0.25 * (texture2D(uSource, uv + vec2( h.x,  h.y))\n"
+                        + "                  + texture2D(uSource, uv + vec2(-h.x,  h.y))\n"
+                        + "                  + texture2D(uSource, uv + vec2( h.x, -h.y))\n"
+                        + "                  + texture2D(uSource, uv + vec2(-h.x, -h.y)));\n"
                         // Colour and mask together in one texture: the colour
                         // to recognise the terrain again in the finished frame,
                         // the mask to say which of it is a light.
                         + "    gl_FragColor = vec4(c.rgb, clamp((c.a - 0.5) * 2.0, 0.0, 1.0));\n"
                         + "}\n");
         bloomMaskInvSize = GL20C.glGetUniformLocation(bloomMaskProgram, "uInvSize");
+
+        // Four to one on each axis, as four bilinear reads of a texture this
+        // renderer owns and filters linearly — so each read is already the
+        // average of two by two, and the four together are a sixteen-pixel box.
+        // Nothing may be point-sampled on the way down; that is what lost the
+        // small lights.
+        bloomDownProgram = buildQuadProgram(
+                "uniform sampler2D uSource;\n"
+                        + "uniform vec2 uInvSize;\n"
+                        + "uniform vec2 uTexel;\n"
+                        + "void main() {\n"
+                        + "    vec2 uv = gl_FragCoord.xy * uInvSize;\n"
+                        + "    gl_FragColor = 0.25 * (texture2D(uSource, uv + uTexel)\n"
+                        + "                        + texture2D(uSource, uv + vec2(uTexel.x, -uTexel.y))\n"
+                        + "                        + texture2D(uSource, uv + vec2(-uTexel.x, uTexel.y))\n"
+                        + "                        + texture2D(uSource, uv - uTexel));\n"
+                        + "}\n");
+        bloomDownInvSize = GL20C.glGetUniformLocation(bloomDownProgram, "uInvSize");
+        bloomDownTexel = GL20C.glGetUniformLocation(bloomDownProgram, "uTexel");
         bloomAddStrength = GL20C.glGetUniformLocation(bloomAddProgram, "uStrength");
     }
 
