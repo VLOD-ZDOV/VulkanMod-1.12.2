@@ -40,6 +40,24 @@ public final class TerrainHooks {
             "shadersmodcore.transform.SMCClassTransformer"
     };
     private static boolean broken;
+
+    /**
+     * The bridge, or nothing at all once the device has been lost.
+     *
+     * There is a difference between "the terrain has stopped drawing" and "the
+     * device is gone", and this is what had them confused. The fallback was
+     * doing its job — terrain went back to OpenGL and the world stayed on
+     * screen — while the animation upload went on handing frames to a device
+     * that no longer existed, and the next submission it made turned a failure
+     * the game had survived into a crash report. A lost device is lost for
+     * everything, so everything asks through here.
+     */
+    static VulkanBridge liveBridge() {
+        if (broken) {
+            return null;
+        }
+        return VulkanLoader.bridgeIfReady();
+    }
     private static boolean compatibilityChecked;
     private static boolean incompatibleRenderer;
     private static boolean atlasUploaded;
@@ -191,7 +209,7 @@ public final class TerrainHooks {
                 && terrainEnabled()
                 && !incompatibleRenderer;
         if (want) {
-            VulkanBridge bridge = VulkanLoader.bridgeIfReady();
+            VulkanBridge bridge = liveBridge();
             want = bridge != null && bridge.isInitialized();
         }
         if (want == droppingVanillaBuffers) {
@@ -224,7 +242,7 @@ public final class TerrainHooks {
         if (!checkRendererCompatibility()) {
             return false;
         }
-        VulkanBridge bridge = VulkanLoader.bridgeIfReady();
+        VulkanBridge bridge = liveBridge();
         if (bridge == null || !bridge.isInitialized()) {
             return false;
         }
@@ -417,7 +435,7 @@ public final class TerrainHooks {
      * onto the sky, which is drawn long after this mod's own frame is finished.
      */
     public static void applySceneBloom() {
-        VulkanBridge bridge = VulkanLoader.bridgeIfReady();
+        VulkanBridge bridge = liveBridge();
         if (bridge == null || !VulkanConfig.isTerrainEnabled()) {
             return;
         }
@@ -440,7 +458,7 @@ public final class TerrainHooks {
      * failure is written down and the game goes on closing.
      */
     public static void shutdown() {
-        VulkanBridge bridge = VulkanLoader.bridgeIfReady();
+        VulkanBridge bridge = liveBridge();
         if (bridge == null || !bridge.isInitialized()) {
             return;
         }
@@ -453,7 +471,7 @@ public final class TerrainHooks {
     }
 
     public static void flushAtlasAnimations() {
-        VulkanBridge bridge = VulkanLoader.bridgeIfReady();
+        VulkanBridge bridge = liveBridge();
         if (bridge == null || !VulkanConfig.isTerrainEnabled()) {
             AtlasAnimations.discard();
             return;

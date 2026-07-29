@@ -362,7 +362,7 @@ vec4 traceReflection(vec3 origin, vec3 dir) {
         if (onScreen.x < 0.0 || onScreen.x > 1.0 || onScreen.y < 0.0 || onScreen.y > 1.0) {
             return vec4(0.0);
         }
-        if (onScreen.z > texture(sceneDepth, onScreen.xy).r) {
+        if (onScreen.z > textureLod(sceneDepth, onScreen.xy, 0.0).r) {
             // Between the last step that was still in front of everything and
             // this one, which is behind something. Halving four times puts the
             // crossing within a sixteenth of a step, which at these sizes is
@@ -373,7 +373,7 @@ vec4 traceReflection(vec3 origin, vec3 dir) {
                 float mid = 0.5 * (near + far);
                 vec4 c = frame.mvp * vec4(origin + dir * mid, 1.0);
                 vec3 s = vec3(c.xy / c.w * 0.5 + 0.5, c.z / c.w);
-                if (s.z > texture(sceneDepth, s.xy).r) {
+                if (s.z > textureLod(sceneDepth, s.xy, 0.0).r) {
                     far = mid;
                     onScreen = s;
                 } else {
@@ -385,7 +385,7 @@ vec4 traceReflection(vec3 origin, vec3 dir) {
             // along the edge of the screen would announce how it was made.
             vec2 edge = smoothstep(vec2(0.0), vec2(0.14), onScreen.xy)
                       * smoothstep(vec2(0.0), vec2(0.14), vec2(1.0) - onScreen.xy);
-            return vec4(texture(sceneColor, onScreen.xy).rgb, edge.x * edge.y);
+            return vec4(textureLod(sceneColor, onScreen.xy, 0.0).rgb, edge.x * edge.y);
         }
         lastMiss = t;
         t += step;

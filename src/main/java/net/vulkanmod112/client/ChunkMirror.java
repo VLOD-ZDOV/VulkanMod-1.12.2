@@ -16,7 +16,7 @@ public final class ChunkMirror {
     }
 
     public static void onBufferData(int slot, ByteBuffer data) {
-        VulkanBridge bridge = VulkanLoader.bridgeIfReady();
+        VulkanBridge bridge = TerrainHooks.liveBridge();
         if (bridge != null && bridge.isInitialized()) {
             // Passed straight through rather than duplicated. This runs for
             // every chunk the game uploads — a burst of them every time the
@@ -35,7 +35,7 @@ public final class ChunkMirror {
      * thread then mirrors it the ordinary way when it uploads the GL buffer.
      */
     public static boolean onWorkerBuild(int slot, ByteBuffer data) {
-        VulkanBridge bridge = VulkanLoader.bridgeIfReady();
+        VulkanBridge bridge = TerrainHooks.liveBridge();
         return bridge != null && bridge.isInitialized() && bridge.stageChunkBuffer(slot, data);
     }
 
@@ -47,14 +47,14 @@ public final class ChunkMirror {
      * draws exactly as terrain always has.
      */
     public static void onMaterials(int slot, int[] runs, int runCount) {
-        VulkanBridge bridge = VulkanLoader.bridgeIfReady();
+        VulkanBridge bridge = TerrainHooks.liveBridge();
         if (bridge != null && bridge.isInitialized()) {
             bridge.stageChunkMaterials(slot, runs, runCount);
         }
     }
 
     public static void onBufferDelete(int slot) {
-        VulkanBridge bridge = VulkanLoader.bridgeIfReady();
+        VulkanBridge bridge = TerrainHooks.liveBridge();
         if (bridge != null && bridge.isInitialized()) {
             bridge.releaseChunkBuffer(slot);
         }

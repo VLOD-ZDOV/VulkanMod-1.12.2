@@ -348,6 +348,8 @@ final class VkTerrainRenderer {
     /** How much of a water surface becomes sky at a grazing angle; 0 is off. */
     private float waterReflection;
     private float screenReflections;
+    /** Set when the sets must be rewritten because the effect went on or off. */
+    private boolean reflectionBindingsDirty;
     /** How far the water surface is tilted by the wave pattern; 0 is off. */
     private float waterWaves;
     /** How far the top of a plant leans in the wind; 0 is off. */
@@ -945,6 +947,14 @@ final class VkTerrainRenderer {
         viewWorldX = viewX;
         viewWorldY = viewY;
         viewWorldZ = viewZ;
+        // Before anything is recorded, because rewriting the sets stops the
+        // device and a command buffer that is already open cannot survive that.
+        // The flag is raised where the setting is read, which is in the middle
+        // of recording — this is the first safe place after it.
+        if (reflectionBindingsDirty) {
+            reflectionBindingsDirty = false;
+            updateDescriptors();
+        }
         if (layerOrdinal == LAYER_TRANSLUCENT) {
             // Its own pass, its own submission, and it runs after the opaque
             // frame has already been composited — so none of the state machine
@@ -3274,7 +3284,15 @@ final class VkTerrainRenderer {
         bloomStrength = clampPercent(intProperty("vulkanmod112.bloom", 0));
         aoStrength = clampPercent(intProperty("vulkanmod112.ambientOcclusion", 0));
         aoRadius = Math.max(1, Math.min(6, intProperty("vulkanmod112.aoRadius", 2)));
-        screenReflections = clampPercent(intProperty("vulkanmod112.screenReflections", 0));
+        float wantedReflections = clampPercent(intProperty("vulkanmod112.screenReflections", 0));
+        if ((wantedReflections > 0.0f) != (screenReflections > 0.0f)) {
+            screenReflections = wantedReflections;
+            // What the water is allowed to look at changed. Rewriting the sets
+            // stops the device, so it happens here — on the change — and never
+            // in a frame that did not ask for it.
+            reflectionBindingsDirty = true;
+        }
+        screenReflections = wantedReflections;
     }
 
     private static float clampPercent(int value) {
@@ -3321,15 +3339,16 @@ final class VkTerrainRenderer {
             // out one per layer per frame in flight, so which one that is falls
             // straight out of the index — no separate layout, no second pool.
             VkDescriptorImageInfo.Buffer sceneColorInfo = VkDescriptorImageInfo.calloc(1, stack);
+            boolean sceneReady = colorView != 0 && depthView != 0 && screenReflections > 0.0f;
             sceneColorInfo.get(0)
                     .sampler(sceneSampler)
-                    .imageView(colorView != 0 ? colorView : atlasView)
+                    .imageView(sceneReady ? colorView : atlasView)
                     .imageLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
             VkDescriptorImageInfo.Buffer sceneDepthInfo = VkDescriptorImageInfo.calloc(1, stack);
             sceneDepthInfo.get(0)
                     .sampler(sceneSampler)
-                    .imageView(depthView != 0 ? depthView : atlasView)
-                    .imageLayout(depthView != 0
+                    .imageView(sceneReady ? depthView : atlasView)
+                    .imageLayout(sceneReady
                             ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL
                             : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
@@ -3341,7 +3360,14 @@ final class VkTerrainRenderer {
                 // read the same frame constants.
                 VkDescriptorBufferInfo.Buffer frameInfo = VkDescriptorBufferInfo.calloc(1, stack);
                 frameInfo.get(0).buffer(frameUniformBuffers[i / BATCHES_PER_FRAME]).offset(0).range(FRAME_UNIFORM_BYTES);
-                boolean waterSet = (i % BATCHES_PER_FRAME) == LAYER_TRANSLUCENT;
+                // Only while the effect is actually on. With it off these two
+                // point at the atlas like every other pass, which puts the
+                // whole arrangement back to what it was before reflections
+                // existed — nothing bound that the frame is also using, and
+                // nothing for a driver to object to. The sets are rewritten
+                // when the setting changes, which is rare enough to afford it.
+                boolean waterSet = screenReflections > 0.0f
+                        && (i % BATCHES_PER_FRAME) == LAYER_TRANSLUCENT;
                 int write = i * 6;
                 writes.get(write)
                         .sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET)
