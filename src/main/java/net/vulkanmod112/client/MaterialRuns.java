@@ -61,6 +61,17 @@ public final class MaterialRuns {
     public static final int ICE = 5;
     /** A cross-shaped plant: lit as a volume like foliage, and the only thing that sways. */
     public static final int PLANT = 6;
+    /**
+     * Not a material but a flag beside one: this block gives off light itself.
+     *
+     * The top bit, so it can be true of any of the above and of none of them —
+     * lava is a material and a light, glowstone is a light and nothing in
+     * particular. Bloom reads it, and it has to be a fact about the block
+     * rather than about the pixel: a glowstone block is a light across its
+     * whole face including the dark texels of its texture, and anything worked
+     * out from what a fragment can see gets that wrong.
+     */
+    public static final int EMITS = 0x80;
 
     /**
      * A run is two ints: the vertex one past the end of the run, and what the
@@ -273,6 +284,23 @@ public final class MaterialRuns {
      * the dynamic light levels.
      */
     private static int materialOf(IBlockState state) {
+        return shapeOf(state) | lightOf(state);
+    }
+
+    /**
+     * Whether the block is a light source, from the block itself rather than
+     * from a list here — so a modded lamp is one without this knowing it
+     * exists, the same reasoning as the dynamic light levels.
+     */
+    private static int lightOf(IBlockState state) {
+        try {
+            return state.getLightValue() > 0 ? EMITS : 0;
+        } catch (Throwable t) {
+            return 0;
+        }
+    }
+
+    private static int shapeOf(IBlockState state) {
         Material material;
         try {
             material = state.getMaterial();

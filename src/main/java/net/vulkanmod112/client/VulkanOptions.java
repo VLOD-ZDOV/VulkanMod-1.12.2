@@ -447,7 +447,7 @@ final class VulkanOptions {
                                         + "creature does not, and a mob standing in front of lava "
                                         + "is drawn over the glow rather than in it.",
                                 Cost.of(Level.NONE, Level.LOW, Level.LOW),
-                                "Needs Vulkan Terrain on.",
+                                "Needs Vulkan Terrain and Material Tags on.",
                                 0, 100, 5, "%", "OFF",
                                 new VRangeOption.Access() {
                                     @Override

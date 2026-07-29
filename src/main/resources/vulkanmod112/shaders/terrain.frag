@@ -47,6 +47,10 @@ const uint MATERIAL_ICE = 5u;
 // thing — and told apart only because it is the one material that may be
 // moved by the wind. See terrain.vert.
 const uint MATERIAL_PLANT = 6u;
+// The block emits light. A flag rather than a value: it is true of blocks of
+// several different materials and of none in particular.
+const uint MATERIAL_EMITS = 0x80u;
+const uint MATERIAL_MASK = 0x7Fu;
 
 /**
  * The material of a surface read off the atlas rather than off the vertex.
@@ -405,7 +409,12 @@ void main() {
     // The translucent pipeline is the only one that asks the atlas, and it only
     // asks where the vertex had nothing to say — which for that layer is
     // everywhere, because its labels are dropped rather than sent wrong.
-    uint material = vMaterial;
+    // The top bit is not a material, it is whether the block this vertex came
+    // from gives off light of its own. Kept beside the material rather than as
+    // one more value of it, because the two are independent: lava is a material
+    // and a light, glowstone is a light and nothing in particular.
+    bool emits = (vMaterial & MATERIAL_EMITS) != 0u;
+    uint material = vMaterial & MATERIAL_MASK;
     if (BLEND && material == MATERIAL_PLAIN) {
         material = spriteMaterial(vUV);
     }
@@ -528,14 +537,18 @@ void main() {
         // Bloom is what reads it, and it has to be told rather than left to
         // guess. Guessing means thresholding on brightness, and snow and sand
         // in sunlight are as bright on screen as lava is without being lights.
-        // What separates them is here and nowhere later: block light, which is
-        // the game's own answer to "is this lit from outside or is it the
-        // source", and the texture's own colour before anything shaded it.
-        // A torch is bright and at block light 14; the stone it stands on is
-        // at 13 and grey, and grey is what rules it out.
-        float lit = clamp((vLight.x - 0.78) / 0.19, 0.0, 1.0);
-        vec3 own = tex.rgb * vColor.rgb;
-        float bright = clamp((max(max(own.r, own.g), own.b) - 0.5) * 2.0, 0.0, 1.0);
-        outColor = vec4(shaded, 0.5 + 0.5 * lit * bright);
+        //
+        // What it is told is the block's own light level, decided where the
+        // chunk was built and carried in the material byte. Two earlier
+        // versions guessed instead and both were wrong in the same way: being
+        // a light is a fact about a block, and neither of the things a
+        // fragment can see is. Judging by the texture's brightness lit the
+        // pale texels of a glowstone block and left its dark ones to receive
+        // the glow from their neighbours, so a light source came out mottled;
+        // and folding in the vertex colour meant vanilla's own face shading
+        // decided it, which multiplies the sides of a block by 0.8 and 0.6 and
+        // its underside by 0.5 — so a block glowed from its top and two sides
+        // and not the other two. Both were reported from a screenshot.
+        outColor = vec4(shaded, emits ? 1.0 : 0.5);
     }
 }
