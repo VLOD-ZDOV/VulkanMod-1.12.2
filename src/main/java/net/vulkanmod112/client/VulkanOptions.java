@@ -439,9 +439,16 @@ final class VulkanOptions {
                                         + "Eight neighbours are asked whether they stand in front "
                                         + "of the surface, at half resolution and blurred, because "
                                         + "the answer is about corners and crevices rather than "
-                                        + "about texels. Terrain only: entities are drawn by the "
-                                        + "game after this renderer has finished, so a creature "
-                                        + "casts no shadow into the corner it stands in.",
+                                        + "about texels. This is not the only occlusion in the "
+                                        + "picture and is scaled knowing it: the game bakes its "
+                                        + "own into the corners of every block while the chunk is "
+                                        + "built, and what this adds lands on top of that rather "
+                                        + "than instead of it, so a seam darkened twice comes out "
+                                        + "blacker than anything else in a room. The whole length "
+                                        + "of the slider is meant to be usable. Terrain only: "
+                                        + "entities are drawn by the game after this renderer has "
+                                        + "finished, so a creature casts no shadow into the corner "
+                                        + "it stands in.",
                                 Cost.of(Level.NONE, Level.LOW, Level.LOW),
                                 "Needs Vulkan Terrain on.",
                                 0, 100, 5, "%", "OFF",

@@ -1900,10 +1900,18 @@ final class VkTerrainRenderer {
                         + "        occlusion += front * share * range;\n"
                         + "    }\n"
                         // Divided by the shares, so what multiplies the strength
-                        // is how much of the neighbourhood is in the way. A
-                        // fully enclosed pocket reaches black at full strength
-                        // and nothing else does.
-                        + "    float ao = 1.0 - uStrength * (occlusion * 0.125) * 1.2;\n"
+                        // is how much of the neighbourhood is in the way.
+                        //
+                        // Half of what it was, because this is not the only
+                        // occlusion in the picture. The game bakes its own into
+                        // the corners of every block while the chunk is built,
+                        // and this lands on top of that rather than instead of
+                        // it — so a seam was being darkened twice and came out
+                        // blacker than anything in the room. The full length of
+                        // the slider is now the useful range, which is the point
+                        // of a slider; the setting that looked right at half of
+                        // the old scale is the whole of this one.
+                        + "    float ao = 1.0 - uStrength * (occlusion * 0.125) * 0.6;\n"
                         + "    gl_FragColor = vec4(clamp(ao, 0.0, 1.0));\n"
                         + "}\n");
         aoInvSize = GL20C.glGetUniformLocation(aoProgram, "uInvSize");

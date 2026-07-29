@@ -428,6 +428,30 @@ public final class TerrainHooks {
         bridge.applySceneBloom(frame.framebufferTexture);
     }
 
+    /**
+     * Closes the Vulkan side while the window it shares memory with still
+     * exists.
+     *
+     * Everything here is guarded, and that is the whole design of it. This runs
+     * on the way out, where there is nothing left to save and nothing left to
+     * fix: an exception thrown from here would replace a clean exit with a
+     * crash report about a renderer that had already finished its work, and a
+     * wait that never returns would leave the game on screen forever. So a
+     * failure is written down and the game goes on closing.
+     */
+    public static void shutdown() {
+        VulkanBridge bridge = VulkanLoader.bridgeIfReady();
+        if (bridge == null || !bridge.isInitialized()) {
+            return;
+        }
+        LOGGER.info("Closing the Vulkan side before the window goes");
+        try {
+            bridge.destroy();
+        } catch (Throwable t) {
+            LOGGER.error("Vulkan did not close cleanly; the game is exiting anyway", t);
+        }
+    }
+
     public static void flushAtlasAnimations() {
         VulkanBridge bridge = VulkanLoader.bridgeIfReady();
         if (bridge == null || !VulkanConfig.isTerrainEnabled()) {

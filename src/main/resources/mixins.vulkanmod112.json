@@ -12,6 +12,7 @@
     "EntityRenderDistanceMixin",
     "TileEntityRenderDistanceMixin",
     "TextureMapAnimationMixin",
-    "AtlasAnimationMixin"
+    "AtlasAnimationMixin",
+    "GameShutdownMixin"
   ]
 }
