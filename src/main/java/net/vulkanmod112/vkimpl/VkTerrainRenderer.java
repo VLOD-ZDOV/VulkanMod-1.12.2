@@ -549,8 +549,14 @@ final class VkTerrainRenderer {
     private int aoWidth;
     private int aoHeight;
     private float aoStrength;
-    private float aoRadius = 0.75f;
+    /** How far a corner's shadow reaches, in blocks. Set from the menu. */
+    private float aoRadius = 2.0f;
     private boolean aoFailed;
+    /**
+     * How far apart the blur's taps stand when it is smoothing occlusion rather
+     * than a glow.
+     */
+    private static final float AO_BLUR_SPREAD = 2.0f;
     private final java.nio.FloatBuffer projectionMatrix =
             org.lwjgl.BufferUtils.createFloatBuffer(16);
     private final int[] compositeInvSizeUniforms = {-1, -1};
@@ -1660,16 +1666,23 @@ final class VkTerrainRenderer {
             GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, glDepthTexture);
             fullscreenQuad();
 
-            // Smoothed, because eight samples of a neighbourhood is a noisy
+            // Smoothed, because sixteen samples of a neighbourhood is a noisy
             // answer to a question whose answer is smooth.
+            //
+            // The same blur bloom uses, walking further between its taps. A
+            // blur wide enough for a glow is not wide enough for this: what a
+            // glow needs hidden is the grain of one bright pixel, and what a
+            // corner needs hidden is the grain of sixteen directions, which is
+            // coarser and lives on a larger scale. Widening costs nothing —
+            // the taps stay five and only the distance between them changes.
             GL20C.glUseProgram(bloomBlurProgram);
             GL20C.glUniform2f(bloomBlurInvSize, 1.0f / aoWidth, 1.0f / aoHeight);
             GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, aoBlurFbo);
-            GL20C.glUniform2f(bloomBlurStep, 1.0f, 0.0f);
+            GL20C.glUniform2f(bloomBlurStep, AO_BLUR_SPREAD, 0.0f);
             GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, aoTexture);
             fullscreenQuad();
             GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, aoFbo);
-            GL20C.glUniform2f(bloomBlurStep, 0.0f, 1.0f);
+            GL20C.glUniform2f(bloomBlurStep, 0.0f, AO_BLUR_SPREAD);
             GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, aoBlurTexture);
             fullscreenQuad();
         } finally {
@@ -1741,8 +1754,11 @@ final class VkTerrainRenderer {
                         + "    return 2.0 * uProj.z * uProj.w\n"
                         + "         / (uProj.w + uProj.z - (2.0 * d - 1.0) * (uProj.w - uProj.z));\n"
                         + "}\n"
-                        + "vec3 viewPos(vec2 uv) {\n"
-                        + "    float z = linearZ(texture2D(uSource, uv).r);\n"
+                        // The depth is passed in rather than fetched, so a
+                        // neighbour costs one read of the texture instead of
+                        // two. That is what pays for sixteen of them.
+                        + "vec3 viewPos(vec2 uv, float d) {\n"
+                        + "    float z = linearZ(d);\n"
                         + "    vec2 ndc = uv * 2.0 - 1.0;\n"
                         + "    return vec3(ndc.x * uProj.x * z, ndc.y * uProj.y * z, -z);\n"
                         + "}\n"
@@ -1751,7 +1767,7 @@ final class VkTerrainRenderer {
                         + "    float d = texture2D(uSource, uv).r;\n"
                         // Nothing was drawn here, so there is nothing to shade.
                         + "    if (d >= 0.9999) { gl_FragColor = vec4(1.0); return; }\n"
-                        + "    vec3 p = viewPos(uv);\n"
+                        + "    vec3 p = viewPos(uv, d);\n"
                         // Exact rather than approximate: every face of a block is
                         // flat, so the cross product of the two screen-space
                         // derivatives is the face, not an estimate of it.
@@ -1762,30 +1778,34 @@ final class VkTerrainRenderer {
                         // perspective.
                         + "    float scale = uRadius / (uProj.x * 2.0 * max(-p.z, 0.1));\n"
                         // Turned by a different angle at every pixel, so what
-                        // eight samples cannot cover comes out as noise the blur
-                        // removes rather than as eight rings nothing removes.
+                        // sixteen samples cannot cover comes out as noise the
+                        // blur removes rather than as rings nothing removes.
                         + "    float a = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) * 6.2831853;\n"
-                        + "    vec2 rot = vec2(cos(a), sin(a));\n"
                         + "    float occlusion = 0.0;\n"
-                        + "    for (int i = 0; i < 8; i++) {\n"
-                        + "        float t = float(i) * 0.7853982;\n"
-                        + "        vec2 dir = vec2(cos(t), sin(t));\n"
-                        + "        dir = vec2(dir.x * rot.x - dir.y * rot.y, dir.x * rot.y + dir.y * rot.x);\n"
-                        // Rings rather than a disc: samples spread out with the
-                        // index so the near neighbourhood is not oversampled.
-                        + "        float step = 0.35 + 0.65 * float(i) / 7.0;\n"
-                        + "        vec2 suv = uv + dir * scale * step;\n"
+                        + "    for (int i = 0; i < 16; i++) {\n"
+                        // The golden angle, so consecutive samples never line up
+                        // however many of them there are, and a square root on
+                        // the distance, so the sixteen cover the disc evenly
+                        // instead of crowding its middle.
+                        + "        float t = a + float(i) * 2.3999632;\n"
+                        + "        float reach = sqrt((float(i) + 0.5) * 0.0625);\n"
+                        + "        vec2 suv = uv + vec2(cos(t), sin(t)) * scale * reach;\n"
                         + "        float sd = texture2D(uSource, suv).r;\n"
                         + "        if (sd >= 0.9999) continue;\n"
-                        + "        vec3 q = viewPos(suv);\n"
-                        + "        vec3 diff = q - p;\n"
+                        + "        vec3 diff = viewPos(suv, sd) - p;\n"
                         + "        float len = length(diff);\n"
                         + "        if (len < 0.0001) continue;\n"
                         // In front of the surface and near enough to matter. The
                         // bias keeps a flat wall from shading itself, which is
                         // what the depth buffer's own steps would otherwise do.
                         + "        float front = max(0.0, dot(n, diff / len) - 0.06);\n"
-                        + "        occlusion += front * clamp(uRadius / len, 0.0, 1.0);\n"
+                        // Fading to nothing at the edge of the radius rather
+                        // than being cut off there. A sample that counts in full
+                        // right up to the edge and then stops is a step in the
+                        // shading, and a handful of such steps is what a corner
+                        // shaded in bands rather than softly is made of.
+                        + "        float near = clamp(1.0 - (len * len) / (uRadius * uRadius), 0.0, 1.0);\n"
+                        + "        occlusion += front * near;\n"
                         + "    }\n"
                         + "    float ao = 1.0 - uStrength * occlusion * 0.18;\n"
                         + "    gl_FragColor = vec4(clamp(ao, 0.0, 1.0));\n"
@@ -2800,6 +2820,7 @@ final class VkTerrainRenderer {
         foliageSway = clampPercent(intProperty("vulkanmod112.foliageSway", 0));
         bloomStrength = clampPercent(intProperty("vulkanmod112.bloom", 0));
         aoStrength = clampPercent(intProperty("vulkanmod112.ambientOcclusion", 0));
+        aoRadius = Math.max(1, Math.min(6, intProperty("vulkanmod112.aoRadius", 2)));
     }
 
     private static float clampPercent(int value) {

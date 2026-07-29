@@ -323,6 +323,12 @@ public final class VulkanConfig {
      * no geometry and no second pass over the world.
      */
     static final int DEF_AMBIENT_OCCLUSION = 0;
+    /**
+     * How far a corner's shadow reaches, in blocks. Two is a little under the
+     * height of a doorway, which is the scale the eye reads a room's corners at;
+     * a smaller reach draws a line along the seam rather than a shadow.
+     */
+    static final int DEF_AO_RADIUS = 2;
     static final boolean DEF_FOG = true;
     static final boolean DEF_ZOOM = true;
     /** Stored as an integer so it fits the config and the slider; 4 = quarter FOV. */
@@ -369,6 +375,7 @@ public final class VulkanConfig {
     private static int foliageSway = DEF_FOLIAGE_SWAY;
     private static int bloom = DEF_BLOOM;
     private static int ambientOcclusion = DEF_AMBIENT_OCCLUSION;
+    private static int aoRadius = DEF_AO_RADIUS;
     private static boolean fogEnabled = DEF_FOG;
     private static boolean zoomEnabled = DEF_ZOOM;
     private static int zoomFactor = DEF_ZOOM_FACTOR;
@@ -596,6 +603,10 @@ public final class VulkanConfig {
                         + "between a wall and a floor pick up shadow the game has no way to "
                         + "express. Terrain only, and worked out from the depth buffer this "
                         + "renderer already has.");
+        aoRadius = config.getInt("aoRadius", CATEGORY_GENERAL,
+                DEF_AO_RADIUS, 1, 6,
+                "How far a corner's shadow reaches, in blocks. Larger is softer and spreads "
+                        + "further from the seam; smaller keeps the shading tight against it.");
         fogEnabled = config.getBoolean("fog", CATEGORY_GENERAL, DEF_FOG,
                 "Fade Vulkan terrain into the distance the way the rest of the scene already does. "
                         + "Off leaves the world ending in a hard edge, which is a little faster.");
@@ -651,6 +662,7 @@ public final class VulkanConfig {
         setFoliageSway(DEF_FOLIAGE_SWAY);
         setBloom(DEF_BLOOM);
         setAmbientOcclusion(DEF_AMBIENT_OCCLUSION);
+        setAoRadius(DEF_AO_RADIUS);
         setFogEnabled(DEF_FOG);
         setZoomEnabled(DEF_ZOOM);
         setZoomFactor(DEF_ZOOM_FACTOR);
@@ -833,6 +845,16 @@ public final class VulkanConfig {
     public static void setAmbientOcclusion(int value) {
         ambientOcclusion = value;
         store(CATEGORY_GENERAL, "ambientOcclusion", value);
+        applySystemProperties();
+    }
+
+    public static int getAoRadius() {
+        return aoRadius;
+    }
+
+    public static void setAoRadius(int value) {
+        aoRadius = value;
+        store(CATEGORY_GENERAL, "aoRadius", value);
         applySystemProperties();
     }
 
@@ -1071,6 +1093,7 @@ public final class VulkanConfig {
         System.setProperty("vulkanmod112.foliageSway", Integer.toString(foliageSway));
         System.setProperty("vulkanmod112.bloom", Integer.toString(bloom));
         System.setProperty("vulkanmod112.ambientOcclusion", Integer.toString(ambientOcclusion));
+        System.setProperty("vulkanmod112.aoRadius", Integer.toString(aoRadius));
         System.setProperty("vulkanmod112.showMaterials", Boolean.toString(showMaterials));
     }
 

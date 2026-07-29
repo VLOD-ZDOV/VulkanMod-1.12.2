@@ -456,6 +456,35 @@ final class VulkanOptions {
                                         VulkanConfig.setAmbientOcclusion(value);
                                     }
                                 }),
+                        new VRangeOption("Ambient Occlusion Reach",
+                                "How far a corner's shadow reaches, in blocks. The row above says "
+                                        + "how dark, this one says how far, and the second is what "
+                                        + "decides whether it reads as shadow at all: a reach under "
+                                        + "a block draws a dark line along the seam where a wall "
+                                        + "meets a ceiling rather than a shadow fading out of it, "
+                                        + "because everything the effect has to say is then said "
+                                        + "within a few pixels. Two blocks is a little under the "
+                                        + "height of a doorway, which is the scale a room's corners "
+                                        + "are read at. Larger is softer and reaches further; it "
+                                        + "costs nothing extra, the same sixteen neighbours are "
+                                        + "asked, only further apart — so the wider it goes the "
+                                        + "coarser the answer, and past four blocks a small alcove "
+                                        + "is missed entirely by a set of samples spread across a "
+                                        + "room.",
+                                Cost.of(Level.NONE, Level.NONE, Level.NONE),
+                                "Needs Ambient Occlusion above zero.",
+                                1, 6, 1, " blocks", null,
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getAoRadius();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setAoRadius(value);
+                                    }
+                                }),
                         new VRangeOption("Bloom",
                                 "How much light spills off a glowing surface into the pixels "
                                         + "around it. Lava, torches, glowstone and any modded "
