@@ -1329,6 +1329,9 @@ final class VkTerrainRenderer {
         GL20C.glUseProgram(bloomAddProgram);
         GL20C.glUniform2f(bloomAddInvSize, 1.0f / width, 1.0f / height);
         GL20C.glUniform1f(bloomAddStrength, bloomStrength);
+        GL13C.glActiveTexture(GL13C.GL_TEXTURE1);
+        GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, glColorTexture);
+        GL13C.glActiveTexture(GL13C.GL_TEXTURE0);
         GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, bloomTexture[0]);
         fullscreenQuad();
         GL11C.glDisable(GL11C.GL_BLEND);
@@ -2472,12 +2475,27 @@ final class VkTerrainRenderer {
         // leaves the frame's own alpha alone.
         bloomAddProgram = buildQuadProgram(
                 "uniform sampler2D uSource;\n"
+                        + "uniform sampler2D uScene;\n"
                         + "uniform vec2 uInvSize;\n"
                         + "uniform float uStrength;\n"
                         + "void main() {\n"
-                        + "    vec3 glow = texture2D(uSource, gl_FragCoord.xy * uInvSize).rgb;\n"
-                        + "    gl_FragColor = vec4(glow * uStrength, 0.0);\n"
+                        + "    vec2 uv = gl_FragCoord.xy * uInvSize;\n"
+                        + "    vec3 glow = texture2D(uSource, uv).rgb;\n"
+                        // Held back on the surfaces producing it, and this is
+                        // not taste. Adding light to a pixel that is already
+                        // near the top of an eight-bit channel does not make it
+                        // brighter, it makes it flat: the frame has no headroom
+                        // anywhere, so the only thing the addition can spend is
+                        // the texture's own detail. Lava came out as a sheet of
+                        // orange with its pattern gone. What a glow is, is the
+                        // light that landed somewhere else, so that is what is
+                        // added — the source keeps the look it earned.
+                        + "    float self = clamp((texture2D(uScene, uv).a - 0.5) * 2.0, 0.0, 1.0);\n"
+                        + "    gl_FragColor = vec4(glow * uStrength * (1.0 - 0.85 * self), 0.0);\n"
                         + "}\n");
+        GL20C.glUseProgram(bloomAddProgram);
+        GL20C.glUniform1i(GL20C.glGetUniformLocation(bloomAddProgram, "uScene"), 1);
+        GL20C.glUseProgram(0);
         bloomAddInvSize = GL20C.glGetUniformLocation(bloomAddProgram, "uInvSize");
         bloomAddStrength = GL20C.glGetUniformLocation(bloomAddProgram, "uStrength");
     }
