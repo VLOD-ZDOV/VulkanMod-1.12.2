@@ -316,8 +316,11 @@ const float WAVE_K = 6.2831853 / WAVE_LATTICE;
 // a run. Water in this game is flat and stays flat — nothing is displaced, so
 // this is what the surface is shaded as, not what it is.
 const float WAVE_SLOPE = 0.3;
-// How much of the sky a tilted facet gains or loses, at full strength.
-const float WAVE_SHADE = 0.14;
+// How much of the sky a tilted facet gains or loses, at full strength. Set by
+// eye: at 0.14 the first version was reported invisible from above, which is
+// the one direction the Fresnel term has nothing to say in, so this is the
+// whole of what a wave looks like when you are standing over it.
+const float WAVE_SHADE = 0.32;
 
 /**
  * A horizontal position that does not travel with the player.
@@ -425,10 +428,29 @@ void main() {
     // smooth patch. Only the top: the sides of a water block are the walls of
     // the channel it runs in, and a wave has no business tilting those.
     float waveShade = 1.0;
+    vec3 mirrorNormal = normal;
     if (frame.water.x > 0.0 && material == MATERIAL_WATER && normal.y > 0.9) {
+        vec3 still = normal;
         vec2 g = waveGradient(waveXZ(), frame.frameInfo.x);
         vec2 slope = g * (WAVE_SLOPE * frame.water.x);
         normal = normalize(vec3(-slope.x, 1.0, -slope.y));
+        // The reflection is measured against a calmer surface than the light is,
+        // and the reason is that Fresnel near grazing is a cliff: the same eight
+        // degrees of tilt that are barely visible from above swing the mirror
+        // from a third to nearly all of it, and the water came out banded white
+        // and blue from the shore rather than rippled. Two things are missing
+        // from a single sample of the slope, and both say the same. A crest
+        // near grazing hides its own trough, so less of the slope is on show
+        // than there is; and a pixel of water out there covers a great many
+        // waves, so what it should carry is the average of the curve over them,
+        // which for a curve this steep is far flatter than the curve at the
+        // average. So the wave is believed in full where the surface faces the
+        // eye — where the reflection is weak anyway and nothing bands — and
+        // fades to a quarter of itself as the view flattens, which leaves the
+        // horizon the smooth mirror it was before the waves and turns the
+        // banding into glitter.
+        float facing = clamp(dot(still, normalize(-vRelative)), 0.0, 1.0);
+        mirrorNormal = normalize(mix(still, normal, 0.25 + 0.75 * facing));
         // What the tilt does to the light the surface catches. The fresnel term
         // alone would leave the water flat wherever the reflection is weak —
         // looking down at it, which is most of the time — so a facet turned
@@ -483,7 +505,7 @@ void main() {
         // frame.heightFog.w: how much of the Fresnel term to believe, 0 off.
         float water = frame.heightFog.w;
         if (water > 0.0 && material == MATERIAL_WATER) {
-            float mirror = fresnel(normal) * water;
+            float mirror = fresnel(mirrorNormal) * water;
             // Both together, because they are the same fact: where the surface
             // turns into a mirror it stops showing what is under it, and a
             // reflection that let the riverbed through would be a colour laid
