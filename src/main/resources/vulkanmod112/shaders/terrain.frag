@@ -147,6 +147,40 @@ float fogFactor(int mode) {
  */
 vec3 faceNormal() {
     vec3 n = normalize(cross(dFdx(vRelative), dFdy(vRelative)));
+    // Snapped to the axis it is nearest, and this is the difference between a
+    // measurement and an answer.
+    //
+    // How well two screen-space derivatives determine the plane they lie in
+    // falls apart as the surface turns edge-on: the two vectors become nearly
+    // parallel, and their cross product is then a small difference of large
+    // numbers. The symptom was reported without a torch in hand at all —
+    // jumping beside a wall, the top of it darkened briefly twice, once
+    // rising and once falling. Nothing about the light had moved; the only
+    // thing in the shading that depends on where the eye is, is this.
+    //
+    // Blocks are boxes. Every face of one is exactly along an axis, so the
+    // measured direction does not have to be believed to any precision at
+    // all — only enough to say which of six directions it is, and that
+    // survives noise that would ruin the direction itself. It is also the
+    // model vanilla uses: it shades a face by which way it points and nothing
+    // else.
+    //
+    // Below the threshold the measurement is kept as it is. That is where the
+    // things that genuinely are not axis-aligned live — the crossed quads of
+    // grass sit at forty-five degrees, so their largest component is 0.71 and
+    // no snapping can turn them into a face of a box.
+    vec3 size = abs(n);
+    float largest = max(size.x, max(size.y, size.z));
+    if (largest > 0.75) {
+        n = size.x == largest ? vec3(sign(n.x), 0.0, 0.0)
+                : (size.y == largest ? vec3(0.0, sign(n.y), 0.0)
+                : vec3(0.0, 0.0, sign(n.z)));
+    }
+    // Which of the two ways along that axis: the one facing the camera. Tested
+    // after the snap on purpose — against an axis this is a single coordinate
+    // of the surface's position, which is a clean number, where against the
+    // measured normal it was a dot product of two noisy ones and could come
+    // out either way exactly when the face was hardest to measure.
     return dot(n, vRelative) > 0.0 ? -n : n;
 }
 
