@@ -23,6 +23,10 @@ layout(set = 0, binding = 3, std140) uniform Frame {
     // in .x. Only the fragment stage reads them; they are declared here because
     // both stages must see the same block.
     vec4 materialSprites[16];
+    // x = wave strength on water, read by the fragment stage.
+    // yz = the camera's own world x and z reduced modulo the lattice below.
+    // w = how far the top of a plant leans in the wind, 0 turns it off.
+    vec4 water;
 } frame;
 
 // What actually differs between draws.
@@ -52,12 +56,65 @@ layout(location = 4) out vec3 vRelative;
 // neither, on the one triangle where they meet.
 layout(location = 5) flat out uint vMaterial;
 
+const uint MATERIAL_PLANT = 6u;
+
+// The same lattice terrain.frag builds its waves on, for the same reason: the
+// phase has to come from a world position, single precision cannot hold one at
+// Minecraft's range, and a phase is periodic — so the camera's position arrives
+// already reduced modulo this, and every term below repeats over it exactly.
+const float SWAY_LATTICE = 16.0;
+const float SWAY_K = 6.2831853 / SWAY_LATTICE;
+// How far the top of a plant may lean, in blocks, at full strength. A tuft of
+// grass is about a foot across; this is deliberately less than that, because
+// what reads as wind is that the field moves together, not that any one blade
+// travels far.
+const float SWAY_REACH = 0.11;
+
+/**
+ * Which way the wind has bent the plants at this spot, at most one on each axis.
+ *
+ * Four sines rather than one, at unrelated angles and speeds, so the field
+ * moves in gusts crossing each other instead of everything in sight leaning the
+ * same way at the same moment. No random phase per plant: neighbours moving
+ * independently reads as noise, and what a field of grass in wind actually does
+ * is bend in waves that travel across it.
+ */
+vec2 swayOffset(vec2 p, float t) {
+    vec2 o = vec2(sin(SWAY_K * (p.x + 2.0 * p.y) + 1.6 * t),
+                  sin(SWAY_K * (2.0 * p.x - p.y) + 1.9 * t));
+    o += 0.45 * vec2(sin(SWAY_K * 3.0 * p.x + 2.7 * t),
+                     sin(SWAY_K * 3.0 * p.y + 2.3 * t));
+    return o * (1.0 / 1.45);
+}
+
 void main() {
     // Every indirect command has exactly one instance; firstInstance is the
     // index of this chunk's camera-relative origin in the storage buffer.
     // That origin is already relative to the camera, so the sum below is the
     // position in eye space and its length is the distance fog needs.
-    vec3 relative = inPos + chunkOffsets.origins[gl_InstanceIndex].xyz;
+    vec4 chunk = chunkOffsets.origins[gl_InstanceIndex];
+    vec3 relative = inPos + chunk.xyz;
+    // Wind, and it moves the vertex rather than pretending in the shading.
+    //
+    // Only the top of a plant may travel: the bottom is in the ground. There is
+    // nothing in the vertex that says which is which — a cross model spans a
+    // whole block, so its top and its bottom are both at whole numbers — but
+    // there is no need to store it. The game builds every quad's four corners
+    // in one fixed order, and its own table of them (EnumFaceDirection) gives
+    // the same answer for all four vertical faces: corners 0 and 3 are the top
+    // pair. So the marker is the corner number, which costs nothing to know.
+    //
+    // gl_VertexIndex has the draw's vertexOffset added in and a chunk does not
+    // have to begin on a quad boundary, so where this chunk's own count starts
+    // is handed over in the origin's spare fourth float.
+    if (frame.water.w > 0.0 && frame.frameInfo.z > 0.5 && inMaterial == MATERIAL_PLANT) {
+        int corner = (gl_VertexIndex - int(chunk.w)) & 3;
+        if (corner == 0 || corner == 3) {
+            vec2 field = relative.xz + frame.water.yz;
+            relative.xz += swayOffset(field, frame.frameInfo.x)
+                    * (SWAY_REACH * frame.water.w);
+        }
+    }
     gl_Position = frame.mvp * vec4(relative, 1.0);
     vColor = inColor;
     vUV = inUV;

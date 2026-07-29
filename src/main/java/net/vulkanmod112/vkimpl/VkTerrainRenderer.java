@@ -342,6 +342,8 @@ final class VkTerrainRenderer {
     private float waterReflection;
     /** How far the water surface is tilted by the wave pattern; 0 is off. */
     private float waterWaves;
+    /** How far the top of a plant leans in the wind; 0 is off. */
+    private float foliageSway;
     /**
      * The camera in world coordinates, kept as doubles.
      *
@@ -925,7 +927,17 @@ final class VkTerrainRenderer {
                 MemoryUtil.memPutFloat(origin, (float) (chunks[c * 4 + 1] - viewX));
                 MemoryUtil.memPutFloat(origin + 4, (float) (chunks[c * 4 + 2] - viewY));
                 MemoryUtil.memPutFloat(origin + 8, (float) (chunks[c * 4 + 3] - viewZ));
-                MemoryUtil.memPutFloat(origin + 12, 0.0f);
+                // Where this chunk's first vertex sits within a quad.
+                //
+                // gl_VertexIndex carries the draw's vertexOffset added in, and
+                // the vertex shader needs the corner number inside the quad to
+                // tell the top of a plant from its bottom. Every suballocation
+                // begins on a vertex boundary but not necessarily on a quad
+                // one, so the offset is not always a multiple of four and the
+                // low two bits cannot simply be masked off. Handing them over
+                // costs a float that was being written as zero anyway.
+                int baseVertex = (int) (entry.offset / BLOCK_VERTEX_STRIDE);
+                MemoryUtil.memPutFloat(origin + 12, baseVertex & 3);
                 if (logInputs) {
                     logInputs = false;
                     ByteBuffer push = stack.malloc(12);
@@ -1813,7 +1825,8 @@ final class VkTerrainRenderer {
         // that. What crosses into the shader is a remainder under sixteen.
         MemoryUtil.memPutFloat(base + 916, (float) waveWrap(viewWorldX));
         MemoryUtil.memPutFloat(base + 920, (float) waveWrap(viewWorldZ));
-        MemoryUtil.memPutFloat(base + 924, 0.0f);
+        // w: how far a plant leans away from where the game put it.
+        MemoryUtil.memPutFloat(base + 924, foliageSway);
     }
 
     /** The wave lattice from terrain.frag, which this side has to agree with. */
@@ -1845,6 +1858,7 @@ final class VkTerrainRenderer {
         showMaterials = "true".equals(System.getProperty("vulkanmod112.showMaterials"));
         waterReflection = clampPercent(intProperty("vulkanmod112.waterReflection", 0));
         waterWaves = clampPercent(intProperty("vulkanmod112.waterWaves", 0));
+        foliageSway = clampPercent(intProperty("vulkanmod112.foliageSway", 0));
     }
 
     private static float clampPercent(int value) {

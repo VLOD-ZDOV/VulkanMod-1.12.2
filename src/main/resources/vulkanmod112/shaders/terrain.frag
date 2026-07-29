@@ -43,6 +43,10 @@ const uint MATERIAL_FOLIAGE = 2u;
 const uint MATERIAL_GLASS = 3u;
 const uint MATERIAL_LAVA = 4u;
 const uint MATERIAL_ICE = 5u;
+// A cross-shaped plant. Lit exactly as foliage is — it is the same kind of
+// thing — and told apart only because it is the one material that may be
+// moved by the wind. See terrain.vert.
+const uint MATERIAL_PLANT = 6u;
 
 /**
  * The material of a surface read off the atlas rather than off the vertex.
@@ -83,7 +87,7 @@ vec3 materialColor(uint material) {
     if (material == MATERIAL_WATER) {
         return vec3(0.2, 0.4, 1.0);
     }
-    if (material == MATERIAL_FOLIAGE) {
+    if (material == MATERIAL_FOLIAGE || material == MATERIAL_PLANT) {
         return vec3(0.2, 1.0, 0.2);
     }
     if (material == MATERIAL_GLASS) {
@@ -405,7 +409,7 @@ void main() {
     if (BLEND && material == MATERIAL_PLAIN) {
         material = spriteMaterial(vUV);
     }
-    bool foliage = material == MATERIAL_FOLIAGE;
+    bool foliage = material == MATERIAL_FOLIAGE || material == MATERIAL_PLANT;
     // Both of these come from the frame's uniform buffer, so every fragment in
     // the draw takes the same branch — which is what makes it safe to ask for
     // derivatives inside it.

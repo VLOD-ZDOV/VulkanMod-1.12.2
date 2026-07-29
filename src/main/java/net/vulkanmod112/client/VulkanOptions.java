@@ -427,6 +427,36 @@ final class VulkanOptions {
                                         VulkanConfig.setWaterReflection(value);
                                     }
                                 }),
+                        new VRangeOption("Foliage Sway",
+                                "How far the top of a plant leans in the wind. The vertex is moved "
+                                        + "rather than the shading faked, and only the top pair of "
+                                        + "corners of each quad: the bottom of a plant is in the "
+                                        + "ground and stays there. Nothing had to be stored to know "
+                                        + "which corners those are — the game builds every quad's "
+                                        + "four in one fixed order, and its own table gives the "
+                                        + "same answer for all four vertical faces, so the corner "
+                                        + "number is the marker and it costs nothing. Grass, "
+                                        + "flowers, saplings and crops only. Leaves are a solid "
+                                        + "cube whose top face would tear in half under the same "
+                                        + "rule, and a plant taller than one block has the top of "
+                                        + "its lower half and the bottom of its upper half at the "
+                                        + "same height, so it would come apart at the seam — both "
+                                        + "are left still until there is somewhere to record how "
+                                        + "far up its own plant a block is.",
+                                Cost.of(Level.NONE, Level.LOW, Level.NONE),
+                                "Needs Material Tags on; nothing else can tell grass from a torch.",
+                                0, 100, 5, "%", "OFF",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getFoliageSway();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setFoliageSway(value);
+                                    }
+                                }),
                         new VRangeOption("Water Waves",
                                 "How much a moving wave pattern tilts the surface of water. "
                                         + "Nothing is displaced and nothing is built: the water "

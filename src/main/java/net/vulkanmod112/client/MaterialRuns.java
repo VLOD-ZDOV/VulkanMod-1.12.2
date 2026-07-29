@@ -1,5 +1,6 @@
 package net.vulkanmod112.client;
 
+import net.minecraft.block.Block;
 import net.minecraft.block.material.Material;
 import net.minecraft.block.state.IBlockState;
 import net.minecraft.client.renderer.BufferBuilder;
@@ -58,6 +59,8 @@ public final class MaterialRuns {
     public static final int GLASS = 3;
     public static final int LAVA = 4;
     public static final int ICE = 5;
+    /** A cross-shaped plant: lit as a volume like foliage, and the only thing that sways. */
+    public static final int PLANT = 6;
 
     /**
      * A run is two ints: the vertex one past the end of the run, and what the
@@ -284,11 +287,29 @@ public final class MaterialRuns {
         if (material == Material.LAVA) {
             return LAVA;
         }
-        // Leaves, grass, flowers, crops, vines. Not cactus and not pumpkins:
-        // they are made of plant too, and they are rigid blocks that would look
-        // wrong swaying, which is what this tag is going to be asked to decide.
-        if (material == Material.LEAVES || material == Material.PLANTS
-                || material == Material.VINE) {
+        // Grass, flowers, saplings, crops: the things drawn as two flat quads
+        // crossing each other, which are the only ones that can be made to
+        // sway. Everything about a cross model is vertical, so the top pair of
+        // corners of every quad is its top and moving them is the whole of it.
+        //
+        // Two are held back. A plant that spans more than one block — a double
+        // plant, sugar cane — has the top of the lower block and the bottom of
+        // the upper block at the same height, and only the first of the two
+        // would move: the stem would come apart at the seam. Doing that
+        // properly means knowing how far up its own plant a block is, which is
+        // not something a single block state can say.
+        if (material == Material.PLANTS) {
+            Block block = state.getBlock();
+            boolean tall = block instanceof net.minecraft.block.BlockDoublePlant
+                    || block instanceof net.minecraft.block.BlockReed;
+            return tall ? FOLIAGE : PLANT;
+        }
+        // Leaves and vines: lit as a volume like the rest, but never moved.
+        // Leaves are a full cube, so its top face is four corners at one
+        // height, and the rule that moves the top pair of a vertical quad
+        // would tear that face in half. Vines hang, so the end that should
+        // stay put is the top one — the opposite of everything else here.
+        if (material == Material.LEAVES || material == Material.VINE) {
             return FOLIAGE;
         }
         if (material == Material.GLASS) {
