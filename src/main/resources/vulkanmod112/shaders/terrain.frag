@@ -351,9 +351,9 @@ vec3 foliageNormal(vec3 geometric) {
 vec4 traceReflection(vec3 origin, vec3 dir) {
     // Away from the surface before the first step, or the surface finds itself.
     float t = 0.3;
-    float step = 0.5;
+    float step = 0.4;
     float lastMiss = t;
-    for (int i = 0; i < 28; i++) {
+    for (int i = 0; i < 32; i++) {
         vec4 clip = frame.mvp * vec4(origin + dir * t, 1.0);
         if (clip.w <= 0.0001) {
             return vec4(0.0);
@@ -369,7 +369,7 @@ vec4 traceReflection(vec3 origin, vec3 dir) {
             // closer than the surface it landed on is thick.
             float near = lastMiss;
             float far = t;
-            for (int j = 0; j < 4; j++) {
+            for (int j = 0; j < 8; j++) {
                 float mid = 0.5 * (near + far);
                 vec4 c = frame.mvp * vec4(origin + dir * mid, 1.0);
                 vec3 s = vec3(c.xy / c.w * 0.5 + 0.5, c.z / c.w);
@@ -385,11 +385,23 @@ vec4 traceReflection(vec3 origin, vec3 dir) {
             // along the edge of the screen would announce how it was made.
             vec2 edge = smoothstep(vec2(0.0), vec2(0.14), onScreen.xy)
                       * smoothstep(vec2(0.0), vec2(0.14), vec2(1.0) - onScreen.xy);
-            return vec4(textureLod(sceneColor, onScreen.xy, 0.0).rgb, edge.x * edge.y);
+            // And believed less the further it had to go. A ray that travelled
+            // a hundred blocks was stepping in strides by the end, so what it
+            // found there is worth less than what it found close in — where
+            // the strides were short and the answer is nearly exact.
+            float trust = clamp(1.0 - t * 0.012, 0.25, 1.0);
+            return vec4(textureLod(sceneColor, onScreen.xy, 0.0).rgb,
+                        edge.x * edge.y * trust);
         }
         lastMiss = t;
         t += step;
-        step *= 1.19;
+        // Gently. Steps have to grow, a metre near the eye covering far more
+        // of the picture than a metre far from it — but they were growing
+        // fast enough that the last of them crossed most of the screen in one
+        // go, and a crossing found that coarsely lands blocks away from where
+        // it happens. That is what a stretched reflection is: not the wrong
+        // shape, the right shape sampled from the wrong place.
+        step *= 1.11;
     }
     return vec4(0.0);
 }
