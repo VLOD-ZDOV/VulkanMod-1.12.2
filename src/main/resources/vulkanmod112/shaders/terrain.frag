@@ -503,15 +503,24 @@ void main() {
     }
 
     int mode = int(frame.fogColor.a);
+    // Kept for the emissive mask below: how much of this surface survived the
+    // fog. Light that the fog swallowed must not glow either — inside lava,
+    // where the fog is thick enough to hide the world, the silhouettes of
+    // distant blocks still had burning edges, because their colour had been
+    // taken to the fog colour and their claim to be a light had not.
+    float fogKeep = 1.0;
     if (mode != 0) {
-        shaded = mix(frame.fogColor.rgb, shaded, clamp(fogFactor(mode), 0.0, 1.0));
+        fogKeep = clamp(fogFactor(mode), 0.0, 1.0);
+        shaded = mix(frame.fogColor.rgb, shaded, fogKeep);
     }
     // After the distance fog and only where the game already has fog of its
     // own: with fog switched off there is no colour to thicken towards, and
     // inventing one would make this the only surface in the scene fading into
     // something the sky never does.
     if (mode != 0 && frame.heightFog.x > 0.0) {
-        shaded = mix(shaded, frame.fogColor.rgb, clamp(heightFogAmount(), 0.0, 1.0));
+        float thickened = clamp(heightFogAmount(), 0.0, 1.0);
+        shaded = mix(shaded, frame.fogColor.rgb, thickened);
+        fogKeep *= 1.0 - thickened;
     }
     if (BLEND) {
         float alpha = tex.a * vColor.a;
@@ -549,6 +558,6 @@ void main() {
         // decided it, which multiplies the sides of a block by 0.8 and 0.6 and
         // its underside by 0.5 — so a block glowed from its top and two sides
         // and not the other two. Both were reported from a screenshot.
-        outColor = vec4(shaded, 0.5 + 0.5 * emits);
+        outColor = vec4(shaded, 0.5 + 0.5 * emits * fogKeep);
     }
 }

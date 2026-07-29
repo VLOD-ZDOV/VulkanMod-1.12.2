@@ -125,6 +125,17 @@ public interface VulkanBridge {
      */
     void updateAtlas(int atlasGlTextureId);
 
+    /**
+     * Replaces rectangles of the block atlas with animation frames the game
+     * just produced.
+     *
+     * Two flat arrays because only primitives and arrays may cross this
+     * boundary. {@code header} holds six ints per rectangle — mip level, x, y,
+     * width, height, and where its pixels begin in {@code pixels} — and the
+     * pixels are the game's own 0xAARRGGBB, converted on the far side.
+     */
+    void updateAtlasRegions(int[] header, int headerCount, int[] pixels, int pixelCount);
+
     /** Tells the Vulkan side which GL texture holds the 16x16 lightmap. */
     void setLightmap(int lightmapGlTextureId);
 

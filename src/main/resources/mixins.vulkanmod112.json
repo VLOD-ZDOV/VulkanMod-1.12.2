@@ -11,6 +11,7 @@
     "GuiVideoSettingsMixin",
     "EntityRenderDistanceMixin",
     "TileEntityRenderDistanceMixin",
-    "TextureMapAnimationMixin"
+    "TextureMapAnimationMixin",
+    "AtlasAnimationMixin"
   ]
 }

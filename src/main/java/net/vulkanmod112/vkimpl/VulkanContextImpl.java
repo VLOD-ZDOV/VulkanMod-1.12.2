@@ -561,6 +561,14 @@ public final class VulkanContextImpl implements VulkanBridge {
     }
 
     @Override
+    public synchronized void updateAtlasRegions(int[] header, int headerCount,
+                                                int[] pixels, int pixelCount) {
+        if (!initialized || terrainRenderer == null) {
+            return;
+        }
+        terrainRenderer.updateAtlasRegions(header, headerCount, pixels, pixelCount);
+    }
+
     public synchronized void updateAtlas(int atlasGlTextureId) {
         if (!initialized || !interopCapable) {
             return;

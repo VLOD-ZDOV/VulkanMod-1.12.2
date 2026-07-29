@@ -1,6 +1,7 @@
 package net.vulkanmod112.mixin;
 
 import net.minecraft.client.renderer.texture.TextureMap;
+import net.vulkanmod112.client.TerrainHooks;
 import net.vulkanmod112.client.VulkanConfig;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -24,5 +25,18 @@ public abstract class TextureMapAnimationMixin {
         if (!VulkanConfig.areAnimationsEnabled()) {
             ci.cancel();
         }
+    }
+
+    /**
+     * The frames this tick produced, handed to the Vulkan copy of the atlas
+     * together rather than one at a time.
+     *
+     * Here rather than at each upload because a tick may move a dozen sprites,
+     * and each hand-over costs a queue submission and a wait however few pixels
+     * it carries.
+     */
+    @Inject(method = "updateAnimations", at = @At("RETURN"))
+    private void vulkanmod112$sendFrames(CallbackInfo ci) {
+        TerrainHooks.flushAtlasAnimations();
     }
 }

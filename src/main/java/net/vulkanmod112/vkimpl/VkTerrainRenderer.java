@@ -272,6 +272,10 @@ final class VkTerrainRenderer {
 
     // Atlas / lightmap
     private long atlasImage;
+    private long atlasStagingBuffer;
+    private long atlasStagingMemory;
+    private long atlasStagingMapped;
+    private long atlasStagingCapacity;
     private long atlasMemory;
     private long atlasView;
     private int atlasWidth;
@@ -531,6 +535,174 @@ final class VkTerrainRenderer {
     // ------------------------------------------------------------------
     // Public entry points (called via the bridge, client thread)
     // ------------------------------------------------------------------
+
+    /**
+     * Replaces rectangles of the atlas with the animation frames of one tick.
+     *
+     * The copy of the atlas here is made once, out of OpenGL, and the game goes
+     * on writing new frames into its own texture for as long as the world is
+     * open. Without this the terrain shows whichever frame the atlas happened
+     * to hold when it was read: lava, water, fire, portals and sea lanterns all
+     * standing still, while the same block held in the hand — drawn by OpenGL
+     * from the game's own texture — animates as it always did.
+     *
+     * Everything the tick produced arrives together and leaves in one
+     * submission. Per sprite it would be a queue submission and a wait apiece,
+     * twenty times a second, for a few kilobytes each.
+     */
+    synchronized void updateAtlasRegions(int[] header, int headerCount, int[] pixels, int pixelCount) {
+        if (atlasImage == 0 || headerCount == 0 || pixelCount == 0) {
+            return;
+        }
+        long bytes = (long) pixelCount * 4L;
+        try (MemoryStack stack = stackPush()) {
+            if (!ensureAtlasStaging(stack, bytes)) {
+                return;
+            }
+            // The game's pixels are 0xAARRGGBB in an int; the image wants the
+            // bytes in the order red, green, blue, alpha. Written straight into
+            // mapped memory rather than through a ByteBuffer view, because this
+            // runs every tick and the conversion is the whole cost.
+            long dst = atlasStagingMapped;
+            for (int i = 0; i < pixelCount; i++) {
+                int argb = pixels[i];
+                MemoryUtil.memPutByte(dst++, (byte) (argb >> 16));
+                MemoryUtil.memPutByte(dst++, (byte) (argb >> 8));
+                MemoryUtil.memPutByte(dst++, (byte) argb);
+                MemoryUtil.memPutByte(dst++, (byte) (argb >>> 24));
+            }
+
+            int regions = headerCount / 6;
+            VkCommandBufferAllocateInfo allocInfo = VkCommandBufferAllocateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO)
+                    .commandPool(commandPool)
+                    .level(VK_COMMAND_BUFFER_LEVEL_PRIMARY)
+                    .commandBufferCount(1);
+            PointerBuffer pBuffer = stack.mallocPointer(1);
+            check(vkAllocateCommandBuffers(device(), allocInfo, pBuffer),
+                    "vkAllocateCommandBuffers(atlas regions)");
+            VkCommandBuffer cmd = new VkCommandBuffer(pBuffer.get(0), device());
+            VkCommandBufferBeginInfo begin = VkCommandBufferBeginInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO)
+                    .flags(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+            check(vkBeginCommandBuffer(cmd, begin), "vkBeginCommandBuffer(atlas regions)");
+
+            VkImageMemoryBarrier.Buffer barrier = VkImageMemoryBarrier.calloc(1, stack)
+                    .sType(VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER)
+                    .srcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+                    .dstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+                    .image(atlasImage)
+                    .srcAccessMask(VK_ACCESS_SHADER_READ_BIT)
+                    .dstAccessMask(VK_ACCESS_TRANSFER_WRITE_BIT)
+                    .oldLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+                    .newLayout(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+            barrier.get(0).subresourceRange()
+                    .aspectMask(VK_IMAGE_ASPECT_COLOR_BIT)
+                    .baseMipLevel(0).levelCount(VK_REMAINING_MIP_LEVELS)
+                    .baseArrayLayer(0).layerCount(1);
+            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT, 0, null, null, barrier);
+
+            VkBufferImageCopy.Buffer copy = VkBufferImageCopy.calloc(regions, stack);
+            for (int r = 0; r < regions; r++) {
+                int base = r * 6;
+                final int level = header[base];
+                final int x = header[base + 1];
+                final int y = header[base + 2];
+                final int w = header[base + 3];
+                final int h = header[base + 4];
+                copy.get(r)
+                        .bufferOffset((long) header[base + 5] * 4L)
+                        .bufferRowLength(0)
+                        .bufferImageHeight(0)
+                        .imageOffset(o -> o.x(x).y(y).z(0))
+                        .imageExtent(e -> e.width(w).height(h).depth(1));
+                copy.get(r).imageSubresource()
+                        .aspectMask(VK_IMAGE_ASPECT_COLOR_BIT)
+                        .mipLevel(level).baseArrayLayer(0).layerCount(1);
+            }
+            vkCmdCopyBufferToImage(cmd, atlasStagingBuffer, atlasImage,
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, copy);
+
+            barrier.get(0)
+                    .srcAccessMask(VK_ACCESS_TRANSFER_WRITE_BIT)
+                    .dstAccessMask(VK_ACCESS_SHADER_READ_BIT)
+                    .oldLayout(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
+                    .newLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, null, null, barrier);
+            check(vkEndCommandBuffer(cmd), "vkEndCommandBuffer(atlas regions)");
+
+            VkFenceCreateInfo fenceInfo = VkFenceCreateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_FENCE_CREATE_INFO);
+            LongBuffer pFence = stack.mallocLong(1);
+            check(vkCreateFence(device(), fenceInfo, null, pFence), "vkCreateFence(atlas regions)");
+            long fence = pFence.get(0);
+            VkSubmitInfo submit = VkSubmitInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_SUBMIT_INFO)
+                    .pCommandBuffers(stack.pointers(cmd));
+            check(vkQueueSubmit(ctx.getGraphicsQueue(), submit, fence),
+                    "vkQueueSubmit(atlas regions)");
+            check(vkWaitForFences(device(), fence, true, 5_000_000_000L),
+                    "vkWaitForFences(atlas regions)");
+            vkDestroyFence(device(), fence, null);
+            vkFreeCommandBuffers(device(), commandPool, cmd);
+        }
+    }
+
+    /** Host-visible staging for the frames of one tick; grows and stays. */
+    private boolean ensureAtlasStaging(MemoryStack stack, long bytes) {
+        if (atlasStagingBuffer != 0 && bytes <= atlasStagingCapacity) {
+            return true;
+        }
+        destroyAtlasStaging();
+        VkBufferCreateInfo info = VkBufferCreateInfo.calloc(stack)
+                .sType(VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO)
+                .size(bytes)
+                .usage(VK_BUFFER_USAGE_TRANSFER_SRC_BIT)
+                .sharingMode(VK_SHARING_MODE_EXCLUSIVE);
+        LongBuffer pBuffer = stack.mallocLong(1);
+        if (vkCreateBuffer(device(), info, null, pBuffer) != VK_SUCCESS) {
+            return false;
+        }
+        atlasStagingBuffer = pBuffer.get(0);
+        VkMemoryRequirements req = VkMemoryRequirements.malloc(stack);
+        vkGetBufferMemoryRequirements(device(), atlasStagingBuffer, req);
+        VkMemoryAllocateInfo alloc = VkMemoryAllocateInfo.calloc(stack)
+                .sType(VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO)
+                .allocationSize(req.size())
+                .memoryTypeIndex(findMemoryType(stack, req.memoryTypeBits(),
+                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT));
+        LongBuffer pMemory = stack.mallocLong(1);
+        if (vkAllocateMemory(device(), alloc, null, pMemory) != VK_SUCCESS) {
+            vkDestroyBuffer(device(), atlasStagingBuffer, null);
+            atlasStagingBuffer = 0;
+            return false;
+        }
+        atlasStagingMemory = pMemory.get(0);
+        check(vkBindBufferMemory(device(), atlasStagingBuffer, atlasStagingMemory, 0),
+                "vkBindBufferMemory(atlas staging)");
+        PointerBuffer pMapped = stack.mallocPointer(1);
+        check(vkMapMemory(device(), atlasStagingMemory, 0, req.size(), 0, pMapped),
+                "vkMapMemory(atlas staging)");
+        atlasStagingMapped = pMapped.get(0);
+        atlasStagingCapacity = bytes;
+        return true;
+    }
+
+    private void destroyAtlasStaging() {
+        if (atlasStagingMemory != 0) {
+            vkUnmapMemory(device(), atlasStagingMemory);
+            vkFreeMemory(device(), atlasStagingMemory, null);
+            atlasStagingMemory = 0;
+        }
+        if (atlasStagingBuffer != 0) {
+            vkDestroyBuffer(device(), atlasStagingBuffer, null);
+            atlasStagingBuffer = 0;
+        }
+        atlasStagingMapped = 0;
+        atlasStagingCapacity = 0;
+    }
 
     synchronized void updateAtlas(int atlasGlId) {
         ctx.ensureGlCapabilities();
@@ -3109,6 +3281,7 @@ final class VkTerrainRenderer {
     // ------------------------------------------------------------------
 
     private void destroyAtlas() {
+        destroyAtlasStaging();
         if (atlasImage != 0) {
             vkDeviceWaitIdle(device());
             vkDestroyImageView(device(), atlasView, null);

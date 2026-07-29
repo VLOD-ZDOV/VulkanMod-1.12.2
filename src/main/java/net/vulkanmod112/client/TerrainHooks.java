@@ -400,6 +400,23 @@ public final class TerrainHooks {
         }
     }
 
+    /**
+     * Hands this tick's animation frames to the Vulkan copy of the atlas.
+     *
+     * Called when the game has finished stepping its own animations. With no
+     * renderer to send them to they are dropped rather than kept: a session
+     * that never brings Vulkan up would otherwise grow this buffer forever, and
+     * frames that arrive late are of no use to anyone.
+     */
+    public static void flushAtlasAnimations() {
+        VulkanBridge bridge = VulkanLoader.bridgeIfReady();
+        if (bridge == null || !VulkanConfig.isTerrainEnabled()) {
+            AtlasAnimations.discard();
+            return;
+        }
+        AtlasAnimations.flush(bridge);
+    }
+
     private static boolean ensureTextures(VulkanBridge bridge) {
         if (atlasUploaded) {
             return true;
@@ -411,6 +428,8 @@ public final class TerrainHooks {
                 "lightmapTexture", "field_78513_d");
         bridge.updateAtlas(atlasId);
         MaterialSprites.handOver(bridge, mc.getTextureMapBlocks());
+        // From here on the copy is worth keeping up to date.
+        AtlasAnimations.arm();
         bridge.setLightmap(lightmap.getGlTextureId());
         lightmapColors = lightmap.getTextureData(); // backing array of the 16x16 lightmap
         atlasUploaded = true;
