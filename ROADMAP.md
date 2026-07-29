@@ -8,8 +8,19 @@ rather than crashing.
 
 ## Done
 
-### 0.7.0 — in development
+### 0.7.0
 
+- **Effects built from the settings screen**, all off by default: water waves, foliage sway,
+  bloom, ambient occlusion, screen reflections on water, and foliage lit as a volume rather than
+  as the two flat quads it is made of. Not a shader pack loader — a set of effects with a slider
+  each. All of them stand on **Material Tags**, which records what a block is made of while the
+  chunk is built, because a render layer is not a material: water shares one with stained glass
+  and grass shares another with torches.
+- **Diagnostic views** under Advanced for the effects that can look plausible while being wrong:
+  the occlusion on its own, the reflection as only what its ray found, and the frame painted with
+  how far each pixel moved since the last one.
+- **Screen reflections are experimental.** They reflect what is on screen and nothing else, which
+  is the limit of the technique rather than of this build, but this is the newest thing here.
 - **Directional light.** A dropped torch no longer lights the underside of the floor it is lying
   on as brightly as the top. On by default.
 - **Height fog**, off by default — how much colour the ground below you gives up to fog.
@@ -86,8 +97,11 @@ rather than crashing.
 
 In the order they are likely to be worth doing.
 
+- **Ray tracing**, for 0.8.0. The obstacle is named under "Not planned" below and has not gone
+  away — it is a question of paying for it deliberately rather than of whether it can be done.
 - **Entities and block entities.** The largest part of the frame now that the visibility search
-  has been dealt with.
+  has been dealt with, and the one change that would improve every effect above at once: the
+  glow, the occlusion and the reflections all stop at the edge of what this renderer draws.
 - **Smart animated textures** — updating only the animated blocks actually in view, instead of
   the all-or-nothing switch that exists today.
 - **Connected glass textures.**
@@ -96,7 +110,7 @@ In the order they are likely to be worth doing.
 
 ## Not planned
 
-- **Ray tracing.** Not for want of hardware — the obstacle is that a chunk's acceleration
+- **Ray tracing in 0.7.** Moved to 0.8.0 rather than dropped. Not for want of hardware — the obstacle is that a chunk's acceleration
   structure has to be rebuilt whenever the chunk is, which is constantly, and chunk rebuilding is
   already the largest cost in a moving frame. The rays would also not see entities, particles or
   the sky, because this renderer does not draw them, so shadows would ignore every mob.

@@ -451,7 +451,8 @@ final class VulkanOptions {
                                         + "off screen needs rays into the world itself, which is a "
                                         + "different thing entirely and is not this.",
                                 Cost.of(Level.NONE, Level.MEDIUM, Level.NONE),
-                                "Needs Vulkan Water and Glass on, and Water Reflection above zero.",
+                                "Experimental. Needs Vulkan Water and Glass on, and Water "
+                                        + "Reflection above zero.",
                                 0, 100, 5, "%", "OFF",
                                 new VRangeOption.Access() {
                                     @Override

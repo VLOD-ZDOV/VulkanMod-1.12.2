@@ -366,7 +366,7 @@ vec3 foliageNormal(vec3 geometric) {
 // occupy real area on screen, and they are what a reflection is actually made
 // of. Beyond this the fog colour takes over, which is the horizon, which is
 // what water at that distance shows anyway.
-const float REFLECT_REACH = 26.0;
+const float REFLECT_REACH = 18.0;
 
 // How far behind a surface a ray may be and still be counted as having hit it,
 // in blocks. Without this the reflection finds things standing in front of the
@@ -685,8 +685,17 @@ void main() {
                 // the world that was never drawn. Faded rather than cut, so a
                 // surface does not change its mind along a line.
                 float outward = clamp(1.0 - dot(ray, toEye) * 2.5, 0.0, 1.0);
-                vec4 found = outward > 0.0 ? traceReflection(vRelative, ray)
-                                           : vec4(0.0);
+                // A ray that leaves almost along the surface is the one that
+                // smears. It skims the top edge of whatever is on the bank and
+                // finds the same few pixels over and over, drawn down the water
+                // as a streak — the reflection is not wrong there so much as
+                // there is one pixel of answer being asked to cover a hundred.
+                // A ray that leaves steeply has room underneath it and comes
+                // back with a picture. Believed in proportion to which it is.
+                float rise = clamp(dot(ray, mirrorNormal) * 4.0, 0.0, 1.0);
+                vec4 found = outward > 0.0 && rise > 0.0
+                        ? traceReflection(vRelative, ray) : vec4(0.0);
+                found.a *= rise;
                 mirrored = mix(mirrored, found.rgb,
                                found.a * outward * frame.screenMirror.x);
                 // Shown on its own when asked. What the ray found, at full
