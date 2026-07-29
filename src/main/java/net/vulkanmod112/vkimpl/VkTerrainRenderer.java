@@ -3824,13 +3824,22 @@ final class VkTerrainRenderer {
                 // them out: what is left on screen is this effect and nothing
                 // else, and a defect either survives that or was never here.
                 + "    c.rgb = mix(c.rgb * ao, vec3(ao), uAo_only);\n"
-                // Where this pixel was a frame ago, as a colour: red for a step
-                // sideways, green for a step up or down, and a still camera over
-                // a still world is one flat grey. Multiplied up hard, because
-                // the numbers are fractions of a screen and a walking pace is a
-                // few thousandths of one.
-                + "    vec2 step = texture2D(uMotion, uv).rg * 24.0;\n"
-                + "    c.rgb = mix(c.rgb, vec3(0.5 + step.x, 0.5 + step.y, 0.5), uMotion_show);\n"
+                // Where this pixel was a frame ago, as a colour.
+                //
+                // Direction is the hue and speed is the brightness, which is
+                // the one encoding of this that can be read without a key.
+                // Putting the two axes in the red and green channels seemed
+                // simpler and was not: half of every direction is a channel
+                // going negative, so looking down came out violet and looked
+                // like a different thing happening rather than the opposite of
+                // looking up. On a wheel, opposite directions are opposite
+                // colours and every direction has one of its own.
+                + "    vec2 step = texture2D(uMotion, uv).rg;\n"
+                + "    float speed = clamp(length(step) * 40.0, 0.0, 1.0);\n"
+                + "    float turn = atan(step.y, step.x) * 0.1591549 + 0.5;\n"
+                + "    vec3 wheel = clamp(abs(fract(turn + vec3(0.0, 0.6666667, 0.3333333))\n"
+                + "                       * 6.0 - 3.0) - 1.0, 0.0, 1.0);\n"
+                + "    c.rgb = mix(c.rgb, wheel * speed, uMotion_show);\n"
                 + (writeDepth ? "    gl_FragDepth = texture2D(uDepth, uv).r;\n" : "")
                 + "    gl_FragColor = vec4(c.rgb, 1.0);\n"
                 + "}\n";

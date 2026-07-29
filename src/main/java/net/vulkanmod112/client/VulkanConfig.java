@@ -494,9 +494,9 @@ public final class VulkanConfig {
                         + "until those two are out of the picture. This takes them out. Needs "
                         + "Ambient Occlusion above zero.");
         showMotion = config.getBoolean("showMotion", CATEGORY_ADVANCED, DEF_SHOW_MOTION,
-                "Paint the world with how far each pixel moved since the last frame instead of "
-                        + "with itself: red for sideways, green for up and down, flat grey where "
-                        + "nothing moved. Nothing on screen depends on this yet — it is what "
+                "Paint the world with how each pixel moved since the last frame instead of with "
+                        + "itself: which way it went is the colour, how fast is the brightness, "
+                        + "and anything that did not move is black. Nothing on screen depends on this yet — it is what "
                         + "reflections and any effect that remembers previous frames are built "
                         + "on, and this is how to see whether it is right.");
         buildNearOffThread = config.getBoolean("buildNearOffThread", CATEGORY_OPTIMIZATION,

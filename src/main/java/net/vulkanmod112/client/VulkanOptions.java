@@ -1308,19 +1308,20 @@ final class VulkanOptions {
                                     }
                                 }),
                         new VSwitchOption("Show Motion Vectors",
-                                "Paint the world with how far each pixel moved since the last "
-                                        + "frame instead of with itself: red for a step sideways, "
-                                        + "green for one up or down, and flat grey wherever "
-                                        + "nothing moved at all. Nothing on screen depends on this "
-                                        + "yet. It is what every effect that wants to remember "
+                                "Paint the world with how each pixel moved since the last frame "
+                                        + "instead of with itself: which way it went is the "
+                                        + "colour, how fast is the brightness, and anything that "
+                                        + "did not move at all is black. Opposite directions come "
+                                        + "out as opposite colours. Nothing on screen depends on "
+                                        + "this yet. It is what every effect that wants to remember "
                                         + "something is built on — a reflection or a shadow worked "
                                         + "out from a handful of samples is too noisy to use on "
                                         + "its own, and what makes it usable is adding this "
                                         + "frame's answer to the ones before it, which cannot be "
                                         + "done without knowing which pixel of the last frame was "
                                         + "looking at the same place. Standing perfectly still "
-                                        + "over a still world must give one even grey; anything "
-                                        + "else there is this being wrong.",
+                                        + "over a still world must come out perfectly black; "
+                                        + "anything else there is this being wrong.",
                                 Cost.of(Level.NONE, Level.NONE, Level.NONE),
                                 "Needs Vulkan Terrain on.",
                                 new VSwitchOption.Access() {
