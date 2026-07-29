@@ -349,10 +349,28 @@ vec3 foliageNormal(vec3 geometric) {
  * falls back to the fog colour, which is the horizon, which is what flat water
  * shows at that angle anyway.
  */
+// How far a reflected ray may travel, in blocks, and this is the whole of what
+// makes the effect usable rather than a limit reluctantly imposed on it.
+//
+// Looking along water rather than down at it, the reflected ray leaves at a
+// very shallow angle and travels enormous distances. Everything such rays reach
+// lies in a band a few pixels tall at the horizon, and the water then stretches
+// that band across the entire lake — which is what the first version did, and
+// it came out as spokes radiating from a point rather than as a reflection. The
+// picture simply does not contain what that geometry is asking for, and no
+// amount of care in the marching adds it.
+//
+// Kept short, a ray finds what is near the water: the bank it runs along, a
+// tree standing beside it, a wall at the edge. Those are at a sane angle, they
+// occupy real area on screen, and they are what a reflection is actually made
+// of. Beyond this the fog colour takes over, which is the horizon, which is
+// what water at that distance shows anyway.
+const float REFLECT_REACH = 26.0;
+
 vec4 traceReflection(vec3 origin, vec3 dir) {
     // Away from the surface before the first step, or the surface finds itself.
     float t = 0.3;
-    float step = 0.4;
+    float step = 0.35;
     float lastMiss = t;
     for (int i = 0; i < 32; i++) {
         vec4 clip = frame.mvp * vec4(origin + dir * t, 1.0);
@@ -361,6 +379,9 @@ vec4 traceReflection(vec3 origin, vec3 dir) {
         }
         vec3 onScreen = vec3(clip.xy / clip.w * 0.5 + 0.5, clip.z / clip.w);
         if (onScreen.x < 0.0 || onScreen.x > 1.0 || onScreen.y < 0.0 || onScreen.y > 1.0) {
+            return vec4(0.0);
+        }
+        if (t > REFLECT_REACH) {
             return vec4(0.0);
         }
         if (onScreen.z > textureLod(sceneDepth, onScreen.xy, 0.0).r) {
@@ -386,23 +407,21 @@ vec4 traceReflection(vec3 origin, vec3 dir) {
             // along the edge of the screen would announce how it was made.
             vec2 edge = smoothstep(vec2(0.0), vec2(0.14), onScreen.xy)
                       * smoothstep(vec2(0.0), vec2(0.14), vec2(1.0) - onScreen.xy);
-            // And believed less the further it had to go. A ray that travelled
-            // a hundred blocks was stepping in strides by the end, so what it
-            // found there is worth less than what it found close in — where
-            // the strides were short and the answer is nearly exact.
-            float trust = clamp(1.0 - t * 0.012, 0.25, 1.0);
+            // And believed less the further it had to go, all the way to
+            // nothing at the end of its rope.
+            float reach = t / REFLECT_REACH;
+            float trust = clamp(1.0 - reach * reach, 0.0, 1.0);
             return vec4(textureLod(sceneColor, onScreen.xy, 0.0).rgb,
                         edge.x * edge.y * trust);
         }
         lastMiss = t;
         t += step;
-        // Gently. Steps have to grow, a metre near the eye covering far more
-        // of the picture than a metre far from it — but they were growing
-        // fast enough that the last of them crossed most of the screen in one
-        // go, and a crossing found that coarsely lands blocks away from where
-        // it happens. That is what a stretched reflection is: not the wrong
-        // shape, the right shape sampled from the wrong place.
-        step *= 1.11;
+        // Barely. Once the ray is not allowed to travel far, its steps do not
+        // have to grow much either, and the whole march stays fine: the
+        // longest step here is under a block and a half, where it used to be
+        // ten. Steps still grow a little, a metre near the eye covering more
+        // of the picture than a metre far from it.
+        step *= 1.045;
     }
     return vec4(0.0);
 }
