@@ -127,10 +127,105 @@ public final class VulkanContextImpl implements VulkanBridge {
 
             PointerBuffer pInstance = stack.mallocPointer(1);
             check(vkCreateInstance(createInfo, null, pInstance), "vkCreateInstance");
-            this.instance = new VkInstance(pInstance.get(0), createInfo);
+            this.instance = wrapInstance(pInstance.get(0), createInfo);
             LOGGER.info("VkInstance created (loader reports Vulkan {})", apiVersionString(VK.getInstanceVersionSupported()));
         }
     }
+
+    /**
+     * Wraps the raw instance handle, translating the one failure this step has.
+     *
+     * Constructing a VkInstance is not the cheap wrapper it looks like: LWJGL
+     * lists the extensions of every physical device on the thread's scratch
+     * stack to work out which entry points exist. When that stack is too small
+     * the throw is an OutOfMemoryError reading "Out of stack space", from a
+     * line inside LWJGL, and it says nothing about which knob is short or that
+     * the amount of heap the player gave the game has anything to do with it —
+     * it does not. Reported as-is it sends people to raise their allocated
+     * memory, which cannot help.
+     */
+    private VkInstance wrapInstance(long handle, VkInstanceCreateInfo createInfo) {
+        try {
+            return new VkInstance(handle, createInfo);
+        } catch (OutOfMemoryError e) {
+            throw new net.vulkanmod112.VulkanUnavailableException(
+                    "Listing this machine's Vulkan extensions did not fit the "
+                    + Lwjgl3Natives.stackSizeKb() + " KiB of scratch space reserved for it."
+                    + measureExtensions(handle)
+                    + " This is a limit inside the mod, not the memory given to the game.", e);
+        }
+    }
+
+    /**
+     * Asks the same two questions LWJGL just choked on, and answers them where
+     * they can do some good: how many devices Vulkan sees and how many
+     * extensions each of them lists.
+     *
+     * Raising the budget fourfold changed nothing on the machine this was
+     * written for, which rules out a budget that is merely too small and leaves
+     * three possibilities that no amount of guessing separates — a machine
+     * genuinely listing that many devices, a driver answering with a nonsense
+     * count, or a setting that never reached LWJGL at all. One number tells
+     * them apart, and the number was never printed anywhere.
+     *
+     * Deliberately allocated on the heap and called through the loader's own
+     * exported entry points rather than the typed API: we are here precisely
+     * because the scratch stack is exhausted, and a VkInstance — the thing the
+     * typed calls need — is what could not be constructed.
+     */
+    private static String measureExtensions(long handle) {
+        java.nio.IntBuffer count = null;
+        java.nio.LongBuffer devices = null;
+        try {
+            org.lwjgl.system.FunctionProvider loader = VK.getFunctionProvider();
+            long listDevices = loader.getFunctionAddress("vkEnumeratePhysicalDevices");
+            long listExtensions = loader.getFunctionAddress("vkEnumerateDeviceExtensionProperties");
+            if (listDevices == 0L || listExtensions == 0L) {
+                return "";
+            }
+            count = org.lwjgl.system.MemoryUtil.memAllocInt(1);
+            count.put(0, 0);
+            org.lwjgl.system.JNI.callPPPI(handle, org.lwjgl.system.MemoryUtil.memAddress(count), 0L, listDevices);
+            int deviceCount = count.get(0);
+            if (deviceCount <= 0) {
+                return " Vulkan reports " + deviceCount + " devices.";
+            }
+            // Pointers, held as longs: this build exists only for 64-bit.
+            devices = org.lwjgl.system.MemoryUtil.memAllocLong(deviceCount);
+            count.put(0, deviceCount);
+            org.lwjgl.system.JNI.callPPPI(handle, org.lwjgl.system.MemoryUtil.memAddress(count),
+                    org.lwjgl.system.MemoryUtil.memAddress(devices), listDevices);
+
+            StringBuilder each = new StringBuilder();
+            long total = 0;
+            for (int i = 0; i < deviceCount; i++) {
+                count.put(0, 0);
+                org.lwjgl.system.JNI.callPPPPI(devices.get(i), 0L,
+                        org.lwjgl.system.MemoryUtil.memAddress(count), 0L, listExtensions);
+                int listed = count.get(0);
+                total += listed;
+                if (i < 8) {
+                    each.append(i == 0 ? "" : ", ").append(listed);
+                }
+            }
+            return " Vulkan lists " + deviceCount + " device(s) with " + total + " extensions in all ("
+                    + each + (deviceCount > 8 ? ", ..." : "") + "), which needs "
+                    + (total * VK_EXTENSION_ENTRY_BYTES / 1024) + " KiB.";
+        } catch (Throwable t) {
+            // A diagnostic must never replace the failure it is describing.
+            return " Counting them failed as well (" + t + ").";
+        } finally {
+            if (devices != null) {
+                org.lwjgl.system.MemoryUtil.memFree(devices);
+            }
+            if (count != null) {
+                org.lwjgl.system.MemoryUtil.memFree(count);
+            }
+        }
+    }
+
+    /** VkExtensionProperties: 256 bytes of name and a version. */
+    private static final int VK_EXTENSION_ENTRY_BYTES = 260;
 
     private boolean isValidationLayerAvailable(MemoryStack stack) {
         IntBuffer count = stack.mallocInt(1);
@@ -168,9 +263,15 @@ public final class VulkanContextImpl implements VulkanBridge {
                 vkGetPhysicalDeviceProperties(candidate, props);
 
                 int score = score(candidate, props, stack);
-                LOGGER.info("GPU {}: {} ({}, Vulkan {}, score {})",
+                // The extension count is here because it is what sizes the
+                // scratch stack this very startup nearly ran out of, and a log
+                // that reports it turns the next such report into one line
+                // instead of a guess. See Lwjgl3Natives.DEFAULT_STACK_SIZE_KB.
+                IntBuffer extensions = stack.mallocInt(1);
+                vkEnumerateDeviceExtensionProperties(candidate, (String) null, extensions, null);
+                LOGGER.info("GPU {}: {} ({}, Vulkan {}, {} extensions, score {})",
                         i, props.deviceNameString(), deviceTypeName(props.deviceType()),
-                        apiVersionString(props.apiVersion()), score);
+                        apiVersionString(props.apiVersion()), extensions.get(0), score);
                 if (score > bestScore) {
                     bestScore = score;
                     best = candidate;

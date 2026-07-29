@@ -23,7 +23,13 @@ import java.util.Locale;
 final class Lwjgl3Natives {
 
     private static final Logger LOGGER = LogManager.getLogger("VulkanMod112/Natives");
+
     private static boolean done;
+
+    /** The size asked for, decided one layer up. See {@link net.vulkanmod112.VulkanLoader#stackSizeKb()}. */
+    static int stackSizeKb() {
+        return net.vulkanmod112.VulkanLoader.stackSizeKb();
+    }
 
     private Lwjgl3Natives() {
     }
@@ -63,15 +69,33 @@ final class Lwjgl3Natives {
         dir.toFile().deleteOnExit();
 
         Configuration.LIBRARY_PATH.set(dir.toAbsolutePath().toString());
-        // Default 64 KiB MemoryStack overflows while VkInstance enumerates the
-        // hundreds of extensions modern drivers expose
-        Configuration.STACK_SIZE.set(512);
+        // Belt and braces. The size is really set through the system property
+        // before this classloader exists, because by the time anything here
+        // runs, MemoryStack can already have read it — see VulkanLoader. This
+        // line still helps on the paths where it has not.
+        Configuration.STACK_SIZE.set(stackSizeKb());
         if (Boolean.getBoolean("vulkanmod112.debugLoader")) {
             Configuration.DEBUG.set(true);
             Configuration.DEBUG_LOADER.set(true);
         }
         done = true;
-        LOGGER.info("LWJGL 3 natives extracted to {}", dir);
+        // What we asked for and what we got, because they are not the same
+        // question. LWJGL reads the setting above once, into a static final,
+        // the first time MemoryStack is initialized; anything that touched it
+        // earlier leaves the request silently ignored and the stack at LWJGL's
+        // own 64 KiB. Reading the size back is the only way to tell a budget
+        // that is too small from a budget that never arrived — and touching it
+        // here also pins that initialization to this moment, right after the
+        // setting, where it is known to be correct.
+        int actualKb = org.lwjgl.system.MemoryStack.stackGet().getSize() / 1024;
+        LOGGER.info("LWJGL 3 natives extracted to {} (stack budget {} KiB, in effect {} KiB)",
+                dir, stackSizeKb(), actualKb);
+        if (actualKb < stackSizeKb()) {
+            // Both numbers, because they answer different questions: what LWJGL
+            // holds as the setting, and what it built before reading it.
+            LOGGER.warn("The stack setting did not take — LWJGL holds {}, MemoryStack was already built at {} KiB",
+                    Configuration.STACK_SIZE.get(-1), actualKb);
+        }
     }
 
     private static void extract(String resource, Path target) throws IOException {

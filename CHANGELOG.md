@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.7.2]
+
+### Fixed
+
+- **The startup failure 0.7.1 was meant to fix is still there on the machine it was reported from**, unchanged by a budget four times larger. That rules out the explanation 0.7.1 was built on. If the reserved space were merely too small for a machine with several GPUs, quadrupling it would have moved something; it did not move at all, which is the signature of a limit that is not the one being raised.
+
+  Three things produce that failure and no amount of reasoning separates them: a machine that genuinely lists that many devices, a driver answering with a nonsense count, or the setting never reaching LWJGL — it is read once, into a static, the first time the stack is initialized, and anything that touches it earlier leaves the request ignored and the size at LWJGL's own 64 KiB, which one current driver exceeds on its own.
+
+  So the numbers are now measured rather than assumed. The log reports the size actually in effect beside the size asked for, and warns when they differ. When the listing fails, the failure counts the devices and their extensions itself — on the heap, through the loader's own entry points, because the scratch space is exhausted and the object the typed calls need is exactly what could not be built — and says how much room that needs.
+
+  If the size in effect turns out to be smaller than the one asked for, `-Dorg.lwjgl.system.stackSize=8192` in the launcher's JVM arguments sets it a step earlier than this mod can, and works even in that case.
+
+- The diagnostics log reported `terrain: Vulkan` on a machine where Vulkan never started, two lines above the same report saying it was not initialized. The terrain path was allowed by the settings and nothing had failed since — because nothing had run.
+
+## [0.7.1]
+
+### Fixed
+
+- **The renderer refused to start on machines with more than a few Vulkan devices**, and everything this mod draws was silently absent: no swaying grass, no glow, no reflections, no water. What was left running was the part of the mod that never needed Vulkan — the settings screen, the render distance, the chunk build threads — so the mod looked installed and working, with every switch in it moving and none of them doing anything.
+
+  Creating a VkInstance is not the cheap wrapper it looks like. LWJGL lists the extensions of every physical device in the machine to work out which entry points exist, and it does that on the thread's scratch stack, in one frame that is not released between devices. An entry is 256 bytes of name and a version, 260 in all, so the frame costs 260 bytes times the extensions of every GPU added together — a number that belongs to the driver, not to us.
+
+  LWJGL's own default of 64 KiB is 252 entries, and one current driver lists 280 on its own, which is why this was already being raised. The value it was raised to, 512 KiB, allows about seven drivers' worth and looked like plenty. It is not: a machine can easily present integrated graphics, a discrete card and a software adapter, and overlay and capture software installs implicit layers that add more. The budget is 2 MiB now — around twenty-nine drivers' worth — and can be overridden with `-Dvulkanmod112.stackSizeKb=N` for whatever the world eventually produces.
+
+  The throw was an `OutOfMemoryError` reading "Out of stack space", which is true and useless: it names no limit, and it reads as though the game needs more memory allocated to it, which cannot help — this budget has nothing to do with the heap. It now says which limit was reached and what to change.
+
+- **Nothing said the renderer was off.** The F3 lines that report the GPU and the terrain mode are added by the overlay, and the overlay only exists once Vulkan has started, so in the one case where a player has nothing else to go on, the screen they would check first was silent. The diagnostics log was in the same position — its per-frame tick came from that same overlay, so the file a report would have been built from did not exist either.
+
+  There are now two F3 lines whenever the renderer did not come up: that it is off, and why. The reason is the innermost cause, which is usually the real one, unless something along the way already knew what to say — a stack budget too small for the machine's drivers explains itself far better than the library error underneath it does. The diagnostics tick and the background frame cap, neither of which ever needed Vulkan, keep running.
+
+  `-Dvulkanmod112.forceFallback=true` reaches that state on purpose, because otherwise what a player sees when the renderer is off can only be checked on a machine where it is broken.
+
+- The startup log now reports how many extensions each GPU lists, next to its name and score. That is the number the scratch budget above is sized against, and having it turns the next report of this kind into one line instead of an estimate.
+
 ## [0.7.0]
 
 ### Added

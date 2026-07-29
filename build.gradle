@@ -439,6 +439,19 @@ tasks.matching { it.name in ['runClient', 'runObfClient'] }.configureEach {
     if (project.hasProperty('dumpLang')) {
         jvmArgs '-Dvulkanmod112.dumpLang=true'
     }
+    // -PforceFallback makes the Vulkan side refuse to start, which is what a
+    // player on an unsupported driver gets. It is the only way to see that
+    // state on a machine where the renderer works.
+    if (project.hasProperty('forceFallback')) {
+        jvmArgs '-Dvulkanmod112.forceFallback=true'
+    }
+    // -PstackSizeKb=N sets the scratch space LWJGL gets per thread. A small
+    // value reproduces the startup failure of a machine whose drivers list more
+    // extensions than the budget allows; a large one is what a player on such a
+    // machine is asked to try.
+    if (project.hasProperty('stackSizeKb')) {
+        jvmArgs "-Dvulkanmod112.stackSizeKb=${project.property('stackSizeKb')}"
+    }
 }
 
 apply from: 'gradle/scripts/publishing.gradle'

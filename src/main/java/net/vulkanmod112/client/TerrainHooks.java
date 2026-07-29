@@ -173,6 +173,13 @@ public final class TerrainHooks {
         if (incompatibleRenderer) {
             return "terrain: disabled for incompatible renderer";
         }
+        // Said "Vulkan" on a machine where Vulkan never started, two lines above
+        // the same report saying it was not initialized. The settings allow the
+        // terrain path and nothing has failed since — because nothing has run.
+        VulkanBridge bridge = liveBridge();
+        if (bridge == null || !bridge.isInitialized()) {
+            return "terrain: vanilla, Vulkan renderer never started";
+        }
         return "terrain: Vulkan, " + lastChunksDrawn + " chunks, frame " + framesDrawn;
     }
 

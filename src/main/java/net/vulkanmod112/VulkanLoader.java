@@ -55,15 +55,80 @@ public final class VulkanLoader {
      */
     private static final int MAX_SUPPORTED_JAVA = 21;
 
+    /** LWJGL's own name for the setting, read whenever its Configuration first initializes. */
+    private static final String LWJGL_STACK_PROPERTY = "org.lwjgl.system.stackSize";
+
+    /**
+     * Per-thread scratch space LWJGL hands out, in kilobytes.
+     *
+     * The number that matters is not ours but the driver's. Constructing a
+     * VkInstance makes LWJGL list the extensions of every physical device on
+     * one stack frame it does not release between devices, and each entry is a
+     * VkExtensionProperties — 256 bytes of name plus a version, 260 in all. So
+     * the frame costs 260 bytes times the extensions of every GPU in the
+     * machine added together.
+     *
+     * LWJGL's own default of 64 KiB holds 252 entries, and current drivers list
+     * around 270 for a single card — machines have failed to start over a
+     * shortfall of three kilobytes. 2 MiB is 8064 entries, twenty-nine drivers'
+     * worth, which is room for whatever a multi-GPU machine with overlay layers
+     * turns out to list.
+     *
+     * The cost is paid per thread that ever touches the stack, and there is no
+     * way to ask for it thread by thread: LWJGL reads this once, into a static
+     * final, the first time MemoryStack is initialized. Our chunk mirror runs
+     * on the game's builder threads, so the real cost is this times about ten.
+     */
+    private static final int DEFAULT_STACK_SIZE_KB = 2048;
+
+    /**
+     * Overridable because what it has to cover belongs to the driver: an
+     * extension list longer than anything foreseen here, or an implicit layer
+     * answering with a nonsense count.
+     */
+    public static int stackSizeKb() {
+        Integer override = Integer.getInteger("vulkanmod112.stackSizeKb");
+        return override == null || override <= 0 ? DEFAULT_STACK_SIZE_KB : override;
+    }
+
+    /**
+     * Puts the stack size where LWJGL cannot miss it, before the classloader
+     * that will read it exists.
+     *
+     * Setting it through Configuration once the Vulkan side is running was too
+     * late on some machines, and silently: LWJGL reads the setting the first
+     * time MemoryStack is initialized, and by then something had already done
+     * that, so the request was ignored and the stack stayed at 64 KiB. One
+     * report showed a machine listing 265 extensions — 67 KiB — failing to
+     * start against those 64, while the log said the budget was 2 MiB.
+     *
+     * A system property set here cannot be too late, because the isolated
+     * loader is created on the next line and nothing in it has run yet. It is
+     * left alone if it is already set, so a launcher flag still wins.
+     */
+    private static void reserveStackSpace() {
+        if (System.getProperty(LWJGL_STACK_PROPERTY) == null) {
+            System.setProperty(LWJGL_STACK_PROPERTY, Integer.toString(stackSizeKb()));
+        }
+    }
+
     public static synchronized VulkanBridge bridge() {
         if (bridge == null) {
+            // The fallback is the hardest state to reach on a machine where
+            // everything works, and the hardest to get a report about from one
+            // where it does not. This reaches it on demand, so what a player
+            // sees when the renderer is off can be checked rather than assumed.
+            if (Boolean.getBoolean("vulkanmod112.forceFallback")) {
+                throw new VulkanUnavailableException("Vulkan renderer switched off by vulkanmod112.forceFallback");
+            }
             int java = javaFeatureVersion();
             if (java > MAX_SUPPORTED_JAVA) {
-                throw new IllegalStateException("Java " + java + " is newer than the bundled LWJGL 3.3 supports"
+                throw new VulkanUnavailableException("Java " + java + " is newer than the bundled LWJGL 3.3 supports"
                         + " (up to " + MAX_SUPPORTED_JAVA + "). Loading it here would corrupt the JVM's JNI"
                         + " function table and crash the process, so the Vulkan renderer stays off and the"
                         + " game renders on OpenGL.");
             }
+            reserveStackSpace();
             try {
                 URLClassLoader loader = new IsolatingLoader(collectUrls(), VulkanLoader.class.getClassLoader());
                 Class<?> impl = Class.forName(IMPL_CLASS, true, loader);

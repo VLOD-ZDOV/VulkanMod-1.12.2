@@ -57,6 +57,12 @@ public class VulkanMod112 {
         } catch (Throwable t) {
             // Vulkan is optional at this stage: the game must stay playable on OpenGL
             LOGGER.error("Vulkan initialization failed, falling back to vanilla OpenGL renderer", t);
+            // Say so in the game as well. Without this the mod is at its most
+            // silent in the one case a player cannot diagnose: settings present,
+            // every effect in them doing nothing, and no line on F3 to explain
+            // it, because the line comes from the overlay above.
+            net.minecraftforge.common.MinecraftForge.EVENT_BUS.register(
+                    new net.vulkanmod112.client.FallbackNotice(t));
         }
     }
 
