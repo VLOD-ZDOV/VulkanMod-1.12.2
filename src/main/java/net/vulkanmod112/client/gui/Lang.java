@@ -113,6 +113,10 @@ public final class Lang {
     /** Chrome that belongs to no option. */
     private static final String[] UI_STRINGS = {
             "Reset", "Cost", "CPU", "GPU", "VRAM", "Vulkan unavailable",
+            "Profiles", "Save As", "Load", "Rename", "Delete", "Saved", "Loaded", "Renamed",
+            "That name is taken", "Could not write that profile", "Could not read that profile",
+            "No profiles yet — type a name below and press Save As",
+            "Everything this mod owns, plus the game's own settings that decide the frame rate",
     };
 
     /**

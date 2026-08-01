@@ -237,6 +237,20 @@ public final class VulkanConfig {
     /** The same, for rain and snow. Kept apart so one can be ruled out alone. */
     static final boolean DEF_VULKAN_WEATHER = true;
     /**
+     * Which GPU Vulkan renders on. -1 lets the mod choose.
+     *
+     * Automatic is not "the fastest card" — it is "the card OpenGL is already
+     * on", because sharing memory between two devices is not slow, it is
+     * impossible, and the game's context was placed by the driver long before
+     * this mod loaded. On a hybrid laptop that is the difference between the
+     * terrain going through Vulkan and it refusing outright.
+     *
+     * A number rather than a name: the list is only known once Vulkan has
+     * started, and the names are in the log and the diagnostics report beside
+     * their numbers.
+     */
+    static final int DEF_VULKAN_DEVICE = -1;
+    /**
      * Let the render-distance slider go past 64, up to 128.
      *
      * Off by default because what it unlocks is not "more of the same". The
@@ -397,6 +411,7 @@ public final class VulkanConfig {
     private static boolean vulkanTranslucent = DEF_VULKAN_TRANSLUCENT;
     private static boolean vulkanParticles = DEF_VULKAN_PARTICLES;
     private static boolean vulkanWeather = DEF_VULKAN_WEATHER;
+    private static int vulkanDevice = DEF_VULKAN_DEVICE;
     private static boolean frameGraph = DEF_FRAME_GRAPH;
     private static int frameGraphInterval = DEF_FRAME_GRAPH_INTERVAL;
     private static boolean dynamicLights = DEF_DYNAMIC_LIGHTS;
@@ -431,6 +446,20 @@ public final class VulkanConfig {
         System.setProperty("vulkanmod112.pipelineCache",
                 new File(configDirectory, "vulkanmod112-pipelines.bin").getAbsolutePath());
         config.load();
+        readAll();
+    }
+
+    /**
+     * Copies every value out of the settings file into the fields above.
+     *
+     * Split out from {@link #load} so that a profile can be applied without
+     * building a new configuration object: a profile writes its values into the
+     * same file this reads from, and then this puts them where the game can see
+     * them. One reader means a setting cannot exist in the file and be invisible
+     * to profiles, which is exactly what went wrong when profiles listed the
+     * settings they knew about by hand.
+     */
+    private static void readAll() {
         terrainEnabled = config.getBoolean("terrainEnabled", CATEGORY_GENERAL, DEF_TERRAIN,
                 "Render supported terrain layers through Vulkan. Disabling immediately returns terrain to vanilla OpenGL.");
         overlayEnabled = config.getBoolean("overlayEnabled", CATEGORY_GENERAL, DEF_OVERLAY,
@@ -606,6 +635,11 @@ public final class VulkanConfig {
                 DEF_VULKAN_WEATHER,
                 "The same for rain and snow. A separate switch from the one above so that either "
                         + "can be ruled out on its own.");
+        vulkanDevice = config.getInt("vulkanDevice", CATEGORY_ADVANCED, DEF_VULKAN_DEVICE, -1, 7,
+                "Which GPU Vulkan renders on, by the number the log gives it. -1 chooses "
+                        + "automatically, and automatic means the card OpenGL is already running "
+                        + "on rather than the fastest one present: memory cannot be shared between "
+                        + "two devices at all. Takes effect on the next start.");
         frameGraph = config.getBoolean("frameGraph", CATEGORY_GENERAL, DEF_FRAME_GRAPH,
                 "Show a frame-time graph in the bottom-left corner, with the worst and best frame "
                         + "of the last couple of seconds and the 1% low. An average framerate "
@@ -714,6 +748,78 @@ public final class VulkanConfig {
         save();
     }
 
+    /** How a setting is named inside a profile: category, then the key. */
+    public static final String PROFILE_PREFIX = "cfg.";
+
+    /**
+     * Writes every setting this mod owns into {@code out}, whatever they are.
+     *
+     * Enumerated from the settings file rather than listed here, and that is the
+     * whole point of it. A profile that names the settings it captures is a
+     * second list of every option in the mod, kept in step with the first by
+     * nothing but memory — and it was not: the shader percentages, a dozen of
+     * the most-used values in the mod, were silently left out of every profile
+     * anyone saved. Anything that reaches the settings file now reaches a
+     * profile, including settings that do not exist yet.
+     */
+    public static void snapshotInto(java.util.Properties out) {
+        if (config == null) {
+            return;
+        }
+        for (String category : config.getCategoryNames()) {
+            net.minecraftforge.common.config.ConfigCategory values = config.getCategory(category);
+            for (java.util.Map.Entry<String, net.minecraftforge.common.config.Property> entry
+                    : values.entrySet()) {
+                out.setProperty(PROFILE_PREFIX + category + "." + entry.getKey(),
+                        entry.getValue().getString());
+            }
+        }
+    }
+
+    /**
+     * Puts a snapshot back and makes the game see it.
+     *
+     * Values that no longer exist are ignored rather than created: a setting
+     * removed from the mod must not come back as an orphan in the file, and a
+     * profile written by a newer version has to be usable by an older one.
+     *
+     * @return how many settings were applied
+     */
+    public static int restoreFrom(java.util.Properties in) {
+        if (config == null) {
+            return 0;
+        }
+        int applied = 0;
+        for (String name : in.stringPropertyNames()) {
+            if (!name.startsWith(PROFILE_PREFIX)) {
+                continue;
+            }
+            String path = name.substring(PROFILE_PREFIX.length());
+            int split = path.lastIndexOf('.');
+            if (split <= 0 || split == path.length() - 1) {
+                continue;
+            }
+            String category = path.substring(0, split);
+            String key = path.substring(split + 1);
+            if (!config.hasCategory(category)) {
+                continue;
+            }
+            net.minecraftforge.common.config.Property property =
+                    config.getCategory(category).get(key);
+            if (property == null) {
+                continue;
+            }
+            property.set(in.getProperty(name));
+            applied++;
+        }
+        if (applied > 0) {
+            // Back through the one reader, so a profile cannot put a value into
+            // the file that the running game never picks up.
+            readAll();
+        }
+        return applied;
+    }
+
     /**
      * Returns every mod-owned setting to its shipped value. Minecraft's own
      * settings are left alone: they are not ours to reset, and the screen only
@@ -752,6 +858,7 @@ public final class VulkanConfig {
         setDropVanillaBuffers(DEF_DROP_VANILLA_BUFFERS);
         setVulkanParticles(DEF_VULKAN_PARTICLES);
         setVulkanWeather(DEF_VULKAN_WEATHER);
+        setVulkanDevice(DEF_VULKAN_DEVICE);
         setExtremeRenderDistance(DEF_EXTREME_RENDER_DISTANCE);
         setDirectionalLight(DEF_DIRECTIONAL_LIGHT);
         setHeightFog(DEF_HEIGHT_FOG);
@@ -917,6 +1024,16 @@ public final class VulkanConfig {
     public static void setVulkanParticles(boolean value) {
         vulkanParticles = value;
         store(CATEGORY_OPTIMIZATION, "vulkanParticles", value);
+    }
+
+    public static int getVulkanDevice() {
+        return vulkanDevice;
+    }
+
+    public static void setVulkanDevice(int value) {
+        vulkanDevice = value < -1 ? -1 : (value > 7 ? 7 : value);
+        store(CATEGORY_ADVANCED, "vulkanDevice", vulkanDevice);
+        applySystemProperties();
     }
 
     public static boolean isVulkanWeather() {
@@ -1298,6 +1415,7 @@ public final class VulkanConfig {
         publish("vulkanmod112.flatBlockColours", Boolean.toString(flatBlockColours));
         publish("vulkanmod112.geometryBudget", Integer.toString(geometryBudgetMiB));
         publish("vulkanmod112.framesInFlight", Integer.toString(framesInFlight));
+        publish("vulkanmod112.vulkanDevice", Integer.toString(vulkanDevice));
         publish("vulkanmod112.directionalLight", Integer.toString(directionalLight));
         publish("vulkanmod112.heightFog", Integer.toString(heightFog));
         publish("vulkanmod112.heightFogDepth", Integer.toString(heightFogDepth));

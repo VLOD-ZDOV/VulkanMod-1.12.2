@@ -34,47 +34,6 @@ public final class VulkanProfiles {
     private static final String SUFFIX = ".profile";
     private static File directory;
 
-    /**
-     * Four numbered places rather than names the player types.
-     *
-     * The settings screen has no text field and gains nothing worth the code
-     * from having one here: what was asked for is switching between
-     * configurations quickly, and a number does that as well as a name. The
-     * files are still plain text with a readable name, so anything more
-     * elaborate can be done to them outside the game.
-     */
-    public static final int SLOTS = 4;
-    private static int selected;
-
-    public static int selectedSlot() {
-        return selected;
-    }
-
-    public static void selectSlot(int index) {
-        selected = index < 0 ? 0 : index % SLOTS;
-    }
-
-    private static String slotName(int index) {
-        return "slot-" + (index + 1);
-    }
-
-    /** Whether the chosen slot has anything in it, for the row's own label. */
-    public static boolean selectedSlotUsed() {
-        return exists(slotName(selected));
-    }
-
-    public static boolean saveSelected(Minecraft mc) {
-        return save(slotName(selected), mc);
-    }
-
-    public static boolean loadSelected(Minecraft mc) {
-        return load(slotName(selected), mc);
-    }
-
-    public static boolean deleteSelected() {
-        return delete(slotName(selected));
-    }
-
     private VulkanProfiles() {
     }
 
@@ -122,16 +81,12 @@ public final class VulkanProfiles {
             return false;
         }
         Properties values = new Properties();
-        values.setProperty("terrain", Boolean.toString(VulkanConfig.isTerrainEnabled()));
-        values.setProperty("entityDistance", Integer.toString(VulkanConfig.getEntityDistance()));
-        values.setProperty("tileEntityDistance", Integer.toString(VulkanConfig.getTileEntityDistance()));
-        values.setProperty("backgroundFps", Integer.toString(VulkanConfig.getBackgroundFpsLimit()));
-        values.setProperty("animations", Boolean.toString(VulkanConfig.areAnimationsEnabled()));
-        values.setProperty("depthBlit", Boolean.toString(VulkanConfig.isDepthBlitEnabled()));
-        values.setProperty("culling", Boolean.toString(VulkanConfig.isCullingEnabled()));
-        values.setProperty("flatBlockColours", Boolean.toString(VulkanConfig.isFlatBlockColours()));
-        values.setProperty("framesInFlight", Integer.toString(VulkanConfig.getFramesInFlight()));
-        values.setProperty("geometryBudget", Integer.toString(VulkanConfig.getGeometryBudgetMiB()));
+        // Everything the mod owns, enumerated from the settings file rather
+        // than named here. The version that named them left out every shader
+        // percentage — a dozen of the most-used values in the mod — and said
+        // nothing, because a list of settings kept beside the settings is a
+        // list that drifts.
+        VulkanConfig.snapshotInto(values);
 
         values.setProperty("mc.renderDistance", Integer.toString(mc.gameSettings.renderDistanceChunks));
         values.setProperty("mc.mipmap", Integer.toString(mc.gameSettings.mipmapLevels));
@@ -185,16 +140,13 @@ public final class VulkanProfiles {
             close(in);
         }
 
-        VulkanConfig.setTerrainEnabled(bool(values, "terrain", VulkanConfig.isTerrainEnabled()));
-        VulkanConfig.setEntityDistance(number(values, "entityDistance", VulkanConfig.getEntityDistance()));
-        VulkanConfig.setTileEntityDistance(number(values, "tileEntityDistance", VulkanConfig.getTileEntityDistance()));
-        VulkanConfig.setBackgroundFpsLimit(number(values, "backgroundFps", VulkanConfig.getBackgroundFpsLimit()));
-        VulkanConfig.setAnimationsEnabled(bool(values, "animations", VulkanConfig.areAnimationsEnabled()));
-        VulkanConfig.setDepthBlitEnabled(bool(values, "depthBlit", VulkanConfig.isDepthBlitEnabled()));
-        VulkanConfig.setCullingEnabled(bool(values, "culling", VulkanConfig.isCullingEnabled()));
-        VulkanConfig.setFlatBlockColours(bool(values, "flatBlockColours", VulkanConfig.isFlatBlockColours()));
-        VulkanConfig.setFramesInFlight(number(values, "framesInFlight", VulkanConfig.getFramesInFlight()));
-        VulkanConfig.setGeometryBudgetMiB(number(values, "geometryBudget", VulkanConfig.getGeometryBudgetMiB()));
+        int restored = VulkanConfig.restoreFrom(values);
+        if (restored == 0) {
+            // A profile saved before this format existed. Those hold ten mod
+            // settings under bare names and nothing else — read them so an old
+            // profile still does what it used to, rather than doing nothing.
+            restoreLegacy(values);
+        }
 
         int wasDistance = mc.gameSettings.renderDistanceChunks;
         int wasMipmap = mc.gameSettings.mipmapLevels;
@@ -230,9 +182,38 @@ public final class VulkanProfiles {
         return true;
     }
 
+    /** The ten settings profiles used to hold, for files written before 01.08.2026. */
+    private static void restoreLegacy(Properties values) {
+        VulkanConfig.setTerrainEnabled(bool(values, "terrain", VulkanConfig.isTerrainEnabled()));
+        VulkanConfig.setEntityDistance(number(values, "entityDistance", VulkanConfig.getEntityDistance()));
+        VulkanConfig.setTileEntityDistance(number(values, "tileEntityDistance", VulkanConfig.getTileEntityDistance()));
+        VulkanConfig.setBackgroundFpsLimit(number(values, "backgroundFps", VulkanConfig.getBackgroundFpsLimit()));
+        VulkanConfig.setAnimationsEnabled(bool(values, "animations", VulkanConfig.areAnimationsEnabled()));
+        VulkanConfig.setDepthBlitEnabled(bool(values, "depthBlit", VulkanConfig.isDepthBlitEnabled()));
+        VulkanConfig.setCullingEnabled(bool(values, "culling", VulkanConfig.isCullingEnabled()));
+        VulkanConfig.setFlatBlockColours(bool(values, "flatBlockColours", VulkanConfig.isFlatBlockColours()));
+        VulkanConfig.setFramesInFlight(number(values, "framesInFlight", VulkanConfig.getFramesInFlight()));
+        VulkanConfig.setGeometryBudgetMiB(number(values, "geometryBudget", VulkanConfig.getGeometryBudgetMiB()));
+    }
+
     public static boolean delete(String name) {
         File target = file(name);
         return target != null && target.isFile() && target.delete();
+    }
+
+    /** True when the name is one this mod will accept as a file. */
+    public static boolean nameIsUsable(String name) {
+        return file(name) != null;
+    }
+
+    /** Renames a profile, refusing to overwrite an existing one. */
+    public static boolean rename(String from, String to) {
+        File source = file(from);
+        File target = file(to);
+        if (source == null || target == null || !source.isFile() || target.exists()) {
+            return false;
+        }
+        return source.renameTo(target);
     }
 
     /**

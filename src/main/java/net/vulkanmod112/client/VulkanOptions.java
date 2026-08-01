@@ -114,54 +114,19 @@ final class VulkanOptions {
                                     }
                                 })),
                 new VOptionBlock("Profiles",
-                        new VCyclingOption("Slot",
-                                "Which of the four saved configurations the two rows below act on. "
-                                        + "A profile is your own settings kept whole — this mod's and "
-                                        + "the game's own, because render distance and graphics "
-                                        + "quality cost more frames than anything here does.",
-                                Cost.FREE, null,
-                                new String[]{"Slot 1", "Slot 2", "Slot 3", "Slot 4"},
-                                new VCyclingOption.Access() {
-                                    @Override
-                                    public int get() {
-                                        return VulkanProfiles.selectedSlot();
-                                    }
-
-                                    @Override
-                                    public void set(int index) {
-                                        VulkanProfiles.selectSlot(index);
-                                    }
-                                }),
-                        new VActionOption("Save To Slot",
-                                "Writes everything as it stands now into the chosen slot, replacing "
-                                        + "whatever was there.",
-                                Cost.FREE, "Save",
+                        new VActionOption("Saved Configurations",
+                                "Open the list of saved configurations. A profile is your own "
+                                        + "settings kept whole and given a name — everything this "
+                                        + "mod owns, plus the game's own render distance, graphics "
+                                        + "quality, particles and mipmaps, because those cost more "
+                                        + "frames than anything here does. The point is going back "
+                                        + "to a configuration without having to remember what was "
+                                        + "in it.",
+                                Cost.FREE, "Open",
                                 new VActionOption.Action() {
                                     @Override
                                     public void run() {
-                                        VulkanProfiles.saveSelected(mc);
-                                    }
-                                }),
-                        new VActionOption("Switch To Slot",
-                                "Puts that configuration back. The world is rebuilt only if "
-                                        + "something that is baked into the chunks changed — render "
-                                        + "distance, graphics quality or smooth lighting. Does "
-                                        + "nothing if the slot is empty.",
-                                Cost.FREE, "Switch",
-                                new VActionOption.Action() {
-                                    @Override
-                                    public void run() {
-                                        VulkanProfiles.loadSelected(mc);
-                                    }
-                                }),
-                        new VActionOption("Clear Slot",
-                                "Deletes the saved configuration in the chosen slot. Nothing about "
-                                        + "the current settings changes.",
-                                Cost.FREE, "Clear",
-                                new VActionOption.Action() {
-                                    @Override
-                                    public void run() {
-                                        VulkanProfiles.deleteSelected();
+                                        mc.displayGuiScreen(new GuiVulkanProfiles(mc.currentScreen));
                                     }
                                 })),
                 new VOptionBlock("Vulkan",
@@ -1360,6 +1325,32 @@ final class VulkanOptions {
                                     @Override
                                     public void set(int value) {
                                         VulkanConfig.setFramesInFlight(value);
+                                    }
+                                }),
+                        new VRangeOption("Vulkan GPU",
+                                "Which graphics card Vulkan renders on, by the number the log gives "
+                                        + "it — open the diagnostics report to see which card is "
+                                        + "which. Automatic does not mean the fastest card: it "
+                                        + "means the card OpenGL is already running on, because "
+                                        + "memory cannot be shared between two devices at all, and "
+                                        + "the game's OpenGL context was placed by the driver long "
+                                        + "before this mod loaded. On a laptop with two GPUs that "
+                                        + "is what decides whether the Vulkan terrain runs or "
+                                        + "quietly stays on OpenGL. To move the whole game to the "
+                                        + "other card, launch it with that card selected for "
+                                        + "OpenGL — this setting cannot do it, because the context "
+                                        + "exists before the mod does.",
+                                Cost.FREE, "Applies after the game restarts.",
+                                -1, 7, 1, "", "Automatic",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getVulkanDevice();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setVulkanDevice(value);
                                     }
                                 })),
                 new VOptionBlock("Compositing",
