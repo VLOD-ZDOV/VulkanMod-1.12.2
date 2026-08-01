@@ -252,12 +252,16 @@ public final class EntityCapture {
      * makes the frames nest.
      */
     private static void localTransform(ModelRenderer part, float scale, float[] out) {
-        float sinX = (float) Math.sin(part.rotateAngleX);
-        float cosX = (float) Math.cos(part.rotateAngleX);
-        float sinY = (float) Math.sin(part.rotateAngleY);
-        float cosY = (float) Math.cos(part.rotateAngleY);
-        float sinZ = (float) Math.sin(part.rotateAngleZ);
-        float cosZ = (float) Math.cos(part.rotateAngleZ);
+        // The game's own sine table rather than the library's. It is a lookup
+        // into sixty-five thousand precomputed values, which is what vanilla
+        // uses everywhere it animates anything — and twelve calls to the real
+        // thing per bone was most of what this method cost.
+        float sinX = net.minecraft.util.math.MathHelper.sin(part.rotateAngleX);
+        float cosX = net.minecraft.util.math.MathHelper.cos(part.rotateAngleX);
+        float sinY = net.minecraft.util.math.MathHelper.sin(part.rotateAngleY);
+        float cosY = net.minecraft.util.math.MathHelper.cos(part.rotateAngleY);
+        float sinZ = net.minecraft.util.math.MathHelper.sin(part.rotateAngleZ);
+        float cosZ = net.minecraft.util.math.MathHelper.cos(part.rotateAngleZ);
 
         // Rz * Ry * Rx, written out rather than multiplied three times: this is
         // the innermost thing in the whole capture and it runs once per bone
@@ -286,17 +290,33 @@ public final class EntityCapture {
         out[15] = 1.0f;
     }
 
-    /** Column-major 4x4 multiply: out = a * b. Never aliases its output. */
+    /**
+     * out = a * b, for matrices whose last row is 0 0 0 1.
+     *
+     * Every matrix in this chain is a rotation and a shift, so the fourth row
+     * is known and the fourth column of the product is the only one that needs
+     * the shift added. Twenty-seven multiplications instead of sixty-four, on
+     * the one piece of arithmetic that runs once per bone of every creature on
+     * screen.
+     */
     private static void multiply(float[] a, float[] b, float[] out) {
-        for (int col = 0; col < 4; col++) {
-            for (int row = 0; row < 4; row++) {
-                float sum = 0.0f;
-                for (int k = 0; k < 4; k++) {
-                    sum += a[k * 4 + row] * b[col * 4 + k];
-                }
-                out[col * 4 + row] = sum;
-            }
+        for (int col = 0; col < 3; col++) {
+            int c = col * 4;
+            float b0 = b[c];
+            float b1 = b[c + 1];
+            float b2 = b[c + 2];
+            out[c] = a[0] * b0 + a[4] * b1 + a[8] * b2;
+            out[c + 1] = a[1] * b0 + a[5] * b1 + a[9] * b2;
+            out[c + 2] = a[2] * b0 + a[6] * b1 + a[10] * b2;
+            out[c + 3] = 0.0f;
         }
+        float b0 = b[12];
+        float b1 = b[13];
+        float b2 = b[14];
+        out[12] = a[0] * b0 + a[4] * b1 + a[8] * b2 + a[12];
+        out[13] = a[1] * b0 + a[5] * b1 + a[9] * b2 + a[13];
+        out[14] = a[2] * b0 + a[6] * b1 + a[10] * b2 + a[14];
+        out[15] = 1.0f;
     }
 
     /**

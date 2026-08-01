@@ -153,9 +153,10 @@ final class VkRayTracing {
         long memory;
         long address;
         long bytes;
-        /** What it was built from; a change in either means it is stale. */
+        /** What it was built from; a change in any of these means it is stale. */
         long sourceOffset;
         int sourceSize;
+        long sourceVersion;
         float x;
         float y;
         float z;
@@ -247,12 +248,20 @@ final class VkRayTracing {
             blas.z = (float) dz;
             blas.touchedFrame = frameIndex;
             live.add(blas);
+            // The version and not just the place and the length. Break one
+            // block and a chunk usually keeps its length, and the allocator
+            // usually hands back the range it just freed — so the two look
+            // identical while the geometry is not, and the structure went on
+            // describing a wall that was no longer there. Which is exactly what
+            // it looked like: light refusing to reach through a hole.
             boolean stale = blas.structure == 0
                     || blas.sourceOffset != entry.offset
-                    || blas.sourceSize != entry.size;
+                    || blas.sourceSize != entry.size
+                    || blas.sourceVersion != entry.version;
             if (stale && toBuild.size() < budget) {
                 blas.sourceOffset = entry.offset;
                 blas.sourceSize = entry.size;
+                blas.sourceVersion = entry.version;
                 toBuild.add(blas);
             }
         }

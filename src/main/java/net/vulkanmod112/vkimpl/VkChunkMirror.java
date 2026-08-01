@@ -59,6 +59,17 @@ final class VkChunkMirror {
         long offset;
         int capacity;
         int size;
+        /**
+         * Bumped on every upload into this slot.
+         *
+         * Where the chunk lives and how long it is are not enough to tell that
+         * it changed: breaking one block usually leaves a chunk the same length
+         * and the allocator usually hands back the range it just freed, so the
+         * two look identical while the contents are not. Anything caching work
+         * derived from this geometry — the acceleration structures do — has to
+         * watch this instead.
+         */
+        long version;
     }
 
     /** Lookup for the terrain renderer; null when that slot has no mirror. */
@@ -731,6 +742,7 @@ final class VkChunkMirror {
         }
         totalBytes += size - entry.size;
         entry.size = size;
+        entry.version++;
         if (size > largestEntrySize) {
             largestEntrySize = size;
         }

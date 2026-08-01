@@ -845,7 +845,23 @@ void main() {
             // is a ceiling on the unlucky fragment and not a cost every one
             // pays.
             tracedLights += 1;
-            level *= 1.0 - lightBlocked(normal, toSource, distance);
+            // How much this surface is entitled to a shadow at all.
+            //
+            // A face turned away from the light receives nothing from it in a
+            // physical model, and everything from it in this game's — vanilla's
+            // block light is a number per block with no idea which way anything
+            // points. Taking the light away outright is therefore right by
+            // physics and wrong by every expectation the world sets: a wall one
+            // block high went completely black on top while its sides were lit,
+            // which is not a shadow, it is a surface that was never included.
+            //
+            // So a face-on surface believes the shadow fully, a face turned
+            // away keeps its light, and between them it fades. The same term
+            // takes the hard band off the top of a block near a carried torch,
+            // where the light runs almost along the surface and the answer was
+            // all or nothing across a pixel.
+            float belief = clamp(0.35 + dot(normal, normalize(toSource)), 0.0, 1.0);
+            level *= 1.0 - lightBlocked(normal, toSource, distance) * belief;
         }
         if (level > 0.0) {
             // The light map is sampled at (level * 16 + 8) / 256, which is the
