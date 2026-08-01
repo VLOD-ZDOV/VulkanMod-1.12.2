@@ -88,8 +88,10 @@ final class Lwjgl3Natives {
         // here also pins that initialization to this moment, right after the
         // setting, where it is known to be correct.
         int actualKb = org.lwjgl.system.MemoryStack.stackGet().getSize() / 1024;
+        // Folder name without its parents: which temporary directory it is has
+        // never mattered, and the full path names the person running the game.
         LOGGER.info("LWJGL 3 natives extracted to {} (stack budget {} KiB, in effect {} KiB)",
-                dir, stackSizeKb(), actualKb);
+                dir.getFileName(), stackSizeKb(), actualKb);
         if (actualKb < stackSizeKb()) {
             // Both numbers, because they answer different questions: what LWJGL
             // holds as the setting, and what it built before reading it.

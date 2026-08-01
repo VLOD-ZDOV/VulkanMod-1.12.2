@@ -38,7 +38,94 @@ public final class Diagnostics {
     private static boolean headerWritten;
     private static long lastSnapshotNanos;
 
+    /**
+     * Guards the writer and the backlog. Snapshots come from the client thread,
+     * but mirrored log lines come from whichever thread wrote them — chunk
+     * builders included — so the two cannot be allowed to interleave mid-line.
+     */
+    private static final Object LOCK = new Object();
+
+    /**
+     * Lines this mod logged before the file existed.
+     *
+     * Everything worth reading about a failed start happens during startup:
+     * which device was chosen, what the driver reported, where initialization
+     * gave up. The file is opened on the first frame, which is far too late for
+     * any of it, so the lines are held until then. Bounded because a mod that
+     * never gets to draw must not also fill the heap.
+     */
+    private static final java.util.ArrayDeque<String> BACKLOG = new java.util.ArrayDeque<String>();
+    private static final int BACKLOG_LIMIT = 4000;
+    private static boolean capturing;
+
     private Diagnostics() {
+    }
+
+    /**
+     * Starts mirroring this mod's own log into the diagnostics file.
+     *
+     * The point of that file is to be the one thing worth asking a player for,
+     * and it was not: the per-second snapshots said what the state was and
+     * never what the mod had done to get there, so every report still needed
+     * the game's own log beside it. Now both live in one file, in order.
+     *
+     * Only lines from this mod are taken. The game's log keeps everything else,
+     * and a diagnostics file with the whole of Forge in it would be no easier
+     * to read than what it replaced.
+     */
+    public static void startCapture() {
+        if (capturing || failed || !enabled()) {
+            return;
+        }
+        capturing = true;
+        try {
+            org.apache.logging.log4j.core.LoggerContext context =
+                    (org.apache.logging.log4j.core.LoggerContext) LogManager.getContext(false);
+            org.apache.logging.log4j.core.config.Configuration config = context.getConfiguration();
+            @SuppressWarnings("deprecation")
+            org.apache.logging.log4j.core.Appender mirror =
+                    new org.apache.logging.log4j.core.appender.AbstractAppender(
+                            "VulkanMod112Diagnostics", null, null, true) {
+                        @Override
+                        public void append(org.apache.logging.log4j.core.LogEvent event) {
+                            mirror(event);
+                        }
+                    };
+            mirror.start();
+            config.getRootLogger().addAppender(mirror, org.apache.logging.log4j.Level.ALL, null);
+            context.updateLoggers();
+        } catch (Throwable t) {
+            // A logging convenience is never worth taking the mod down for.
+            capturing = false;
+            LOGGER.warn("Could not mirror the mod's log into the diagnostics file", t);
+        }
+    }
+
+    private static void mirror(org.apache.logging.log4j.core.LogEvent event) {
+        String name = event.getLoggerName();
+        if (name == null || !name.startsWith("VulkanMod112")) {
+            return;
+        }
+        StringBuilder line = new StringBuilder()
+                .append('[').append(STAMP.format(new Date())).append("] ")
+                .append(event.getLevel()).append(' ')
+                .append(name).append(": ")
+                .append(event.getMessage().getFormattedMessage());
+        Throwable thrown = event.getThrown();
+        if (thrown != null) {
+            java.io.StringWriter trace = new java.io.StringWriter();
+            thrown.printStackTrace(new PrintWriter(trace));
+            line.append(System.lineSeparator()).append(trace);
+        }
+        String text = line.toString();
+        synchronized (LOCK) {
+            if (writer != null) {
+                writer.println(text);
+                writer.flush();
+            } else if (BACKLOG.size() < BACKLOG_LIMIT) {
+                BACKLOG.add(text);
+            }
+        }
     }
 
     public static boolean enabled() {
@@ -61,12 +148,10 @@ public final class Diagnostics {
             if (out == null) {
                 return;
             }
-            if (!headerWritten) {
-                writeHeader(out);
-                headerWritten = true;
+            synchronized (LOCK) {
+                writeSnapshot(out);
+                out.flush();
             }
-            writeSnapshot(out);
-            out.flush();
         } catch (Throwable t) {
             failed = true;
             LOGGER.error("Diagnostics logging disabled after an error", t);
@@ -102,7 +187,18 @@ public final class Diagnostics {
         Writer file = new java.io.OutputStreamWriter(
                 new java.io.FileOutputStream(new File(directory, FILE_NAME), false),
                 Charset.forName("UTF-8"));
-        writer = new PrintWriter(file);
+        synchronized (LOCK) {
+            writer = new PrintWriter(file);
+            // Header first so the file always opens with what machine this is,
+            // then everything the mod said before the file existed, in the
+            // order it said it, and only then the first snapshot.
+            writeHeader(writer);
+            headerWritten = true;
+            while (!BACKLOG.isEmpty()) {
+                writer.println(BACKLOG.poll());
+            }
+            writer.flush();
+        }
         return writer;
     }
 

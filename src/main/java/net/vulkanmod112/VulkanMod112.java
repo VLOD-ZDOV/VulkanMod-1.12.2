@@ -23,6 +23,11 @@ public class VulkanMod112 {
     public void preInit(FMLPreInitializationEvent event) {
         LOGGER.info("{} {} starting up", Tags.MOD_NAME, Tags.VERSION);
         net.vulkanmod112.client.VulkanConfig.load(event.getModConfigurationDirectory());
+        // Immediately after the setting that turns it on and before anything
+        // that can fail: from here every line this mod logs is kept, so the
+        // diagnostics file is worth asking for on its own rather than always
+        // alongside the game's log.
+        net.vulkanmod112.client.Diagnostics.startCapture();
         // Independent of Vulkan: the zoom must work even where the renderer
         // falls back to OpenGL, so it is registered before anything can fail.
         net.vulkanmod112.client.Zoom.register();

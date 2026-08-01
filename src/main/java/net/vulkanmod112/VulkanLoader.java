@@ -181,7 +181,17 @@ public final class VulkanLoader {
                 }
             }
         }
-        LOGGER.info("Vulkan classloader roots: {}", urls);
+        // File names only. What this line is for is which jars were found, and
+        // the directories they sit in name the person running the game — this
+        // log is something players are asked to send.
+        StringBuilder names = new StringBuilder();
+        for (URL url : urls) {
+            String path = url.getPath();
+            int slash = path.lastIndexOf('/');
+            names.append(names.length() == 0 ? "" : ", ")
+                    .append(slash < 0 ? path : path.substring(slash + 1));
+        }
+        LOGGER.info("Vulkan classloader roots: {}", names);
         return urls.toArray(new URL[0]);
     }
 
