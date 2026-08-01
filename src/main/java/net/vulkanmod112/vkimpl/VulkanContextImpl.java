@@ -129,6 +129,12 @@ public final class VulkanContextImpl implements VulkanBridge {
     private volatile VkChunkMirror chunkMirror;
     private VkTerrainRenderer terrainRenderer;
     private boolean interopCapable;
+    private boolean multiDrawIndirect;
+
+    /** Whether one indirect draw may carry more than one command. */
+    public boolean canMultiDrawIndirect() {
+        return multiDrawIndirect;
+    }
 
     @Override
     public synchronized void init() {
@@ -713,8 +719,24 @@ public final class VulkanContextImpl implements VulkanBridge {
             // built to do; what it buys is that the worst case becomes terrain
             // shaded as though it were made of nothing, which can be seen,
             // reported and found.
+            // multiDrawIndirect, and this renderer has been drawing without it.
+            //
+            // Every terrain layer is one vkCmdDrawIndexedIndirect with as many
+            // commands as there are chunks, and a draw count above one is only
+            // allowed with this feature enabled. It was never asked for. No
+            // driver refused — they all simply did it — which is precisely the
+            // sort of thing that works everywhere until the card it does not
+            // work on is somebody else's.
+            VkPhysicalDeviceFeatures available = VkPhysicalDeviceFeatures.malloc(stack);
+            vkGetPhysicalDeviceFeatures(physicalDevice, available);
+            this.multiDrawIndirect = available.multiDrawIndirect();
+            if (!multiDrawIndirect) {
+                LOGGER.warn("This driver cannot draw more than one indirect command at a time; "
+                        + "terrain chunks will be drawn one command each");
+            }
             VkPhysicalDeviceFeatures features = VkPhysicalDeviceFeatures.calloc(stack)
-                    .robustBufferAccess(true);
+                    .robustBufferAccess(true)
+                    .multiDrawIndirect(multiDrawIndirect);
 
             VkDeviceCreateInfo deviceInfo = VkDeviceCreateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO)

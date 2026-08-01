@@ -1329,18 +1329,21 @@ final class VkTerrainRenderer {
         // it; handing it over every frame costs one query and removes a way for
         // the structures to be built from an address that no longer exists.
         rayTracing.setIndexBuffer(quadIndexBuffer);
-        rayTracing.update(chunks, chunkCount, mirror, frameCounter, viewX, viewY, viewZ);
-        // The structure only gets a new handle when it has to grow, which is
-        // rare — so pointing the descriptors at it is done on change rather
-        // than every frame, because doing it stops the device.
-        long current = rayTracing.topLevel();
-        if (current != structureWritten && ctx.isRayQuerySupported()) {
-            structureWritten = current;
-            writeStructureDescriptors(current);
+        rayTracing.update(chunks, chunkCount, mirror, frameCounter,
+                activeFrameSlot, framesInFlight, viewX, viewY, viewZ);
+        // Each frame slot has a structure of its own and descriptor sets of its
+        // own, so the two are tied together here and nowhere else. A handle
+        // only changes when the structure has to grow, which is rare — and
+        // pointing descriptors at it stops the device, so it is done on change
+        // rather than every frame.
+        long current = rayTracing.topLevel(activeFrameSlot);
+        if (current != structureWritten[activeFrameSlot] && ctx.isRayQuerySupported()) {
+            structureWritten[activeFrameSlot] = current;
+            writeStructureDescriptors(activeFrameSlot, current);
         }
     }
 
-    private void writeStructureDescriptors(long structure) {
+    private void writeStructureDescriptors(int slot, long structure) {
         if (structure == 0 || descriptorSet == 0) {
             return;
         }
@@ -1352,13 +1355,15 @@ final class VkTerrainRenderer {
                             .sType(org.lwjgl.vulkan.KHRAccelerationStructure
                                     .VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR)
                             .pAccelerationStructures(handle);
+            // Only this slot's sets: the other slots name the structures their
+            // own frames are still reading.
             VkWriteDescriptorSet.Buffer writes =
-                    VkWriteDescriptorSet.calloc(drawDescriptorSets.length, stack);
-            for (int i = 0; i < drawDescriptorSets.length; i++) {
+                    VkWriteDescriptorSet.calloc(BATCHES_PER_FRAME, stack);
+            for (int i = 0; i < BATCHES_PER_FRAME; i++) {
                 writes.get(i)
                         .sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET)
                         .pNext(structureInfo.address())
-                        .dstSet(drawDescriptorSets[i]).dstBinding(7)
+                        .dstSet(drawDescriptorSets[slot * BATCHES_PER_FRAME + i]).dstBinding(7)
                         // Not taken from pAccelerationStructures: the count in
                         // the write is what the driver reads, and the chained
                         // structure carries the handles it counts.
@@ -1374,8 +1379,8 @@ final class VkTerrainRenderer {
     private VkRayTracing rayTracing;
     /** The tracing build of the terrain pipelines, or zeroes where impossible. */
     private final long[] tracingPipelines = new long[TERRAIN_PIPELINES.length];
-    /** Which structure the descriptor sets currently name; 0 means none. */
-    private long structureWritten;
+    /** Which structure each frame slot's descriptor sets name; 0 means none. */
+    private final long[] structureWritten = new long[framesInFlight];
 
     /** Everything the ultra log wants to know about this renderer. */
     synchronized void appendDiagnostics(StringBuilder sb) {
@@ -1634,7 +1639,7 @@ final class VkTerrainRenderer {
         // a reason to: no structure, no sun, or the setting at zero, and the
         // ordinary pipeline draws exactly what it always did.
         boolean traced = sunShadowsActive() && tracingPipelines[variant] != 0
-                && structureWritten == rayTracing.topLevel();
+                && structureWritten[activeFrameSlot] == rayTracing.topLevel(activeFrameSlot);
         try (MemoryStack stack = stackPush()) {
             vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                     traced ? tracingPipelines[variant] : pipelines[variant]);
@@ -1720,8 +1725,19 @@ final class VkTerrainRenderer {
             if (drawCount != 0) {
                 vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout,
                         0, stack.longs(drawDescriptorSets[batchIndex]), null);
-                vkCmdDrawIndexedIndirect(commandBuffer, drawBatchBuffers[batchIndex], drawCommandOffset,
-                        drawCount, DRAW_COMMAND_BYTES);
+                if (ctx.canMultiDrawIndirect()) {
+                    vkCmdDrawIndexedIndirect(commandBuffer, drawBatchBuffers[batchIndex],
+                            drawCommandOffset, drawCount, DRAW_COMMAND_BYTES);
+                } else {
+                    // One command per call where the driver will not take a
+                    // batch. Slower, and the alternative is undefined
+                    // behaviour, which is not an alternative.
+                    for (int i = 0; i < drawCount; i++) {
+                        vkCmdDrawIndexedIndirect(commandBuffer, drawBatchBuffers[batchIndex],
+                                drawCommandOffset + (long) i * DRAW_COMMAND_BYTES, 1,
+                                DRAW_COMMAND_BYTES);
+                    }
+                }
             }
         }
     }
@@ -4290,7 +4306,7 @@ final class VkTerrainRenderer {
     private boolean sunShadowsActive() {
         return rayTracing != null
                 && ctx.isRayQuerySupported()
-                && rayTracing.topLevel() != 0
+                && rayTracing.topLevel(activeFrameSlot) != 0
                 && sunShadowStrength() > 0.0f
                 && sunDirection[1] > 0.05f;
     }
@@ -5940,6 +5956,13 @@ final class VkTerrainRenderer {
         }
         quads = Integer.highestOneBit(quads) * 2; // headroom: chunks keep growing
         if (quadIndexBuffer != 0) {
+            // Every frame still in flight names this buffer, and one of them is
+            // the translucent pass, whose fence is not the one the opaque frame
+            // waited on. Destroying it here without stopping the device is a
+            // buffer freed while a command buffer is reading it — which the
+            // validation layer reports and a driver is free to fault on. It
+            // happens a handful of times a session.
+            vkDeviceWaitIdle(device());
             vkDestroyBuffer(device(), quadIndexBuffer, null);
             vkFreeMemory(device(), quadIndexMemory, null);
         }

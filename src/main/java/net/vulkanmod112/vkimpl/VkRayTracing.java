@@ -96,10 +96,45 @@ final class VkRayTracing {
     private long instanceAddress;
     private int instanceCapacity;
 
-    private long tlas;
-    private long tlasBuffer;
-    private long tlasMemory;
-    private long tlasCapacity;
+    /**
+     * One top-level structure per frame in flight, and the reason is a lost
+     * device rather than tidiness.
+     *
+     * A shader traverses this while it shades, and shading a frame outlives the
+     * command that started it by however many frames the renderer runs ahead.
+     * One structure rebuilt every frame is therefore rewritten underneath the
+     * frames still reading it, and a traversal walking a structure being
+     * rewritten does not come back wrong — it does not come back. The card
+     * gives up on switching away from it and the driver resets, which is what a
+     * CTX SWITCH TIMEOUT is.
+     *
+     * Per slot, the write happens after the fence that says every frame which
+     * used that slot has finished.
+     */
+    private long[] tlas;
+    private long[] tlasBuffer;
+    private long[] tlasMemory;
+    private long[] tlasCapacity;
+    private int activeSlot;
+    private int slotCount = 1;
+
+    /**
+     * Structures that are no longer wanted but may still be under a ray.
+     *
+     * Freed once every frame that could name them has finished. The same rule
+     * the chunk mirror follows for its geometry buffers, and for the same
+     * reason: a handle in a command buffer already submitted is a handle the
+     * card will read.
+     */
+    private final java.util.ArrayList<Retired> retired = new java.util.ArrayList<Retired>();
+
+    private static final class Retired {
+        long structure;
+        long buffer;
+        long memory;
+        long bytes;
+        long frame;
+    }
 
     /** One structure per mirror slot, keyed by it. */
     private final java.util.HashMap<Integer, Blas> structures = new java.util.HashMap<Integer, Blas>();
@@ -135,9 +170,9 @@ final class VkRayTracing {
         return ctx.getDevice();
     }
 
-    /** The structure a shader traces against, or 0 before one exists. */
-    long topLevel() {
-        return tlas;
+    /** The structure the shaders of one frame slot trace against, or 0. */
+    long topLevel(int slot) {
+        return tlas == null || slot < 0 || slot >= tlas.length ? 0 : tlas[slot];
     }
 
     boolean isUsable() {
@@ -152,13 +187,16 @@ final class VkRayTracing {
      * second notion of visibility maintained here.
      */
     void update(int[] chunks, int chunkCount, VkChunkMirror mirror, long frameIndex,
-                double viewX, double viewY, double viewZ) {
+                int slot, int slots, double viewX, double viewY, double viewZ) {
         if (!isUsable()) {
             return;
         }
+        this.activeSlot = slot;
+        this.slotCount = Math.max(1, slots);
         try {
             ensureResources();
             waitForPreviousBuild();
+            releaseRetired(frameIndex);
             buildFrame(chunks, chunkCount, mirror, frameIndex, viewX, viewY, viewZ);
         } catch (Throwable t) {
             broken = true;
@@ -167,8 +205,12 @@ final class VkRayTracing {
         }
     }
 
+    /** The frame the current batch of builds belongs to, for retiring. */
+    private long buildFrameIndex;
+
     private void buildFrame(int[] chunks, int chunkCount, VkChunkMirror mirror, long frameIndex,
                             double viewX, double viewY, double viewZ) {
+        buildFrameIndex = frameIndex;
         int radius = radiusBlocks();
         int budget = buildsPerFrame();
         int maxStructures = maxStructures();
@@ -254,7 +296,7 @@ final class VkRayTracing {
             if (frameIndex - blas.touchedFrame < KEEP_FRAMES) {
                 continue;
             }
-            destroyBlas(blas);
+            retire(blas, frameIndex);
             it.remove();
         }
     }
@@ -315,10 +357,13 @@ final class VkRayTracing {
                 KHRAccelerationStructure.VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
                 buildInfo.get(0), stack.ints(triangles), sizes);
 
-        if (blas.structure == 0 || blas.bytes < sizes.accelerationStructureSize()) {
-            destroyBlas(blas);
-            createBlas(stack, blas, sizes.accelerationStructureSize());
-        }
+        // A fresh structure every time, and the old one retired rather than
+        // rewritten. Building into a structure a previous frame is still
+        // tracing through is the same hazard as rewriting the top level, and it
+        // has the same ending — the difference is only that a chunk changes far
+        // less often than a frame passes.
+        retire(blas, buildFrameIndex);
+        createBlas(stack, blas, sizes.accelerationStructureSize());
         ensureScratch(sizes.buildScratchSize());
 
         buildInfo.get(0)
@@ -428,20 +473,22 @@ final class VkRayTracing {
                 KHRAccelerationStructure.VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
                 buildInfo.get(0), stack.ints(instances), sizes);
 
-        if (tlas == 0 || tlasCapacity < sizes.accelerationStructureSize()) {
-            destroyTopLevel();
+        ensureTopLevelSlots();
+        int slot = activeSlot;
+        if (tlas[slot] == 0 || tlasCapacity[slot] < sizes.accelerationStructureSize()) {
+            retireTopLevel(slot);
             long[] out = new long[3];
             createStructure(stack, sizes.accelerationStructureSize(),
                     KHRAccelerationStructure.VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR, out);
-            tlas = out[0];
-            tlasBuffer = out[1];
-            tlasMemory = out[2];
-            tlasCapacity = sizes.accelerationStructureSize();
+            tlas[slot] = out[0];
+            tlasBuffer[slot] = out[1];
+            tlasMemory[slot] = out[2];
+            tlasCapacity[slot] = sizes.accelerationStructureSize();
         }
         ensureScratch(sizes.buildScratchSize());
 
         buildInfo.get(0)
-                .dstAccelerationStructure(tlas)
+                .dstAccelerationStructure(tlas[slot])
                 .scratchData(it -> it.deviceAddress(scratchAddress));
 
         VkAccelerationStructureBuildRangeInfoKHR.Buffer range =
@@ -524,6 +571,23 @@ final class VkRayTracing {
     }
 
     private void endAndSubmit(MemoryStack stack) {
+        // The finished structures, made visible to everything that comes after
+        // on this queue.
+        //
+        // Submission order alone does not give this. Work from separate
+        // submissions to one queue may overlap, so without a barrier the
+        // terrain pass can begin tracing a structure whose build has not
+        // finished — and a traversal of a half-built structure is the failure
+        // that does not come back at all.
+        VkMemoryBarrier.Buffer barrier = VkMemoryBarrier.calloc(1, stack);
+        barrier.get(0)
+                .sType(VK_STRUCTURE_TYPE_MEMORY_BARRIER)
+                .srcAccessMask(KHRAccelerationStructure.VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR)
+                .dstAccessMask(KHRAccelerationStructure.VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR);
+        vkCmdPipelineBarrier(commandBuffer,
+                KHRAccelerationStructure.VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+                VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                0, barrier, null, null);
         check(vkEndCommandBuffer(commandBuffer), "vkEndCommandBuffer(rt)");
         VkSubmitInfo submit = VkSubmitInfo.calloc(stack)
                 .sType(VK_STRUCTURE_TYPE_SUBMIT_INFO)
@@ -735,17 +799,92 @@ final class VkRayTracing {
         blas.sourceSize = 0;
     }
 
-    private void destroyTopLevel() {
-        if (tlas == 0) {
+    private void ensureTopLevelSlots() {
+        if (tlas != null && tlas.length >= slotCount) {
             return;
         }
-        KHRAccelerationStructure.vkDestroyAccelerationStructureKHR(device(), tlas, null);
-        vkDestroyBuffer(device(), tlasBuffer, null);
-        vkFreeMemory(device(), tlasMemory, null);
-        tlas = 0;
-        tlasBuffer = 0;
-        tlasMemory = 0;
-        tlasCapacity = 0;
+        tlas = new long[slotCount];
+        tlasBuffer = new long[slotCount];
+        tlasMemory = new long[slotCount];
+        tlasCapacity = new long[slotCount];
+    }
+
+    private void retireTopLevel(int slot) {
+        if (tlas[slot] == 0) {
+            return;
+        }
+        Retired entry = new Retired();
+        entry.structure = tlas[slot];
+        entry.buffer = tlasBuffer[slot];
+        entry.memory = tlasMemory[slot];
+        entry.frame = buildFrameIndex;
+        retired.add(entry);
+        tlas[slot] = 0;
+        tlasBuffer[slot] = 0;
+        tlasMemory[slot] = 0;
+        tlasCapacity[slot] = 0;
+    }
+
+    private void retire(Blas blas, long frameIndex) {
+        if (blas.structure == 0) {
+            return;
+        }
+        Retired entry = new Retired();
+        entry.structure = blas.structure;
+        entry.buffer = blas.buffer;
+        entry.memory = blas.memory;
+        entry.bytes = blas.bytes;
+        entry.frame = frameIndex;
+        retired.add(entry);
+        blas.structure = 0;
+        blas.buffer = 0;
+        blas.memory = 0;
+        blas.address = 0;
+        blas.bytes = 0;
+        blas.sourceSize = 0;
+    }
+
+    /**
+     * Frees what no frame can still be reading.
+     *
+     * The margin is the number of frames the renderer runs ahead plus two: one
+     * because a frame is submitted before the next begins, one because this
+     * class submits its own work on a queue of its own reckoning. Cheap
+     * insurance against the only failure mode here that is fatal rather than
+     * visible.
+     */
+    private void releaseRetired(long frameIndex) {
+        if (retired.isEmpty()) {
+            return;
+        }
+        long safe = frameIndex - (slotCount + 2);
+        java.util.Iterator<Retired> it = retired.iterator();
+        while (it.hasNext()) {
+            Retired entry = it.next();
+            if (entry.frame > safe) {
+                continue;
+            }
+            KHRAccelerationStructure.vkDestroyAccelerationStructureKHR(device(), entry.structure, null);
+            vkDestroyBuffer(device(), entry.buffer, null);
+            vkFreeMemory(device(), entry.memory, null);
+            structureBytes -= entry.bytes;
+            it.remove();
+        }
+    }
+
+    private void destroyTopLevel() {
+        if (tlas == null) {
+            return;
+        }
+        for (int slot = 0; slot < tlas.length; slot++) {
+            if (tlas[slot] == 0) {
+                continue;
+            }
+            KHRAccelerationStructure.vkDestroyAccelerationStructureKHR(device(), tlas[slot], null);
+            vkDestroyBuffer(device(), tlasBuffer[slot], null);
+            vkFreeMemory(device(), tlasMemory[slot], null);
+            tlas[slot] = 0;
+        }
     }
 
     private void destroyScratch() {
@@ -783,6 +922,13 @@ final class VkRayTracing {
             destroyBlas(blas);
         }
         structures.clear();
+        // The device is idle here, so nothing can still be reading these.
+        for (Retired entry : retired) {
+            KHRAccelerationStructure.vkDestroyAccelerationStructureKHR(device(), entry.structure, null);
+            vkDestroyBuffer(device(), entry.buffer, null);
+            vkFreeMemory(device(), entry.memory, null);
+        }
+        retired.clear();
         live.clear();
         destroyTopLevel();
         destroyScratch();

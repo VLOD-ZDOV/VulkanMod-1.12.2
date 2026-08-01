@@ -1188,6 +1188,7 @@ final class VkChunkMirror {
         long oldBuffer = geometryBuffer;
         long oldMemory = geometryMemory;
         long oldUsed = nextGeometryOffset;
+        long oldCapacity = geometryCapacity;
         resolveBudget();
         long capacity = geometryCapacity == 0 ? initialGeometryCapacity : geometryCapacity;
         long step = Math.max(64L * 1024L * 1024L, geometryBudget / 8L);
@@ -1206,7 +1207,14 @@ final class VkChunkMirror {
                     // adding them to a buffer that already exists. Asked for
                     // only when ray tracing came up, so a session without it
                     // allocates exactly what it always did.
+                    // TRANSFER_SRC because growth copies this buffer into its
+                    // successor on the card. It was missing from the day that
+                    // copy was written — every session since has issued a copy
+                    // from a buffer that never said it could be copied from,
+                    // and no driver refused. The validation layer did, the
+                    // first time it was ever pointed at this.
                     .usage(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT
+                            | VK_BUFFER_USAGE_TRANSFER_SRC_BIT
                             | (rayTracing ? RAY_TRACING_BUFFER_USAGE : 0))
                     .sharingMode(VK_SHARING_MODE_EXCLUSIVE);
             LongBuffer pBuffer = stack.mallocLong(1);
@@ -1237,8 +1245,20 @@ final class VkChunkMirror {
                 // in both buffers, so per-chunk copies would gain nothing.
                 beginUploads();
                 try (MemoryStack stack = stackPush()) {
+                    // Clamped to what the old buffer actually held. The high
+                    // water mark is supposed never to pass the capacity, and
+                    // the validation layer found a frame where it had by fifty
+                    // bytes — a read past the end of a buffer, on the card,
+                    // which is the shape of fault that ends a session rather
+                    // than a frame. Both numbers are printed so the next one
+                    // is a report and not another investigation.
+                    long copied = Math.min(oldUsed, oldCapacity);
+                    if (copied != oldUsed) {
+                        LOGGER.warn("Geometry high water mark {} is past the buffer it lives in "
+                                + "({}); copying only what is there", oldUsed, oldCapacity);
+                    }
                     VkBufferCopy.Buffer copy = VkBufferCopy.calloc(1, stack);
-                    copy.get(0).srcOffset(0).dstOffset(0).size(oldUsed);
+                    copy.get(0).srcOffset(0).dstOffset(0).size(copied);
                     vkCmdCopyBuffer(uploadCommandBuffer, oldBuffer, geometryBuffer, copy);
                 }
                 flushUploads();
@@ -1278,7 +1298,15 @@ final class VkChunkMirror {
         waitForUploads();
         long oldBuffer = materialBuffer;
         long oldMemory = materialMemory;
+        // Clamped to the old buffer, not just to the vertex count.
+        //
+        // The amount worth keeping is worked out from how far the geometry
+        // buffer has been filled, and the old material buffer was sized from
+        // an older geometry capacity — so after the geometry has grown and the
+        // materials have not yet, the first number is past the end of the
+        // second. Copying that much reads off the end of a buffer on the card.
         long keep = oldBuffer == 0 ? 0L : (nextGeometryOffset / BLOCK_VERTEX_STRIDE) & ~3L;
+        keep = Math.min(keep, materialCapacity);
         try (MemoryStack stack = stackPush()) {
             VkBufferCreateInfo info = VkBufferCreateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO)
