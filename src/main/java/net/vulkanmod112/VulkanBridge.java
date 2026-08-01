@@ -190,4 +190,16 @@ public interface VulkanBridge {
     boolean renderTerrainLayer(int layerOrdinal, int[] chunks, int chunkCount, float[] mvp,
                                double viewX, double viewY, double viewZ, int fbWidth, int fbHeight);
 
+    /**
+     * Whether the translucent layer can go through Vulkan at all on this
+     * machine. False until the render targets exist, and false for good on a
+     * driver with no sampleable 24-bit depth — every AMD card — because the
+     * pass has no way to borrow the game's depth back without it.
+     *
+     * <p>Anything that stops the game filling its own chunk buffers has to ask
+     * first: water and glass live only there, so dropping them while this
+     * returns false leaves nobody drawing them at all.
+     */
+    boolean drawsTranslucent();
+
 }

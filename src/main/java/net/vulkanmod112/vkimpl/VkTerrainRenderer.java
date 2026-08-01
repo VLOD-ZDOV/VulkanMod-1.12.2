@@ -1412,6 +1412,16 @@ final class VkTerrainRenderer {
      *
      * @return true when the layer was taken and OpenGL should not draw it
      */
+    /**
+     * The same condition {@link #renderTranslucent} opens with, asked ahead of
+     * time. Kept next to it so the two cannot drift: whoever decides to stop
+     * filling the game's own chunk buffers is betting the world's water on this
+     * answer.
+     */
+    synchronized boolean drawsTranslucent() {
+        return translucentFramebuffer != 0 && depthBlit;
+    }
+
     private boolean renderTranslucent(int[] chunks, int chunkCount, float[] mvp,
                                       double viewX, double viewY, double viewZ,
                                       VkChunkMirror mirror) {
@@ -1649,6 +1659,16 @@ final class VkTerrainRenderer {
             } else {
                 GL11C.glEnable(GL11C.GL_DEPTH_TEST);
                 GL11C.glDepthFunc(GL11C.GL_LEQUAL);
+                // Re-opened here and not once at the top of the composite: the
+                // ambient occlusion and motion passes above both close the mask
+                // for their own fullscreen quads and leave it closed. On the
+                // blit path that is harmless, because the depth was already
+                // copied in before they ran; here the quad below is the only
+                // thing that ever writes depth, and a closed mask throws it
+                // away silently. The frame still looks right — the colour lands
+                // either way — and everything the game draws afterwards stops
+                // being occluded by the world.
+                GL11C.glDepthMask(true);
             }
 
             org.lwjgl.opengl.GL11.glBegin(org.lwjgl.opengl.GL11.GL_QUADS);

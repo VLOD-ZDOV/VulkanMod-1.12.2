@@ -733,6 +733,14 @@ public final class VulkanContextImpl implements VulkanBridge {
     }
 
     @Override
+    public synchronized boolean drawsTranslucent() {
+        if (!initialized || !interopCapable || terrainRenderer == null) {
+            return false;
+        }
+        return terrainRenderer.drawsTranslucent();
+    }
+
+    @Override
     public synchronized void destroy() {
         if (!initialized) {
             return;

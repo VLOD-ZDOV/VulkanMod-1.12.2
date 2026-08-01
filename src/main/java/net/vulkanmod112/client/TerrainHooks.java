@@ -217,7 +217,14 @@ public final class TerrainHooks {
                 && !incompatibleRenderer;
         if (want) {
             VulkanBridge bridge = liveBridge();
-            want = bridge != null && bridge.isInitialized();
+            // Water and glass live in the vanilla buffers and nowhere else
+            // until the translucent layer goes through Vulkan. Dropping them
+            // before that leaves the layer to a renderer that declines it and
+            // to buffers that are empty — so nobody draws it, and an ocean
+            // turns into a hole in the world with nothing in any log to say so.
+            want = bridge != null && bridge.isInitialized()
+                    && VulkanConfig.isVulkanTranslucent()
+                    && bridge.drawsTranslucent();
         }
         if (want == droppingVanillaBuffers) {
             return;
