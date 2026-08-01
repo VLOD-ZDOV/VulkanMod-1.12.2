@@ -4291,6 +4291,10 @@ final class VkTerrainRenderer {
                     : org.lwjgl.opengl.GL30.GL_DEPTH_COMPONENT32F);
             // glBlitFramebuffer only copies depth between matching formats,
             // and the game's framebuffer is 24-bit.
+            // Before anything is drawn with them, and before the depth blit is
+            // even considered: if OpenGL will not take these, none of what
+            // follows can work and the frame that finds out costs the display.
+            verifyImportedTargets();
             depthBlit = depth24 && depthBlitAllowed();
             if (depthBlit) {
                 glDepthBlitFbo = createDepthReadFbo();
@@ -4396,6 +4400,69 @@ final class VkTerrainRenderer {
         return depthFormat = (props.optimalTilingFeatures() & needed) == needed
                 ? VK_FORMAT_X8_D24_UNORM_PACK32
                 : VK_FORMAT_D32_SFLOAT;
+    }
+
+    /**
+     * Asks OpenGL, in words, whether it can actually use the textures we just
+     * handed it out of Vulkan's memory.
+     *
+     * With the semaphores switched off entirely and the layouts agreed, the one
+     * thing left in the frame was OpenGL sampling these two textures — and the
+     * card still stopped. Vulkan rendering into its own image says nothing about
+     * what OpenGL sees through the import, which is what was wrongly concluded
+     * from it twice.
+     *
+     * Attachment completeness is answered on the processor, by the driver's own
+     * bookkeeping, without a single command reaching the card. So a driver that
+     * cannot really use the import can say so here instead of dying four calls
+     * later with the machine's display reset — and the mod steps aside to
+     * vanilla with a sentence a player can act on, rather than taking the game
+     * down.
+     *
+     * A pass is not a promise: it means the driver accepts the textures as
+     * attachments, not that its idea of their memory layout matches Vulkan's.
+     * On a vendor whose OpenGL and Vulkan drivers are separate implementations
+     * that is a real distinction, and it is the next thing to look at if this
+     * reports everything is fine and the card still stops.
+     */
+    private void verifyImportedTargets() {
+        int prevDraw = GL11C.glGetInteger(GL30C.GL_DRAW_FRAMEBUFFER_BINDING);
+        int fbo = GL30C.glGenFramebuffers();
+        GL30C.glBindFramebuffer(GL30C.GL_DRAW_FRAMEBUFFER, fbo);
+        GL30C.glFramebufferTexture2D(GL30C.GL_DRAW_FRAMEBUFFER, GL30C.GL_COLOR_ATTACHMENT0,
+                GL11C.GL_TEXTURE_2D, glColorTexture, 0);
+        int colorStatus = GL30C.glCheckFramebufferStatus(GL30C.GL_DRAW_FRAMEBUFFER);
+        GL30C.glFramebufferTexture2D(GL30C.GL_DRAW_FRAMEBUFFER, GL30C.GL_COLOR_ATTACHMENT0,
+                GL11C.GL_TEXTURE_2D, 0, 0);
+        GL30C.glFramebufferTexture2D(GL30C.GL_DRAW_FRAMEBUFFER, GL30C.GL_DEPTH_ATTACHMENT,
+                GL11C.GL_TEXTURE_2D, glDepthTexture, 0);
+        int depthStatus = GL30C.glCheckFramebufferStatus(GL30C.GL_DRAW_FRAMEBUFFER);
+        GL30C.glBindFramebuffer(GL30C.GL_DRAW_FRAMEBUFFER, prevDraw);
+        GL30C.glDeleteFramebuffers(fbo);
+
+        // Read back through OpenGL rather than trusted from what we asked for:
+        // the numbers the driver reports are the ones it will render by.
+        GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, glColorTexture);
+        int gotWidth = GL11C.glGetTexLevelParameteri(GL11C.GL_TEXTURE_2D, 0, GL11C.GL_TEXTURE_WIDTH);
+        int gotHeight = GL11C.glGetTexLevelParameteri(GL11C.GL_TEXTURE_2D, 0, GL11C.GL_TEXTURE_HEIGHT);
+        GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, 0);
+        int error = GL11C.glGetError();
+
+        LOGGER.info("Imported targets checked by OpenGL: colour attachment 0x{}, depth attachment "
+                        + "0x{}, colour texture reads back as {}x{} (asked for {}x{}), glGetError 0x{}",
+                Integer.toHexString(colorStatus), Integer.toHexString(depthStatus),
+                gotWidth, gotHeight, width, height, Integer.toHexString(error));
+
+        if (colorStatus != GL30C.GL_FRAMEBUFFER_COMPLETE
+                || depthStatus != GL30C.GL_FRAMEBUFFER_COMPLETE
+                || gotWidth != width || gotHeight != height) {
+            throw new net.vulkanmod112.VulkanUnavailableException(
+                    "This driver's OpenGL side will not use the images Vulkan shared with it"
+                    + " (colour 0x" + Integer.toHexString(colorStatus)
+                    + ", depth 0x" + Integer.toHexString(depthStatus)
+                    + ", size " + gotWidth + "x" + gotHeight + "). Sharing frames between the two"
+                    + " is what this renderer is built on, so it stands aside here.");
+        }
     }
 
     /** Read-only FBO wrapping the shared depth texture; -1 if incomplete. */
