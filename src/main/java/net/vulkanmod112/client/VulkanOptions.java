@@ -81,6 +81,21 @@ final class VulkanOptions {
                                     public void run() {
                                         VulkanPresets.performance(mc);
                                     }
+                                }),
+                        new VActionOption("Potato",
+                                "For a machine this game is too heavy for. Everything Performance "
+                                        + "gives up, plus smooth lighting, mipmaps, clouds and eight "
+                                        + "chunks of view — and a sixty frame ceiling with vsync on. "
+                                        + "The ceiling is the point: above the refresh rate of the "
+                                        + "screen, extra frames are heat and fan noise for pictures "
+                                        + "nobody sees. The world will look plainly worse. Pick this "
+                                        + "one only if the game is currently unplayable.",
+                                Cost.FREE, "Apply",
+                                new VActionOption.Action() {
+                                    @Override
+                                    public void run() {
+                                        VulkanPresets.potato(mc);
+                                    }
                                 })),
                 new VOptionBlock("Vulkan",
                         new VSwitchOption("Vulkan Terrain",

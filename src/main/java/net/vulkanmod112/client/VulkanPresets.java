@@ -1,6 +1,7 @@
 package net.vulkanmod112.client;
 
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.settings.GameSettings;
 
 /**
  * Named starting points for the settings screen.
@@ -37,6 +38,54 @@ public final class VulkanPresets {
         VulkanConfig.setGeometryBudgetMiB(0);
         mc.gameSettings.particleSetting = 1;
         mc.gameSettings.saveOptions();
+    }
+
+    /**
+     * For a machine that cannot run this game well, on the assumption that
+     * sixty frames is the goal and everything else is negotiable.
+     *
+     * The other presets tune; this one gives things up. It is separate from
+     * Performance because the two answer different questions: Performance asks
+     * what can be spared to go faster on a capable machine, this one asks what
+     * has to go for the game to be playable at all. On a laptop with shared
+     * memory and a sixty-hertz screen, frames above sixty are not a gain — they
+     * are heat and fan noise for pictures nobody sees, which is why this is the
+     * one preset that puts a ceiling on rather than removing one.
+     */
+    public static void potato(Minecraft mc) {
+        performance(mc);
+        VulkanConfig.setEntityDistance(32);
+        VulkanConfig.setTileEntityDistance(16);
+        // One frame a second out of focus. The game keeps running; the card
+        // stops being asked to draw a menu nobody is looking at.
+        VulkanConfig.setBackgroundFpsLimit(1);
+        // Two, not three. Frames in flight buy the processor room when it is
+        // the thing holding the frame up — on this class of machine the card
+        // is, and a third frame only adds a frame of delay to the controls.
+        VulkanConfig.setFramesInFlight(2);
+        mc.gameSettings.limitFramerate = 60;
+        mc.gameSettings.enableVsync = true;
+        mc.gameSettings.particleSetting = 2;
+        mc.gameSettings.entityShadows = false;
+        // Through the game's own setter rather than the field: it rebinds the
+        // atlas, turns off mipmap filtering and raises the flag Forge added to
+        // stop the models being rebuilt once per notch of the slider. Writing
+        // the field alone changes the number and nothing else.
+        mc.gameSettings.setOptionFloatValue(GameSettings.Options.MIPMAP_LEVELS, 0.0f);
+        mc.gameSettings.clouds = 0;
+        mc.gameSettings.ambientOcclusion = 0;
+        if (mc.gameSettings.renderDistanceChunks > 8) {
+            mc.gameSettings.renderDistanceChunks = 8;
+        }
+        mc.gameSettings.saveOptions();
+        // The flag raised above is only acted on when a settings screen closes,
+        // and this one was applied from a button in the middle of ours. Said
+        // here so the models are rebuilt at the next safe moment rather than
+        // whenever the player happens to open and shut the vanilla options.
+        mc.gameSettings.onGuiClosed();
+        // Smooth lighting and the render distance are baked into chunk
+        // geometry, so neither takes effect until the chunks are made again.
+        mc.renderGlobal.loadRenderers();
     }
 
     /** Trades looks for frames: shorter distances, no animation, fewer particles. */
