@@ -422,7 +422,7 @@ final class Interop {
                     "vkGetMemoryWin32HandleKHR");
             EXTMemoryObjectWin32.glImportMemoryWin32HandleEXT(memObj, size,
                     EXTMemoryObjectWin32.GL_HANDLE_TYPE_OPAQUE_WIN32_EXT, pHandle.get(0));
-            closeHandle(pHandle.get(0));
+            retainHandle(pHandle.get(0));
         } else {
             VkMemoryGetFdInfoKHR info = VkMemoryGetFdInfoKHR.calloc(stack)
                     .sType(KHRExternalMemoryFd.VK_STRUCTURE_TYPE_MEMORY_GET_FD_INFO_KHR)
@@ -464,7 +464,7 @@ final class Interop {
                         + "exported semaphore (GL error 0x" + Integer.toHexString(error)
                         + "). Waiting on it from OpenGL would never return.");
             }
-            closeHandle(pHandle.get(0));
+            retainHandle(pHandle.get(0));
         } else {
             VkSemaphoreGetFdInfoKHR info = VkSemaphoreGetFdInfoKHR.calloc(stack)
                     .sType(KHRExternalSemaphoreFd.VK_STRUCTURE_TYPE_SEMAPHORE_GET_FD_INFO_KHR)
@@ -476,12 +476,71 @@ final class Interop {
             EXTSemaphoreFD.glImportSemaphoreFdEXT(glSem,
                     EXTSemaphoreFD.GL_HANDLE_TYPE_OPAQUE_FD_EXT, pFd.get(0));
         }
+        // The driver's own opinion of what it just took. glGenSemaphoresEXT
+        // alone does not make a semaphore real — the name only becomes an
+        // object on a successful import — so a driver that quietly refused
+        // says so here, and nowhere else until the wait that never returns.
+        boolean real = EXTSemaphore.glIsSemaphoreEXT(glSem);
+        LOGGER.info("Imported semaphore {}: the driver {} it a semaphore (glGetError 0x{})",
+                glSem, real ? "calls" : "does NOT call",
+                Integer.toHexString(org.lwjgl.opengl.GL11C.glGetError()));
         return glSem;
     }
 
+    /** Exported Win32 handles still held open, closed when the device goes. */
+    private static final java.util.List<Long> RETAINED = new java.util.ArrayList<Long>();
+
     /**
-     * Releases an exported Win32 handle once it has been imported.
+     * Restores the old behaviour — close the handle the instant the import
+     * returns — with -Dvulkanmod112.closeHandlesEarly=true, so the difference
+     * can be measured rather than argued about.
+     */
+    private static final boolean CLOSE_EARLY =
+            "true".equals(System.getProperty("vulkanmod112.closeHandlesEarly"));
+
+    /**
+     * Holds an exported Win32 handle open until the Vulkan device is destroyed.
      *
+     * Both extensions say to release ownership "when the handle is no longer
+     * needed", and this used to close it the moment the import returned, on the
+     * reading that the driver duplicates whatever it keeps. That reading is
+     * true of every driver this was written against and is not guaranteed by
+     * anything: a driver that stores the handle instead is left holding a
+     * closed one, and then the object it names is dead while still looking
+     * alive — a wait that never returns, memory that faults when read. Nothing
+     * distinguishes that from the driver simply not supporting the import.
+     *
+     * The handle is genuinely no longer needed once the semaphore or memory it
+     * names is gone, which is at device teardown. Holding it until then costs
+     * a handful of handles and takes the ambiguity out.
+     */
+    private static void retainHandle(long handle) {
+        if (handle == 0L) {
+            return;
+        }
+        if (CLOSE_EARLY) {
+            closeHandle(handle);
+            return;
+        }
+        synchronized (RETAINED) {
+            RETAINED.add(Long.valueOf(handle));
+        }
+    }
+
+    /** Closes everything {@link #retainHandle} kept. Called at device teardown. */
+    static void releaseImportedHandles() {
+        synchronized (RETAINED) {
+            if (!RETAINED.isEmpty()) {
+                LOGGER.info("Closing {} exported handle(s) held for the driver", RETAINED.size());
+            }
+            for (Long handle : RETAINED) {
+                closeHandle(handle.longValue());
+            }
+            RETAINED.clear();
+        }
+    }
+
+    /**
      * Unlike a file descriptor on Linux, which GL takes ownership of, a Win32
      * handle stays ours after the import: every one we forget to close leaks
      * for the lifetime of the process. LWJGL has no CloseHandle binding, so it

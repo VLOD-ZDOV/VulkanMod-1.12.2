@@ -12,6 +12,13 @@
 - **Water and glass could disappear entirely.** With the setting that stops the game filling its own chunk buffers, the transparent layer was left to a renderer that declines it on those same cards, and to buffers that were no longer being filled — so nothing drew it at all, and an ocean became a hole in the world. That setting now checks whether the transparent layer really goes through Vulkan before it drops anything.
 - **Settings given on the command line were overwritten by the settings file** before the renderer could read them, so a `-D` switch appeared to work and changed nothing. The log now names every setting the command line has pinned.
 - The diagnostics snapshot reported the depth copy as enabled by the setting on one line and disabled by the driver twenty lines below. The first line now says it is a request, not the result.
+- **Handles the driver was given are no longer closed while it may still be holding them.** Sharing a frame between Vulkan and OpenGL is done by handing the second one a handle naming what the first one made, and this closed each handle the moment the import returned. That is what everyone does and it works on every driver it was written against, but nothing in either extension promises the driver copies what it keeps. One that stores the handle instead is left with a closed one, and then the object it names is dead while still answering as though it were alive — a wait that never returns, memory that faults when read. The handles are now held until the device that owns what they name is destroyed.
+- The reported operating system on Windows is no longer quietly wrong. Windows tells any program built before it that it is an older version, and Java 8 is such a program, so every Windows 10 and 11 machine reported itself as 8.1. The line now says as much rather than inviting a bug to be explained with the wrong system.
+
+### Diagnostics
+
+- **The mod now reads the memory it shares with OpenGL three separate ways at startup, announcing each before it runs.** A driver that accepts the sharing and cannot really use it takes the display with it at the first read, and there is no return value from that — so the answer had to be the log itself: whichever step is announced and never reports back is the one at fault. The reads happen before a semaphore is involved in anything, which is what makes the answer mean only one thing.
+- The imported semaphore is now checked against the driver's own opinion of whether it is a semaphore at all. A refused import has no other symptom until the wait that never returns.
 
 ## [0.7.1]
 

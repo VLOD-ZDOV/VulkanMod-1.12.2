@@ -472,6 +472,20 @@ tasks.matching { it.name in ['runClient', 'runObfClient'] }.configureEach {
     if (project.hasProperty('queueTransfer')) {
         jvmArgs "-Dvulkanmod112.externalQueueTransfer=${project.property('queueTransfer')}"
     }
+    // -PnoReadProbe skips the three reads of the shared memory done at startup
+    // before anything depends on them. They are there to name the step that
+    // kills a driver that cannot really use the import, so turning them off is
+    // for when the probe itself is the thing under suspicion.
+    if (project.hasProperty('noReadProbe')) {
+        jvmArgs '-Dvulkanmod112.probeImportedRead=false'
+    }
+    // -PcloseHandlesEarly restores closing each exported Win32 handle the moment
+    // the import returns, instead of holding it until the device goes. The pair
+    // is how the difference gets measured on a driver that might be storing the
+    // handle rather than duplicating what it keeps.
+    if (project.hasProperty('closeHandlesEarly')) {
+        jvmArgs '-Dvulkanmod112.closeHandlesEarly=true'
+    }
 }
 
 apply from: 'gradle/scripts/publishing.gradle'

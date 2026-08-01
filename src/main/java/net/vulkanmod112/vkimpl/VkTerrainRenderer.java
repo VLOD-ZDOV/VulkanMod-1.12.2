@@ -4295,6 +4295,7 @@ final class VkTerrainRenderer {
             // even considered: if OpenGL will not take these, none of what
             // follows can work and the frame that finds out costs the display.
             verifyImportedTargets();
+            probeImportedRead();
             depthBlit = depth24 && depthBlitAllowed();
             if (depthBlit) {
                 glDepthBlitFbo = createDepthReadFbo();
@@ -4463,6 +4464,142 @@ final class VkTerrainRenderer {
                     + ", size " + gotWidth + "x" + gotHeight + "). Sharing frames between the two"
                     + " is what this renderer is built on, so it stands aside here.");
         }
+    }
+
+    /** Off with -Dvulkanmod112.probeImportedRead=false if the probe itself becomes a problem. */
+    private static final boolean PROBE_IMPORTED_READ =
+            !"false".equals(System.getProperty("vulkanmod112.probeImportedRead"));
+    private static boolean importedReadProbed;
+
+    /**
+     * Makes OpenGL actually touch the memory Vulkan shared with it, in three
+     * separate steps, each announced before it runs.
+     *
+     * {@link #verifyImportedTargets()} passed on the machine that dies, so the
+     * driver's bookkeeping accepts the import; what it cannot answer is whether
+     * its idea of the memory layout matches Vulkan's. Only a command that reads
+     * the memory can, and on that machine the first such command takes the
+     * display with it — which is why this cannot be a return value. It is the
+     * log line that does the work: whichever step is announced but never
+     * reports back is the one that kills the driver.
+     *
+     * Deliberately before Vulkan has drawn or signalled anything. The contents
+     * are undefined here and that is fine — the question is whether the memory
+     * can be read at all, and asking it without a semaphore in the picture is
+     * what makes the answer mean only one thing.
+     */
+    private void probeImportedRead() {
+        if (!PROBE_IMPORTED_READ || importedReadProbed) {
+            return;
+        }
+        importedReadProbed = true;
+
+        int prevDraw = GL11C.glGetInteger(GL30C.GL_DRAW_FRAMEBUFFER_BINDING);
+        int prevRead = GL11C.glGetInteger(GL30C.GL_READ_FRAMEBUFFER_BINDING);
+        int prevTexture = GL11C.glGetInteger(GL11C.GL_TEXTURE_BINDING_2D);
+        int prevProgram = GL11C.glGetInteger(GL20C.GL_CURRENT_PROGRAM);
+        int prevActive = GL11C.glGetInteger(GL13C.GL_ACTIVE_TEXTURE);
+        int scratchTexture = 0;
+        int readFbo = 0;
+        int drawFbo = 0;
+
+        try (MemoryStack stack = stackPush()) {
+            IntBuffer viewport = stack.mallocInt(4);
+            GL11C.glGetIntegerv(GL11C.GL_VIEWPORT, viewport);
+            java.nio.ByteBuffer pixel = stack.calloc(16);
+
+            org.lwjgl.opengl.GL11.glPushAttrib(org.lwjgl.opengl.GL11.GL_ENABLE_BIT
+                    | org.lwjgl.opengl.GL11.GL_DEPTH_BUFFER_BIT
+                    | org.lwjgl.opengl.GL11.GL_COLOR_BUFFER_BIT
+                    | org.lwjgl.opengl.GL11.GL_TEXTURE_BIT
+                    | org.lwjgl.opengl.GL11.GL_CURRENT_BIT
+                    | org.lwjgl.opengl.GL11.GL_VIEWPORT_BIT
+                    | org.lwjgl.opengl.GL11.GL_POLYGON_BIT);
+            GL20C.glUseProgram(0);
+            GL11C.glDisable(GL11C.GL_DEPTH_TEST);
+            GL11C.glDisable(GL11C.GL_BLEND);
+            GL11C.glDisable(GL11C.GL_CULL_FACE);
+            GL11C.glDisable(GL11C.GL_SCISSOR_TEST);
+            GL11C.glDisable(org.lwjgl.opengl.GL11.GL_ALPHA_TEST);
+            GL11C.glDepthMask(false);
+
+            // 1. The shared colour read straight out as an attachment. The
+            // shortest path from that memory to the processor there is.
+            readFbo = GL30C.glGenFramebuffers();
+            GL30C.glBindFramebuffer(GL30C.GL_READ_FRAMEBUFFER, readFbo);
+            GL30C.glFramebufferTexture2D(GL30C.GL_READ_FRAMEBUFFER, GL30C.GL_COLOR_ATTACHMENT0,
+                    GL11C.GL_TEXTURE_2D, glColorTexture, 0);
+            GL11C.glReadBuffer(GL30C.GL_COLOR_ATTACHMENT0);
+            LOGGER.info("Shared memory probe 1 of 3: reading the shared colour back as an attachment");
+            GL11C.glReadPixels(0, 0, 1, 1, GL11C.GL_RGBA, GL11C.GL_UNSIGNED_BYTE, pixel);
+            GL11C.glFinish();
+            LOGGER.info("Shared memory probe 1 of 3: survived (glGetError 0x{})",
+                    Integer.toHexString(GL11C.glGetError()));
+
+            // 2. The shared colour sampled through a texture unit — what the
+            // composite quad does every frame, on four pixels instead of two
+            // million.
+            scratchTexture = GL11C.glGenTextures();
+            GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, scratchTexture);
+            GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_MIN_FILTER, GL11C.GL_NEAREST);
+            GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_MAG_FILTER, GL11C.GL_NEAREST);
+            GL11C.glTexImage2D(GL11C.GL_TEXTURE_2D, 0, org.lwjgl.opengl.GL11.GL_RGBA8, 4, 4, 0,
+                    GL11C.GL_RGBA, GL11C.GL_UNSIGNED_BYTE, (java.nio.ByteBuffer) null);
+            drawFbo = GL30C.glGenFramebuffers();
+            GL30C.glBindFramebuffer(GL30C.GL_DRAW_FRAMEBUFFER, drawFbo);
+            GL30C.glFramebufferTexture2D(GL30C.GL_DRAW_FRAMEBUFFER, GL30C.GL_COLOR_ATTACHMENT0,
+                    GL11C.GL_TEXTURE_2D, scratchTexture, 0);
+            GL11C.glViewport(0, 0, 4, 4);
+
+            probeSample("2 of 3", "colour", glColorTexture);
+            probeSample("3 of 3", "depth", glDepthTexture);
+
+            GL30C.glBindFramebuffer(GL30C.GL_READ_FRAMEBUFFER, drawFbo);
+            GL11C.glReadPixels(0, 0, 1, 1, GL11C.GL_RGBA, GL11C.GL_UNSIGNED_BYTE, pixel);
+            GL11C.glFinish();
+            LOGGER.info("Shared memory probe: all three steps survived — this driver can read"
+                    + " what Vulkan shared with it");
+
+            GL11C.glViewport(viewport.get(0), viewport.get(1), viewport.get(2), viewport.get(3));
+            org.lwjgl.opengl.GL11.glPopAttrib();
+        } finally {
+            if (scratchTexture != 0) {
+                GL11C.glDeleteTextures(scratchTexture);
+            }
+            if (readFbo != 0) {
+                GL30C.glDeleteFramebuffers(readFbo);
+            }
+            if (drawFbo != 0) {
+                GL30C.glDeleteFramebuffers(drawFbo);
+            }
+            GL30C.glBindFramebuffer(GL30C.GL_READ_FRAMEBUFFER, prevRead);
+            GL30C.glBindFramebuffer(GL30C.GL_DRAW_FRAMEBUFFER, prevDraw);
+            GL13C.glActiveTexture(prevActive);
+            GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, prevTexture);
+            GL20C.glUseProgram(prevProgram);
+        }
+    }
+
+    /** One textured quad off the shared texture, announced before and after. */
+    private void probeSample(String step, String which, int texture) {
+        GL13C.glActiveTexture(GL13C.GL_TEXTURE0);
+        GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, texture);
+        GL11C.glEnable(GL11C.GL_TEXTURE_2D);
+        LOGGER.info("Shared memory probe {}: sampling the shared {} through a texture unit",
+                step, which);
+        org.lwjgl.opengl.GL11.glBegin(org.lwjgl.opengl.GL11.GL_QUADS);
+        org.lwjgl.opengl.GL11.glTexCoord2f(0.0f, 0.0f);
+        org.lwjgl.opengl.GL11.glVertex2f(-1.0f, -1.0f);
+        org.lwjgl.opengl.GL11.glTexCoord2f(1.0f, 0.0f);
+        org.lwjgl.opengl.GL11.glVertex2f(1.0f, -1.0f);
+        org.lwjgl.opengl.GL11.glTexCoord2f(1.0f, 1.0f);
+        org.lwjgl.opengl.GL11.glVertex2f(1.0f, 1.0f);
+        org.lwjgl.opengl.GL11.glTexCoord2f(0.0f, 1.0f);
+        org.lwjgl.opengl.GL11.glVertex2f(-1.0f, 1.0f);
+        org.lwjgl.opengl.GL11.glEnd();
+        GL11C.glFinish();
+        LOGGER.info("Shared memory probe {}: survived (glGetError 0x{})",
+                step, Integer.toHexString(GL11C.glGetError()));
     }
 
     /** Read-only FBO wrapping the shared depth texture; -1 if incomplete. */

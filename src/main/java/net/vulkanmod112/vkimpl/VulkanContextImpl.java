@@ -765,6 +765,9 @@ public final class VulkanContextImpl implements VulkanBridge {
             demoRenderer.destroy();
             demoRenderer = null;
         }
+        // After every renderer that could still import, before the device that
+        // owns what the handles name.
+        Interop.releaseImportedHandles();
         if (device != null) {
             vkDeviceWaitIdle(device);
             vkDestroyDevice(device, null);

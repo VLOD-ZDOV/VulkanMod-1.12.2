@@ -211,7 +211,18 @@ public final class Diagnostics {
                 + ", forge: " + net.minecraftforge.common.ForgeVersion.getVersion());
         out.println("java: " + System.getProperty("java.version")
                 + " (" + System.getProperty("java.vm.name") + ")");
-        out.println("os: " + System.getProperty("os.name") + " " + System.getProperty("os.arch"));
+        // os.name is not to be believed on Windows past 8: the system reports an
+        // old version to any program without a manifest saying it knows about
+        // the new ones, and Java 8 has no such manifest. Every Windows 10 and 11
+        // machine says "Windows 8.1" here. Said out loud so nobody reads a log
+        // and starts explaining a bug with the wrong operating system.
+        String os = System.getProperty("os.name");
+        boolean lies = os != null && os.startsWith("Windows")
+                && (os.contains("8") || os.contains("7"));
+        out.println("os: " + os + " " + System.getProperty("os.arch")
+                + (lies ? " (as Java 8 sees it — Windows hides its real version"
+                        + " from programs this old, so 10 and 11 both show up here)" : "")
+                + ", version " + System.getProperty("os.version"));
         out.println();
 
         out.println("mods:");
