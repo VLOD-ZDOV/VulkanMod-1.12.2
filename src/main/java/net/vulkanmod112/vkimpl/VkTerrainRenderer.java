@@ -686,6 +686,68 @@ final class VkTerrainRenderer {
     private static final boolean SHARED_SEMAPHORES =
             !"false".equals(System.getProperty("vulkanmod112.interopSemaphores"));
 
+    /**
+     * Whether the shared images change hands between Vulkan and OpenGL by an
+     * explicit ownership transfer.
+     *
+     * They are created VK_SHARING_MODE_EXCLUSIVE, and an exclusive image handed
+     * to another API has to be released to VK_QUEUE_FAMILY_EXTERNAL and taken
+     * back afterwards — the specification says so and this renderer never did
+     * it. Two drivers let that pass and one does not, which is the whole story
+     * of a machine that draws the world under one operating system and stops
+     * the card under the other.
+     *
+     * Windows only by default: the drivers this has been shown to work on have
+     * been running without it for every version so far, and there is no reason
+     * to hand them a change they cannot benefit from.
+     */
+    private static final boolean EXTERNAL_QUEUE_TRANSFER = queueTransferWanted();
+
+    private static boolean queueTransferWanted() {
+        String setting = System.getProperty("vulkanmod112.externalQueueTransfer");
+        if (setting != null) {
+            return !"false".equals(setting);
+        }
+        return Interop.WINDOWS;
+    }
+
+    /**
+     * Releases the shared colour and depth images to OpenGL, or takes them back.
+     *
+     * Both sit in SHADER_READ_ONLY_OPTIMAL between frames, which is where the
+     * render pass leaves them and what the composite samples. The layout does
+     * not move here — only the ownership does, and the pair has to match: a
+     * release without its acquire leaves the next frame writing to an image it
+     * does not hold.
+     */
+    private void transferSharedImages(MemoryStack stack, VkCommandBuffer cmd, boolean release) {
+        if (!EXTERNAL_QUEUE_TRANSFER || colorImage == 0 || depthImage == 0) {
+            return;
+        }
+        int external = org.lwjgl.vulkan.VK11.VK_QUEUE_FAMILY_EXTERNAL;
+        int owner = ctx.getGraphicsQueueFamily();
+        VkImageMemoryBarrier.Buffer barriers = VkImageMemoryBarrier.calloc(2, stack);
+        long[] images = {colorImage, depthImage};
+        int[] aspects = {VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_ASPECT_DEPTH_BIT};
+        for (int i = 0; i < 2; i++) {
+            barriers.get(i)
+                    .sType(VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER)
+                    .srcAccessMask(release ? VK_ACCESS_SHADER_READ_BIT : 0)
+                    .dstAccessMask(release ? 0 : VK_ACCESS_SHADER_READ_BIT)
+                    .oldLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+                    .newLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+                    .srcQueueFamilyIndex(release ? owner : external)
+                    .dstQueueFamilyIndex(release ? external : owner)
+                    .image(images[i]);
+            barriers.get(i).subresourceRange()
+                    .aspectMask(aspects[i])
+                    .baseMipLevel(0).levelCount(1).baseArrayLayer(0).layerCount(1);
+        }
+        vkCmdPipelineBarrier(cmd,
+                VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                0, null, null, barriers);
+    }
+
     private void firstFrameStage(String stage) {
         if (tracingFirstFrame) {
             LOGGER.info("First terrain frame: {}", stage);
@@ -1238,6 +1300,13 @@ final class VkTerrainRenderer {
                     .flags(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
             check(vkBeginCommandBuffer(commandBuffer, begin), "vkBeginCommandBuffer");
 
+            // Taken back from OpenGL before anything is recorded against them.
+            // Skipped on the very first frame, where there is nothing to take
+            // back: nobody has been given them yet.
+            if (!firstFrame) {
+                transferSharedImages(stack, commandBuffer, false);
+            }
+
             if (timestampsSupported) {
                 // Must be outside a render pass, so it goes first.
                 vkCmdResetQueryPool(commandBuffer, queryPool, slot * 2, 2);
@@ -1409,6 +1478,9 @@ final class VkTerrainRenderer {
     private void submitFrame() {
         try (MemoryStack stack = stackPush()) {
             vkCmdEndRenderPass(commandBuffer);
+            // Handed to OpenGL as the last thing this frame records, so the
+            // composite that follows reads images Vulkan no longer owns.
+            transferSharedImages(stack, commandBuffer, true);
             if (STARTUP_READBACK && (frameCounter == 0 || frameCounter == 119)) {
                 recordColorReadback(stack);
             }

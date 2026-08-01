@@ -466,6 +466,12 @@ tasks.matching { it.name in ['runClient', 'runObfClient'] }.configureEach {
     if (project.hasProperty('noInteropSemaphores')) {
         jvmArgs '-Dvulkanmod112.interopSemaphores=false'
     }
+    // -PqueueTransfer=true|false forces the ownership handover of the shared
+    // images on or off. It defaults to on for Windows only, so this is how the
+    // barriers get exercised on a driver that can report what it thinks of them.
+    if (project.hasProperty('queueTransfer')) {
+        jvmArgs "-Dvulkanmod112.externalQueueTransfer=${project.property('queueTransfer')}"
+    }
 }
 
 apply from: 'gradle/scripts/publishing.gradle'
