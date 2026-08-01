@@ -55,6 +55,8 @@ layout(set = 0, binding = 3, std140) uniform Frame {
     // structures near the camera, so past this there is nothing to hit and the
     // shadow has to be faded out rather than stopped.
     // y = how much of its sky light a fully shadowed surface keeps.
+    // z = how wide the sun is made, in radians of half-angle. 0 is a point
+    //     source and a hard edge; larger spreads the ray and softens it.
     vec4 sunParams;
 } frame;
 
@@ -175,6 +177,19 @@ float fogFactor(int mode) {
     return exp(-scaled * scaled);
 }
 
+/**
+ * A different number for every pixel, the same every frame.
+ *
+ * Interleaved gradient noise: the pattern it makes is fine and even rather
+ * than clumped, which is what lets a single sample per pixel read as a soft
+ * edge instead of as speckle. Fixed per pixel and not per frame on purpose —
+ * this renderer has nothing that averages frames together, so a pattern that
+ * moved would be seen moving.
+ */
+float ditherValue(vec2 pixel) {
+    return fract(52.9829189 * fract(dot(pixel, vec2(0.06711056, 0.00583715))));
+}
+
 // True only in the build that can trace, and a compile-time constant in both —
 // so the branch it guards costs nothing in the ordinary shader and the
 // derivatives inside it stay legal.
@@ -208,24 +223,57 @@ float fogFactor(int mode) {
  */
 float sunShadow(vec3 normal) {
 #ifdef RAY_QUERY
-    if (frame.sun.w <= 0.0 || frame.sun.y <= 0.05) {
+    if (frame.sun.w <= 0.0 || frame.sun.y <= 0.0) {
         return 0.0;
     }
-    if (dot(normal, frame.sun.xyz) <= 0.0) {
+    float facing = dot(normal, frame.sun.xyz);
+    if (facing <= 0.0) {
         return 0.0;
     }
+    // Faded in as the sun climbs, not switched on when it clears a threshold.
+    //
+    // A shadow that begins the instant the sun is above the horizon appears
+    // over the whole world in one frame, and at that moment it is also at its
+    // longest and sweeping fastest — so it does not fade in, it arrives and
+    // then races. The sky it belongs to brightens over minutes, and this now
+    // follows the same climb.
+    float risen = smoothstep(0.02, 0.30, frame.sun.y);
     float reach = frame.sunParams.x;
     float fade = 1.0 - clamp((vDistance - reach * 0.75) / max(reach * 0.25, 1.0), 0.0, 1.0);
+    fade *= risen;
     if (fade <= 0.0) {
         return 0.0;
     }
-    // Lifted off the surface along its own normal: a ray starting exactly on
-    // the face it came from finds that face.
-    vec3 from = vRelative + normal * 0.02;
+    // Lifted off the surface, and further the flatter the light strikes it.
+    //
+    // A fixed lift is enough for a face the sun hits square. Near sunrise the
+    // light runs nearly along the ground, and there a fixed lift leaves the
+    // ray skimming its own surface and finding it — which reads as a crawling
+    // stipple over everything flat, exactly where the shadows are longest and
+    // most visible.
+    vec3 from = vRelative + normal * (0.02 + 0.14 * (1.0 - facing));
+    // Which way to look, spread over how wide the sun is made to be.
+    //
+    // One ray gives one answer, so its edge is a staircase along the pixel
+    // grid. Spreading that one ray over a disc instead — a different direction
+    // for every pixel, from an ordered pattern rather than at random — turns
+    // the staircase into a band the width of the spread. It is dithered rather
+    // than smooth, but it costs nothing: still one ray. A second ray would
+    // cost as much again as the whole effect does.
+    vec3 direction = frame.sun.xyz;
+    float spread = frame.sunParams.z;
+    if (spread > 0.0) {
+        vec3 tangent = normalize(cross(direction,
+                abs(direction.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
+        vec3 bitangent = cross(direction, tangent);
+        float angle = ditherValue(gl_FragCoord.xy) * 6.2831853;
+        float radius = sqrt(ditherValue(gl_FragCoord.xy + 5.588238)) * spread;
+        direction = normalize(direction + (cos(angle) * tangent + sin(angle) * bitangent) * radius);
+    }
     rayQueryEXT query;
     rayQueryInitializeEXT(query, terrainStructure,
             gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT,
-            0xFFu, from, 0.01, frame.sun.xyz, reach);
+            0xFFu, from, 0.01, direction, reach);
     rayQueryProceedEXT(query);
     bool blocked = rayQueryGetIntersectionTypeEXT(query, true)
             != gl_RayQueryCommittedIntersectionNoneEXT;

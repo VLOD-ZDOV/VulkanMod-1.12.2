@@ -4235,6 +4235,12 @@ final class VkTerrainRenderer {
         // light a fully shadowed surface keeps.
         MemoryUtil.memPutFloat(base + 960, VkRayTracing.radiusBlocks());
         MemoryUtil.memPutFloat(base + 964, SHADOW_SKY_KEPT);
+        // How wide the sun is made to be, in radians of half-angle. The real
+        // one is about a quarter of a degree; this goes far past that, because
+        // what the setting is really choosing is how much of the staircase to
+        // trade for dither.
+        MemoryUtil.memPutFloat(base + 968,
+                clampPercent(intProperty("vulkanmod112.shadowSoftness", 35)) * MAX_SUN_SPREAD);
     }
 
     /**
@@ -4248,6 +4254,18 @@ final class VkTerrainRenderer {
      * look pasted on.
      */
     private static final float SHADOW_SKY_KEPT = 0.45f;
+
+    /**
+     * The widest the sun may be made, in radians of half-angle.
+     *
+     * Three degrees, which is a dozen times the real sun. A physically sized
+     * source gives a penumbra of a few centimetres at these distances — which
+     * is to say a hard edge and the staircase back again. What this number is
+     * really for is how far a single ray may be thrown off course, and past
+     * about this much the dither stops reading as a soft edge and starts
+     * reading as speckle.
+     */
+    private static final float MAX_SUN_SPREAD = 0.052f;
 
     /** Camera-relative, which for this axis-aligned frame is world direction. */
     private final float[] sunDirection = {0.0f, 1.0f, 0.0f};

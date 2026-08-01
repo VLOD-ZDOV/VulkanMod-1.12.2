@@ -291,6 +291,26 @@ public final class VulkanConfig {
      */
     static final int DEF_SUN_SHADOWS = 0;
     /**
+     * How soft the edge of a shadow is, in percent.
+     *
+     * Not a physical quantity. One ray gives one answer per pixel, so a shadow
+     * made of one ray has an edge that follows the pixel grid; spreading that
+     * ray over a disc instead trades the staircase for a dithered band. This
+     * chooses how wide the band is, and it costs nothing either way — the ray
+     * count does not change.
+     */
+    static final int DEF_SHADOW_SOFTNESS = 35;
+    /**
+     * How far from the camera the terrain carries structures a ray can hit, in
+     * blocks.
+     *
+     * The one number that decides both what a shadow can be cast by and what
+     * the whole feature costs in memory and build time. Past it there is
+     * nothing to hit, so shadows fade out over the last quarter rather than
+     * ending at a circle drawn around the player.
+     */
+    static final int DEF_RAY_TRACING_RADIUS = 96;
+    /**
      * Let the render-distance slider go past 64, up to 128.
      *
      * Off by default because what it unlocks is not "more of the same". The
@@ -455,6 +475,8 @@ public final class VulkanConfig {
     private static boolean rayTracing = DEF_RAY_TRACING;
     private static boolean entityCapture = DEF_ENTITY_CAPTURE;
     private static int sunShadows = DEF_SUN_SHADOWS;
+    private static int shadowSoftness = DEF_SHADOW_SOFTNESS;
+    private static int rayTracingRadius = DEF_RAY_TRACING_RADIUS;
     private static boolean frameGraph = DEF_FRAME_GRAPH;
     private static int frameGraphInterval = DEF_FRAME_GRAPH_INTERVAL;
     private static boolean dynamicLights = DEF_DYNAMIC_LIGHTS;
@@ -684,6 +706,18 @@ public final class VulkanConfig {
                         + "shadow lowers how much sky light a surface gets rather than darkening "
                         + "the finished colour, which is how the game itself shades and why it "
                         + "does not touch a cave lit by a torch.");
+        shadowSoftness = config.getInt("shadowSoftness", CATEGORY_GENERAL, DEF_SHADOW_SOFTNESS,
+                0, 100,
+                "How soft the edge of a traced shadow is. One ray gives one answer per pixel, so "
+                        + "at zero the edge follows the pixel grid; higher values spread that same "
+                        + "ray over a disc and trade the staircase for a dithered band. Costs "
+                        + "nothing either way — the number of rays does not change.");
+        rayTracingRadius = config.getInt("rayTracingRadius", CATEGORY_ADVANCED,
+                DEF_RAY_TRACING_RADIUS, 32, 256,
+                "How far from you the terrain carries the structures a ray can hit, in blocks. "
+                        + "Decides both what can cast a shadow and what the whole feature costs in "
+                        + "video memory and build time; past it shadows fade out rather than "
+                        + "stopping at a circle. Takes effect immediately.");
         entityCapture = config.getBoolean("entityCapture", CATEGORY_ADVANCED, DEF_ENTITY_CAPTURE,
                 "Read what the game draws for every creature, and draw none of it. The first step "
                         + "of moving entities to Vulkan: it measures how much of a scene comes "
@@ -923,6 +957,8 @@ public final class VulkanConfig {
         setRayTracing(DEF_RAY_TRACING);
         setEntityCapture(DEF_ENTITY_CAPTURE);
         setSunShadows(DEF_SUN_SHADOWS);
+        setShadowSoftness(DEF_SHADOW_SOFTNESS);
+        setRayTracingRadius(DEF_RAY_TRACING_RADIUS);
         setExtremeRenderDistance(DEF_EXTREME_RENDER_DISTANCE);
         setDirectionalLight(DEF_DIRECTIONAL_LIGHT);
         setHeightFog(DEF_HEIGHT_FOG);
@@ -1088,6 +1124,26 @@ public final class VulkanConfig {
     public static void setVulkanParticles(boolean value) {
         vulkanParticles = value;
         store(CATEGORY_OPTIMIZATION, "vulkanParticles", value);
+    }
+
+    public static int getShadowSoftness() {
+        return shadowSoftness;
+    }
+
+    public static void setShadowSoftness(int value) {
+        shadowSoftness = value < 0 ? 0 : (value > 100 ? 100 : value);
+        store(CATEGORY_GENERAL, "shadowSoftness", shadowSoftness);
+        applySystemProperties();
+    }
+
+    public static int getRayTracingRadius() {
+        return rayTracingRadius;
+    }
+
+    public static void setRayTracingRadius(int value) {
+        rayTracingRadius = value < 32 ? 32 : (value > 256 ? 256 : value);
+        store(CATEGORY_ADVANCED, "rayTracingRadius", rayTracingRadius);
+        applySystemProperties();
     }
 
     public static int getSunShadows() {
@@ -1511,6 +1567,8 @@ public final class VulkanConfig {
         publish("vulkanmod112.vulkanDevice", Integer.toString(vulkanDevice));
         publish("vulkanmod112.rayTracing", Boolean.toString(rayTracing));
         publish("vulkanmod112.sunShadows", Integer.toString(sunShadows));
+        publish("vulkanmod112.shadowSoftness", Integer.toString(shadowSoftness));
+        publish("vulkanmod112.rayTracingRadius", Integer.toString(rayTracingRadius));
         publish("vulkanmod112.directionalLight", Integer.toString(directionalLight));
         publish("vulkanmod112.heightFog", Integer.toString(heightFog));
         publish("vulkanmod112.heightFogDepth", Integer.toString(heightFogDepth));

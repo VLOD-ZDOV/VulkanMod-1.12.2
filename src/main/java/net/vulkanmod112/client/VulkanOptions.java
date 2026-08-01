@@ -1352,6 +1352,48 @@ final class VulkanOptions {
                                         VulkanConfig.setSunShadows(value);
                                     }
                                 }),
+                        new VRangeOption("Shadow Softness",
+                                "How soft the edge of a traced shadow is. One ray gives one answer "
+                                        + "per pixel, so at zero the edge follows the pixel grid "
+                                        + "exactly — accurate, and a staircase. Higher values "
+                                        + "spread that same ray over a disc, which trades the "
+                                        + "staircase for a dithered band. It costs nothing either "
+                                        + "way: the number of rays does not change, only where the "
+                                        + "one ray is aimed.",
+                                Cost.FREE, "Needs Ray Traced Sun Shadows.",
+                                0, 100, 5, "%", "HARD",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getShadowSoftness();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setShadowSoftness(value);
+                                    }
+                                }),
+                        new VRangeOption("Shadow Reach",
+                                "How far from you the world carries the structures a ray can hit, "
+                                        + "in blocks. This decides both what is able to cast a "
+                                        + "shadow onto you and what the whole thing costs in video "
+                                        + "memory and in building time — past it there is nothing "
+                                        + "to hit, so shadows fade out over the last quarter "
+                                        + "rather than ending at a circle drawn around you. Raise "
+                                        + "it if you can see where the shadows stop.",
+                                Cost.of(Level.LOW, Level.MEDIUM, Level.MEDIUM), null,
+                                32, 256, 16, " blocks", null,
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getRayTracingRadius();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setRayTracingRadius(value);
+                                    }
+                                }),
                         new VSwitchOption("Entity Capture",
                                 "Read what the game draws for every creature and draw none of it. "
                                         + "The first step of moving entities into Vulkan, and it "
