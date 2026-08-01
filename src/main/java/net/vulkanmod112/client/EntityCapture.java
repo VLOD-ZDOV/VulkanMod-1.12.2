@@ -163,24 +163,27 @@ public final class EntityCapture {
                 return;
             }
             if (depth == 0) {
-                // The creature's own frame, and it has to be read here rather
-                // than once per model.
+                // The creature's own frame, taken from the mirror rather than
+                // from the driver.
                 //
-                // The obvious anchor is ModelBase.render, which every model
-                // has — and which every model also overrides without calling,
-                // so a hook on it fires for almost nothing. The first version
-                // did that and composed every bone against a frame left over
-                // from some other creature: ninety-eight parts in a hundred
-                // landed somewhere else, one of them a hundred and seventy
-                // blocks away. Reading per root bone is correct, and what it
-                // costs is the measurement below.
-                readMatrix(STACK[0]);
-                matrixReads++;
+                // Two anchors were tried before this one. The model's own
+                // render method is overridden by every model without calling
+                // the base, so a hook there fired for almost nothing and every
+                // bone was composed against a frame left over from another
+                // creature. Reading per root bone is correct and saves nothing:
+                // a creature's bones are almost all roots, so once per root is
+                // once per bone, and the cost came back exactly where it
+                // started. The mirror removes the driver from the question.
+                System.arraycopy(GlMatrixMirror.current(), 0, STACK[0], 0, 16);
             }
             float[] parent = STACK[depth];
             // Checked rarely, because the check is the very thing this is
             // trying to avoid doing often.
-            if (depth > 0 && ++partsSeen % CHECK_EVERY == 0) {
+            // Counted before the check and not inside it: the two used to be
+            // one expression, and the short circuit meant the count only ever
+            // saw the bones that were not roots — which is one in a hundred.
+            partsSeen++;
+            if (partsSeen % CHECK_EVERY == 0) {
                 verify(parent);
             }
             localTransform(part, scale, LOCAL);
