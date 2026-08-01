@@ -205,14 +205,37 @@ public final class VulkanConfig {
      * uploads out of the per-frame budget vanilla reserves for them, which is
      * the one place chunk loading is actually gated.
      *
-     * Off by default, and for a sharper reason than novelty. Every failure path
-     * in this mod ends in "fall back to vanilla rendering", and that only works
-     * while the vanilla buffers still hold the world. With them empty, falling
-     * back would mean an invisible world — so the fallback has to rebuild the
-     * whole grid first, and that is a stutter nobody asked for on a setting
-     * they did not turn on.
+     * On by default since 01.08.2026, and it was off before that for a reason
+     * that has since been removed rather than out of caution. Every failure
+     * path in this mod ends in "fall back to vanilla rendering", which works
+     * only while the vanilla buffers still hold the world; with them empty the
+     * fallback has to rebuild the entire grid first. That is still true — it is
+     * the price of this setting — and what changed is that the second condition
+     * was met. Until the translucent layer went through Vulkan on cards without
+     * sampleable 24-bit depth, dropping these buffers on every AMD machine left
+     * water and glass with nobody drawing them at all.
+     *
+     * Measured at 900 MiB saved on one world, against a difference in mirrored
+     * geometry of three — one whole copy of the world, which is the largest
+     * single line in what this renderer asks of the card.
      */
-    static final boolean DEF_DROP_VANILLA_BUFFERS = false;
+    static final boolean DEF_DROP_VANILLA_BUFFERS = true;
+    /**
+     * Draw particles with Vulkan instead of OpenGL.
+     *
+     * The vertices are the game's own, built by the game's own code; what
+     * changes is that they go into a buffer the card owns rather than through a
+     * client-side vertex array, which is the slowest path OpenGL has and the
+     * one this game has always used for every particle in the world.
+     *
+     * On by default, and it is not a visual setting — a particle looks the same
+     * either way. It costs nothing extra to hand over: the quads join the
+     * translucent Vulkan pass, which already exists, already has the game's
+     * depth, and already ends in a composite.
+     */
+    static final boolean DEF_VULKAN_PARTICLES = true;
+    /** The same, for rain and snow. Kept apart so one can be ruled out alone. */
+    static final boolean DEF_VULKAN_WEATHER = true;
     /**
      * Let the render-distance slider go past 64, up to 128.
      *
@@ -372,6 +395,8 @@ public final class VulkanConfig {
     private static boolean buildNearOffThread = DEF_BUILD_NEAR_OFF_THREAD;
     private static boolean fastFrustumTest = DEF_FAST_FRUSTUM_TEST;
     private static boolean vulkanTranslucent = DEF_VULKAN_TRANSLUCENT;
+    private static boolean vulkanParticles = DEF_VULKAN_PARTICLES;
+    private static boolean vulkanWeather = DEF_VULKAN_WEATHER;
     private static boolean frameGraph = DEF_FRAME_GRAPH;
     private static int frameGraphInterval = DEF_FRAME_GRAPH_INTERVAL;
     private static boolean dynamicLights = DEF_DYNAMIC_LIGHTS;
@@ -564,8 +589,23 @@ public final class VulkanConfig {
                         + "halves what a render distance costs there. It also takes the second "
                         + "upload out of the budget the game reserves each frame for getting "
                         + "chunks onto the card, which is what actually limits how fast a world "
-                        + "fills in. Off by default: with those buffers empty, every fallback to "
-                        + "vanilla rendering has to rebuild the entire world first.");
+                        + "fills in. On by default since the translucent layer started going "
+                        + "through Vulkan everywhere: what it costs is that a fallback to vanilla "
+                        + "rendering has to rebuild the entire world first, which is a pause, not "
+                        + "a hole.");
+        vulkanParticles = config.getBoolean("vulkanParticles", CATEGORY_OPTIMIZATION,
+                DEF_VULKAN_PARTICLES,
+                "Draw particles with Vulkan. The game still decides where every particle is and "
+                        + "what it looks like — this changes only how the finished quads reach "
+                        + "the card. Vanilla hands them over as a client-side vertex array, "
+                        + "which the driver has to copy in full before it can start, and the "
+                        + "game allows itself up to sixteen thousand particles in each of six "
+                        + "queues. Costs no extra work between the two APIs: they join the pass "
+                        + "that draws water.");
+        vulkanWeather = config.getBoolean("vulkanWeather", CATEGORY_OPTIMIZATION,
+                DEF_VULKAN_WEATHER,
+                "The same for rain and snow. A separate switch from the one above so that either "
+                        + "can be ruled out on its own.");
         frameGraph = config.getBoolean("frameGraph", CATEGORY_GENERAL, DEF_FRAME_GRAPH,
                 "Show a frame-time graph in the bottom-left corner, with the worst and best frame "
                         + "of the last couple of seconds and the 1% low. An average framerate "
@@ -710,6 +750,8 @@ public final class VulkanConfig {
         setDynamicLights(DEF_DYNAMIC_LIGHTS);
         setDynamicLightDistance(DEF_DYNAMIC_LIGHT_DISTANCE);
         setDropVanillaBuffers(DEF_DROP_VANILLA_BUFFERS);
+        setVulkanParticles(DEF_VULKAN_PARTICLES);
+        setVulkanWeather(DEF_VULKAN_WEATHER);
         setExtremeRenderDistance(DEF_EXTREME_RENDER_DISTANCE);
         setDirectionalLight(DEF_DIRECTIONAL_LIGHT);
         setHeightFog(DEF_HEIGHT_FOG);
@@ -866,6 +908,24 @@ public final class VulkanConfig {
     public static void setDropVanillaBuffers(boolean value) {
         dropVanillaBuffers = value;
         store(CATEGORY_OPTIMIZATION, "dropVanillaBuffers", value);
+    }
+
+    public static boolean isVulkanParticles() {
+        return vulkanParticles;
+    }
+
+    public static void setVulkanParticles(boolean value) {
+        vulkanParticles = value;
+        store(CATEGORY_OPTIMIZATION, "vulkanParticles", value);
+    }
+
+    public static boolean isVulkanWeather() {
+        return vulkanWeather;
+    }
+
+    public static void setVulkanWeather(boolean value) {
+        vulkanWeather = value;
+        store(CATEGORY_OPTIMIZATION, "vulkanWeather", value);
     }
 
     public static boolean isFrameGraph() {

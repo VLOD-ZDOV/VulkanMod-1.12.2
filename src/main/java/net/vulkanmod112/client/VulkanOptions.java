@@ -923,13 +923,12 @@ final class VulkanOptions {
                                         + "render distances. It also takes the second upload out "
                                         + "of the budget the game reserves each frame for getting "
                                         + "chunks onto the card, which is what really decides how "
-                                        + "fast a world fills in around you. Off by default for a "
-                                        + "specific reason: everything in this mod falls back to "
-                                        + "vanilla rendering when something goes wrong, and that "
-                                        + "works because those buffers hold the world. With them "
-                                        + "empty, falling back has to rebuild every chunk first, "
-                                        + "which it will do — but it is a pause, and one you "
-                                        + "should have chosen.",
+                                        + "fast a world fills in around you. Measured at 900 MiB "
+                                        + "saved on one world. On by default now that water goes "
+                                        + "through Vulkan on every card; what it costs is that "
+                                        + "falling back to vanilla rendering has to rebuild every "
+                                        + "chunk first, which it will do — a pause, not a hole in "
+                                        + "the world.",
                                 Cost.of(Level.NONE, Level.NONE, Level.NONE), null,
                                 new VSwitchOption.Access() {
                                     @Override
@@ -940,6 +939,46 @@ final class VulkanOptions {
                                     @Override
                                     public void set(boolean value) {
                                         VulkanConfig.setDropVanillaBuffers(value);
+                                    }
+                                }),
+                        new VSwitchOption("Vulkan Particles",
+                                "Draw particles with Vulkan. Where every particle is and what it "
+                                        + "looks like is still decided entirely by the game — this "
+                                        + "changes how the finished quads reach the card. The old "
+                                        + "way hands them over as pointers into ordinary memory, "
+                                        + "which the driver must copy in full before it can start "
+                                        + "drawing, and the game lets itself keep up to sixteen "
+                                        + "thousand particles in each of six lists. They join the "
+                                        + "pass that already draws water, so nothing extra is "
+                                        + "moved between the two renderers. Needs Vulkan Water and "
+                                        + "Glass, which is the pass they ride in.",
+                                Cost.of(Level.NONE, Level.NONE, Level.NONE), null,
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return VulkanConfig.isVulkanParticles();
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        VulkanConfig.setVulkanParticles(value);
+                                    }
+                                }),
+                        new VSwitchOption("Vulkan Rain and Snow",
+                                "The same for weather. A switch of its own so that either can be "
+                                        + "ruled out without the other — rain is built by very "
+                                        + "different code from particles and only shares the way it "
+                                        + "is drawn.",
+                                Cost.of(Level.NONE, Level.NONE, Level.NONE), null,
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return VulkanConfig.isVulkanWeather();
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        VulkanConfig.setVulkanWeather(value);
                                     }
                                 }),
                         new VSwitchOption("Vulkan Water and Glass",
