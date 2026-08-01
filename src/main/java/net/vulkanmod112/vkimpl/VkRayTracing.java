@@ -135,6 +135,11 @@ final class VkRayTracing {
         return ctx.getDevice();
     }
 
+    /** The structure a shader traces against, or 0 before one exists. */
+    long topLevel() {
+        return tlas;
+    }
+
     boolean isUsable() {
         return !broken && ctx.isRayTracingEnabled();
     }
@@ -694,7 +699,7 @@ final class VkRayTracing {
         sb.append('\n');
     }
 
-    private static int radiusBlocks() {
+    static int radiusBlocks() {
         return intProperty("vulkanmod112.rayTracingRadius", 96);
     }
 

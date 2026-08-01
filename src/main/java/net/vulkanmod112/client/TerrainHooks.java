@@ -288,6 +288,8 @@ public final class TerrainHooks {
                 bridge.updateFogState(FOG);
                 DynamicLights.gather(viewX, viewY, viewZ);
                 bridge.updateDynamicLights(DynamicLights.lights(), DynamicLights.count());
+                captureSun(mc);
+                bridge.updateSun(SUN);
                 if (lightmapColors != null) {
                     bridge.updateLightmapData(lightmapColors);
                 }
@@ -396,6 +398,35 @@ public final class TerrainHooks {
             lastChunksDrawn += i / 4;
         }
         return i / 4;
+    }
+
+    /** Direction to the sun, in world axes; see captureSun. */
+    private static final float[] SUN = {0.0f, 1.0f, 0.0f};
+
+    /**
+     * Where the sun is, worked out the way the game itself places it.
+     *
+     * Vanilla draws the sun by turning the sky ninety degrees about Y and then
+     * by the day's angle about X, and hanging the sun overhead in that frame.
+     * Undoing those two rotations on "straight up" leaves this, and taking it
+     * from the same number the sky is drawn from is what keeps a shadow
+     * pointing where the light in the picture comes from — a renderer with its
+     * own clock would drift from the sky above it within a day.
+     *
+     * Below the horizon there is no sun to cast anything, and the caller reads
+     * the y component for exactly that.
+     */
+    private static void captureSun(Minecraft mc) {
+        if (mc.world == null) {
+            SUN[0] = 0.0f;
+            SUN[1] = -1.0f;
+            SUN[2] = 0.0f;
+            return;
+        }
+        float angle = mc.world.getCelestialAngleRadians(mc.getRenderPartialTicks());
+        SUN[0] = -(float) Math.sin(angle);
+        SUN[1] = (float) Math.cos(angle);
+        SUN[2] = 0.0f;
     }
 
     /**

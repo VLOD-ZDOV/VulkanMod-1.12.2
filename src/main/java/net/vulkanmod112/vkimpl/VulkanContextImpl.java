@@ -1103,6 +1103,14 @@ public final class VulkanContextImpl implements VulkanBridge {
     }
 
     @Override
+    public synchronized void updateSun(float[] sun) {
+        if (!initialized || !interopCapable) {
+            return;
+        }
+        terrainRenderer().setSunDirection(sun);
+    }
+
+    @Override
     public synchronized boolean drawsSprites() {
         if (!initialized || !interopCapable || terrainRenderer == null) {
             return false;

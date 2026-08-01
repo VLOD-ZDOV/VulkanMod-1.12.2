@@ -278,6 +278,19 @@ public final class VulkanConfig {
      */
     static final boolean DEF_ENTITY_CAPTURE = false;
     /**
+     * How dark the sun's own shadow is, in percent. 0 turns it off.
+     *
+     * Traced against the terrain structures, so it needs those and a card that
+     * can trace from a fragment shader. Off by default because it is new and
+     * because it costs a ray per lit pixel.
+     *
+     * The shadow moves the surface down the sky-light axis rather than
+     * multiplying over the finished colour. This game has no sun in its
+     * lighting — a surface is lit by how much block light and sky light reach
+     * it — and a multiply would darken a torch-lit cave the sky never touched.
+     */
+    static final int DEF_SUN_SHADOWS = 0;
+    /**
      * Let the render-distance slider go past 64, up to 128.
      *
      * Off by default because what it unlocks is not "more of the same". The
@@ -441,6 +454,7 @@ public final class VulkanConfig {
     private static int vulkanDevice = DEF_VULKAN_DEVICE;
     private static boolean rayTracing = DEF_RAY_TRACING;
     private static boolean entityCapture = DEF_ENTITY_CAPTURE;
+    private static int sunShadows = DEF_SUN_SHADOWS;
     private static boolean frameGraph = DEF_FRAME_GRAPH;
     private static int frameGraphInterval = DEF_FRAME_GRAPH_INTERVAL;
     private static boolean dynamicLights = DEF_DYNAMIC_LIGHTS;
@@ -664,6 +678,12 @@ public final class VulkanConfig {
                 DEF_VULKAN_WEATHER,
                 "The same for rain and snow. A separate switch from the one above so that either "
                         + "can be ruled out on its own.");
+        sunShadows = config.getInt("sunShadows", CATEGORY_GENERAL, DEF_SUN_SHADOWS, 0, 100,
+                "How dark the sun's shadow is, traced against the terrain. Needs Terrain "
+                        + "Acceleration Structures and a card that can trace from a shader. The "
+                        + "shadow lowers how much sky light a surface gets rather than darkening "
+                        + "the finished colour, which is how the game itself shades and why it "
+                        + "does not touch a cave lit by a torch.");
         entityCapture = config.getBoolean("entityCapture", CATEGORY_ADVANCED, DEF_ENTITY_CAPTURE,
                 "Read what the game draws for every creature, and draw none of it. The first step "
                         + "of moving entities to Vulkan: it measures how much of a scene comes "
@@ -902,6 +922,7 @@ public final class VulkanConfig {
         setVulkanDevice(DEF_VULKAN_DEVICE);
         setRayTracing(DEF_RAY_TRACING);
         setEntityCapture(DEF_ENTITY_CAPTURE);
+        setSunShadows(DEF_SUN_SHADOWS);
         setExtremeRenderDistance(DEF_EXTREME_RENDER_DISTANCE);
         setDirectionalLight(DEF_DIRECTIONAL_LIGHT);
         setHeightFog(DEF_HEIGHT_FOG);
@@ -1067,6 +1088,16 @@ public final class VulkanConfig {
     public static void setVulkanParticles(boolean value) {
         vulkanParticles = value;
         store(CATEGORY_OPTIMIZATION, "vulkanParticles", value);
+    }
+
+    public static int getSunShadows() {
+        return sunShadows;
+    }
+
+    public static void setSunShadows(int value) {
+        sunShadows = value < 0 ? 0 : (value > 100 ? 100 : value);
+        store(CATEGORY_GENERAL, "sunShadows", sunShadows);
+        applySystemProperties();
     }
 
     public static boolean isEntityCapture() {
@@ -1479,6 +1510,7 @@ public final class VulkanConfig {
         publish("vulkanmod112.framesInFlight", Integer.toString(framesInFlight));
         publish("vulkanmod112.vulkanDevice", Integer.toString(vulkanDevice));
         publish("vulkanmod112.rayTracing", Boolean.toString(rayTracing));
+        publish("vulkanmod112.sunShadows", Integer.toString(sunShadows));
         publish("vulkanmod112.directionalLight", Integer.toString(directionalLight));
         publish("vulkanmod112.heightFog", Integer.toString(heightFog));
         publish("vulkanmod112.heightFogDepth", Integer.toString(heightFogDepth));

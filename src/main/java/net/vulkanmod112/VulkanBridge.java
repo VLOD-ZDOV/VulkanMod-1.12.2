@@ -223,6 +223,16 @@ public interface VulkanBridge {
      * translucent pass, and there is no second place to put them that would not
      * cost another round trip of the game's depth.
      */
+    /**
+     * Which way the sun is, in the same camera-relative axes the terrain is
+     * drawn in, plus how strongly its shadow should be believed.
+     *
+     * Four floats: direction x, y, z and strength. Sent every frame because the
+     * sun moves; costs nothing, and the alternative is the renderer keeping its
+     * own clock and drifting from the sky the game draws.
+     */
+    void updateSun(float[] sun);
+
     boolean drawsSprites();
 
     /**

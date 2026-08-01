@@ -1,5 +1,15 @@
 #version 450
 
+// Present only in the ray-query build of this shader. A module that names an
+// acceleration structure asks the driver for a capability it either has or
+// refuses the whole pipeline for, so a card without ray query is never handed
+// this variant — see the shader task in build.gradle, which produces both from
+// this one file.
+#ifdef RAY_QUERY
+#extension GL_EXT_ray_query : require
+layout(set = 0, binding = 7) uniform accelerationStructureEXT terrainStructure;
+#endif
+
 layout(set = 0, binding = 0) uniform sampler2D atlas;
 layout(set = 0, binding = 1) uniform sampler2D lightmap;
 /*
@@ -38,6 +48,14 @@ layout(set = 0, binding = 3, std140) uniform Frame {
     // the ray found and nothing else. zw = the near and far planes, which turn
     // a stored depth back into a distance.
     vec4 screenMirror;
+    // xyz = which way the sun is, in the same camera-relative axes everything
+    // else here uses. w = how much of a shadow to believe, 0 = off.
+    vec4 sun;
+    // x = how far a shadow ray may travel, in blocks — the world only has
+    // structures near the camera, so past this there is nothing to hit and the
+    // shadow has to be faded out rather than stopped.
+    // y = how much of its sky light a fully shadowed surface keeps.
+    vec4 sunParams;
 } frame;
 
 layout(push_constant) uniform Draw {
@@ -155,6 +173,66 @@ float fogFactor(int mode) {
     // exp2
     float scaled = frame.fogParams.z * vDistance;
     return exp(-scaled * scaled);
+}
+
+// True only in the build that can trace, and a compile-time constant in both —
+// so the branch it guards costs nothing in the ordinary shader and the
+// derivatives inside it stay legal.
+#ifdef RAY_QUERY
+#define SUN_SHADOWS_WANTED (frame.sun.w > 0.0)
+#else
+#define SUN_SHADOWS_WANTED false
+#endif
+
+/**
+ * How much of the sun this fragment is denied, 0 to 1.
+ *
+ * One ray, and it stops at the first thing it meets: a shadow only asks
+ * whether anything is in the way, never what or how far, so the traversal can
+ * give up the moment it finds an answer. That is the cheapest question ray
+ * tracing hardware can be asked and the reason this is the first thing worth
+ * tracing here.
+ *
+ * Three refusals before the ray, each for its own reason:
+ *
+ *  - the sun below the horizon has no shadow to cast, and at night the sky
+ *    light is already low everywhere;
+ *  - a surface turned away from the sun is not shaded here at all. It is
+ *    unlit in a physical model, but this game does not shade by which way a
+ *    face points, and darkening every back face would be a change to the whole
+ *    look of the world rather than a shadow. What that would be is the
+ *    directional light setting, which already exists;
+ *  - past the reach there are no structures to hit, so every ray would come
+ *    back lit and draw a visible circle around the player. The strength fades
+ *    out over the last quarter instead.
+ */
+float sunShadow(vec3 normal) {
+#ifdef RAY_QUERY
+    if (frame.sun.w <= 0.0 || frame.sun.y <= 0.05) {
+        return 0.0;
+    }
+    if (dot(normal, frame.sun.xyz) <= 0.0) {
+        return 0.0;
+    }
+    float reach = frame.sunParams.x;
+    float fade = 1.0 - clamp((vDistance - reach * 0.75) / max(reach * 0.25, 1.0), 0.0, 1.0);
+    if (fade <= 0.0) {
+        return 0.0;
+    }
+    // Lifted off the surface along its own normal: a ray starting exactly on
+    // the face it came from finds that face.
+    vec3 from = vRelative + normal * 0.02;
+    rayQueryEXT query;
+    rayQueryInitializeEXT(query, terrainStructure,
+            gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT,
+            0xFFu, from, 0.01, frame.sun.xyz, reach);
+    rayQueryProceedEXT(query);
+    bool blocked = rayQueryGetIntersectionTypeEXT(query, true)
+            != gl_RayQueryCommittedIntersectionNoneEXT;
+    return blocked ? frame.sun.w * fade : 0.0;
+#else
+    return 0.0;
+#endif
 }
 
 /**
@@ -569,7 +647,7 @@ void main() {
     // same for every fragment of the draw, which is what makes the derivatives
     // inside it legal. The translucent pipeline always needs the normal: water
     // is in it, and water is asked which way it faces even in the dark.
-    vec3 normal = (BLEND || (lightCount > 0 && directional > 0.0))
+    vec3 normal = (BLEND || (lightCount > 0 && directional > 0.0) || SUN_SHADOWS_WANTED)
             ? faceNormal() : vec3(0.0, 1.0, 0.0);
     // After the derivatives and outside their branch: this is arithmetic on the
     // answer, not another question about the neighbourhood.
@@ -638,7 +716,20 @@ void main() {
             blockLight = max(blockLight, (level * 16.0 + 8.0) / 256.0);
         }
     }
-    vec3 light = texture(lightmap, vec2(blockLight, vLight.y)).rgb;
+    // The sun's shadow, and it moves the sky light rather than multiplying the
+    // result.
+    //
+    // This game has no sun in its lighting: a surface is lit by a pair of
+    // numbers, how much block light and how much sky light reach it, and the
+    // light map turns that pair into a colour. Multiplying a shadow over that
+    // colour would darken a torch-lit cave wall that the sky never reached,
+    // and would look like a filter laid on the world rather than like shade.
+    // Moving down the sky axis is what the game itself does when a cloud of
+    // night comes over, so a shadow made this way is a shade this world
+    // already knows how to draw.
+    float skyLight = vLight.y;
+    skyLight = mix(skyLight, skyLight * frame.sunParams.y, sunShadow(normal));
+    vec3 light = texture(lightmap, vec2(blockLight, skyLight)).rgb;
     vec3 shaded = tex.rgb * vColor.rgb * light * waveShade;
     if (frame.frameInfo.w > 0.5) {
         shaded = materialColor(material) * light;

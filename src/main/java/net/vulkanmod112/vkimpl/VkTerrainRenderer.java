@@ -1330,9 +1330,52 @@ final class VkTerrainRenderer {
         // the structures to be built from an address that no longer exists.
         rayTracing.setIndexBuffer(quadIndexBuffer);
         rayTracing.update(chunks, chunkCount, mirror, frameCounter, viewX, viewY, viewZ);
+        // The structure only gets a new handle when it has to grow, which is
+        // rare — so pointing the descriptors at it is done on change rather
+        // than every frame, because doing it stops the device.
+        long current = rayTracing.topLevel();
+        if (current != structureWritten && ctx.isRayQuerySupported()) {
+            structureWritten = current;
+            writeStructureDescriptors(current);
+        }
+    }
+
+    private void writeStructureDescriptors(long structure) {
+        if (structure == 0 || descriptorSet == 0) {
+            return;
+        }
+        vkDeviceWaitIdle(device());
+        try (MemoryStack stack = stackPush()) {
+            LongBuffer handle = stack.longs(structure);
+            org.lwjgl.vulkan.VkWriteDescriptorSetAccelerationStructureKHR structureInfo =
+                    org.lwjgl.vulkan.VkWriteDescriptorSetAccelerationStructureKHR.calloc(stack)
+                            .sType(org.lwjgl.vulkan.KHRAccelerationStructure
+                                    .VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR)
+                            .pAccelerationStructures(handle);
+            VkWriteDescriptorSet.Buffer writes =
+                    VkWriteDescriptorSet.calloc(drawDescriptorSets.length, stack);
+            for (int i = 0; i < drawDescriptorSets.length; i++) {
+                writes.get(i)
+                        .sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET)
+                        .pNext(structureInfo.address())
+                        .dstSet(drawDescriptorSets[i]).dstBinding(7)
+                        // Not taken from pAccelerationStructures: the count in
+                        // the write is what the driver reads, and the chained
+                        // structure carries the handles it counts.
+                        .descriptorCount(1)
+                        .descriptorType(org.lwjgl.vulkan.KHRAccelerationStructure
+                                .VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR);
+            }
+            vkUpdateDescriptorSets(device(), writes, null);
+        }
+        LOGGER.info("Shaders can now trace against the terrain");
     }
 
     private VkRayTracing rayTracing;
+    /** The tracing build of the terrain pipelines, or zeroes where impossible. */
+    private final long[] tracingPipelines = new long[TERRAIN_PIPELINES.length];
+    /** Which structure the descriptor sets currently name; 0 means none. */
+    private long structureWritten;
 
     /** Everything the ultra log wants to know about this renderer. */
     synchronized void appendDiagnostics(StringBuilder sb) {
@@ -1587,8 +1630,14 @@ final class VkTerrainRenderer {
             return;
         }
         float cutoff = LAYER_CUTOFF[layerOrdinal];
+        // The tracing build only when there is something to trace against and
+        // a reason to: no structure, no sun, or the setting at zero, and the
+        // ordinary pipeline draws exactly what it always did.
+        boolean traced = sunShadowsActive() && tracingPipelines[variant] != 0
+                && structureWritten == rayTracing.topLevel();
         try (MemoryStack stack = stackPush()) {
-            vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines[variant]);
+            vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                    traced ? tracingPipelines[variant] : pipelines[variant]);
             // The only thing left that changes between draws. Per-chunk origins
             // are fetched by the vertex shader from the storage buffer.
             ByteBuffer drawPush = stack.calloc(16);
@@ -3847,7 +3896,9 @@ final class VkTerrainRenderer {
 
         createFrameUniforms(stack);
 
-        VkDescriptorSetLayoutBinding.Buffer bindings = VkDescriptorSetLayoutBinding.calloc(6, stack);
+        boolean tracing = ctx.isRayTracingEnabled() && ctx.isRayQuerySupported();
+        VkDescriptorSetLayoutBinding.Buffer bindings =
+                VkDescriptorSetLayoutBinding.calloc(tracing ? 7 : 6, stack);
         bindings.get(0).binding(0)
                 .descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
                 .descriptorCount(1)
@@ -3879,6 +3930,16 @@ final class VkTerrainRenderer {
                 .descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
                 .descriptorCount(1)
                 .stageFlags(VK_SHADER_STAGE_FRAGMENT_BIT);
+        if (tracing) {
+            // The world as a thing a ray can be fired into. Declared only where
+            // the driver can trace: a layout naming a descriptor type an
+            // extension brought in is not creatable without that extension.
+            bindings.get(6).binding(7)
+                    .descriptorType(org.lwjgl.vulkan.KHRAccelerationStructure
+                            .VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR)
+                    .descriptorCount(1)
+                    .stageFlags(VK_SHADER_STAGE_FRAGMENT_BIT);
+        }
         VkDescriptorSetLayoutCreateInfo layoutInfo = VkDescriptorSetLayoutCreateInfo.calloc(stack)
                 .sType(VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO)
                 .pBindings(bindings);
@@ -3886,10 +3947,15 @@ final class VkTerrainRenderer {
         check(vkCreateDescriptorSetLayout(device(), layoutInfo, null, pLayout), "vkCreateDescriptorSetLayout");
         descriptorSetLayout = pLayout.get(0);
 
-        VkDescriptorPoolSize.Buffer poolSizes = VkDescriptorPoolSize.calloc(3, stack);
+        VkDescriptorPoolSize.Buffer poolSizes = VkDescriptorPoolSize.calloc(tracing ? 4 : 3, stack);
         poolSizes.get(0).type(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER).descriptorCount(drawDescriptorSets.length * 4);
         poolSizes.get(1).type(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER).descriptorCount(drawDescriptorSets.length);
         poolSizes.get(2).type(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER).descriptorCount(drawDescriptorSets.length);
+        if (tracing) {
+            poolSizes.get(3).type(org.lwjgl.vulkan.KHRAccelerationStructure
+                    .VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR)
+                    .descriptorCount(drawDescriptorSets.length);
+        }
         VkDescriptorPoolCreateInfo poolInfo = VkDescriptorPoolCreateInfo.calloc(stack)
                 .sType(VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO)
                 .pPoolSizes(poolSizes)
@@ -4157,6 +4223,58 @@ final class VkTerrainRenderer {
         readProjectionPlanes();
         MemoryUtil.memPutFloat(base + 936, nearPlane);
         MemoryUtil.memPutFloat(base + 940, farPlane);
+        // vec4 sun at 944: which way it is, and how much of a shadow to
+        // believe. Zero strength is the whole of the off switch — the ray is
+        // never initialised and the pipeline that could trace one is not even
+        // bound.
+        MemoryUtil.memPutFloat(base + 944, sunDirection[0]);
+        MemoryUtil.memPutFloat(base + 948, sunDirection[1]);
+        MemoryUtil.memPutFloat(base + 952, sunDirection[2]);
+        MemoryUtil.memPutFloat(base + 956, sunShadowsActive() ? sunShadowStrength() : 0.0f);
+        // vec4 sunParams at 960: how far a shadow ray may go, and how much sky
+        // light a fully shadowed surface keeps.
+        MemoryUtil.memPutFloat(base + 960, VkRayTracing.radiusBlocks());
+        MemoryUtil.memPutFloat(base + 964, SHADOW_SKY_KEPT);
+    }
+
+    /**
+     * How dark a fully shadowed surface goes, as a fraction of its sky light.
+     *
+     * Not a setting. What a shadow should look like in this game is decided by
+     * how the light map is built, not by taste: a surface in shade is a surface
+     * the sky reaches less, and vanilla's own range from open sky to none is
+     * what this is a fraction of. Left adjustable it would be the first thing
+     * turned to zero, and a black shadow is the one thing that would make this
+     * look pasted on.
+     */
+    private static final float SHADOW_SKY_KEPT = 0.45f;
+
+    /** Camera-relative, which for this axis-aligned frame is world direction. */
+    private final float[] sunDirection = {0.0f, 1.0f, 0.0f};
+
+    synchronized void setSunDirection(float[] direction) {
+        if (direction != null && direction.length >= 3) {
+            System.arraycopy(direction, 0, sunDirection, 0, 3);
+        }
+    }
+
+    private static float sunShadowStrength() {
+        return clampPercent(intProperty("vulkanmod112.sunShadows", 0)) ;
+    }
+
+    /**
+     * Whether this frame may trace shadows at all.
+     *
+     * Every term is a thing that can be absent on a real machine: the card may
+     * not trace, the structures may not have been built yet, the sun may be
+     * down. A missing one costs the shadow and nothing else.
+     */
+    private boolean sunShadowsActive() {
+        return rayTracing != null
+                && ctx.isRayQuerySupported()
+                && rayTracing.topLevel() != 0
+                && sunShadowStrength() > 0.0f
+                && sunDirection[1] > 0.05f;
     }
 
     /** The wave lattice from terrain.frag, which this side has to agree with. */
@@ -4475,8 +4593,23 @@ final class VkTerrainRenderer {
     }
 
     private void createPipeline(MemoryStack stack) {
+        createPipelineSet(stack, false);
+        if (ctx.isRayTracingEnabled() && ctx.isRayQuerySupported()) {
+            // A second set of exactly the same pipelines, differing only in
+            // which build of the fragment shader they carry. Two sets rather
+            // than one with a switch inside: the tracing build names an
+            // acceleration structure, which is a capability the driver either
+            // has or refuses the pipeline for — and this renderer has to keep
+            // working on the cards that refuse.
+            createPipelineSet(stack, true);
+        }
+    }
+
+    private void createPipelineSet(MemoryStack stack, boolean rayQuery) {
         long vertModule = createShaderModule(stack, "vulkanmod112/shaders/terrain.vert.spv");
-        long fragModule = createShaderModule(stack, "vulkanmod112/shaders/terrain.frag.spv");
+        long fragModule = createShaderModule(stack, rayQuery
+                ? "vulkanmod112/shaders/terrain_rt.frag.spv"
+                : "vulkanmod112/shaders/terrain.frag.spv");
 
         ByteBuffer entryPoint = stack.UTF8("main");
 
@@ -4539,13 +4672,16 @@ final class VkTerrainRenderer {
                 // buffer; this used to be 112 of the 128 bytes Vulkan
                 // guarantees, which left nothing to grow into.
                 .size(16);
-        VkPipelineLayoutCreateInfo layoutInfo = VkPipelineLayoutCreateInfo.calloc(stack)
-                .sType(VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO)
-                .pSetLayouts(stack.longs(descriptorSetLayout))
-                .pPushConstantRanges(pushRange);
-        LongBuffer pLayout = stack.mallocLong(1);
-        check(vkCreatePipelineLayout(device(), layoutInfo, null, pLayout), "vkCreatePipelineLayout(terrain)");
-        pipelineLayout = pLayout.get(0);
+        if (pipelineLayout == 0) {
+            VkPipelineLayoutCreateInfo layoutInfo = VkPipelineLayoutCreateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO)
+                    .pSetLayouts(stack.longs(descriptorSetLayout))
+                    .pPushConstantRanges(pushRange);
+            LongBuffer pLayout = stack.mallocLong(1);
+            check(vkCreatePipelineLayout(device(), layoutInfo, null, pLayout),
+                    "vkCreatePipelineLayout(terrain)");
+            pipelineLayout = pLayout.get(0);
+        }
 
         // ALPHA_TEST (constant_id 0) off for SOLID, on for the CUTOUT layers.
         // Booleans travel as a 32-bit value, like VkBool32.
@@ -4630,7 +4766,11 @@ final class VkTerrainRenderer {
         check(vkCreateGraphicsPipelines(device(), pipelineCacheHandle, pipelineInfo, null,
                 pPipeline), "vkCreateGraphicsPipelines(terrain)");
         for (int variant = 0; variant < TERRAIN_PIPELINES.length; variant++) {
-            pipelines[variant] = pPipeline.get(variant);
+            if (rayQuery) {
+                tracingPipelines[variant] = pPipeline.get(variant);
+            } else {
+                pipelines[variant] = pPipeline.get(variant);
+            }
         }
 
         vkDestroyShaderModule(device(), vertModule, null);
@@ -6229,6 +6369,10 @@ final class VkTerrainRenderer {
             if (pipelines[i] != 0) {
                 vkDestroyPipeline(device(), pipelines[i], null);
                 pipelines[i] = 0;
+            }
+            if (tracingPipelines[i] != 0) {
+                vkDestroyPipeline(device(), tracingPipelines[i], null);
+                tracingPipelines[i] = 0;
             }
         }
         // Saved here rather than at exit: the device is still alive, and this

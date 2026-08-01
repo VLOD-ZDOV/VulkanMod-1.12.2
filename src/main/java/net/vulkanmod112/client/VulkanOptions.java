@@ -1327,6 +1327,31 @@ final class VulkanOptions {
                                         VulkanConfig.setFramesInFlight(value);
                                     }
                                 }),
+                        new VRangeOption("Ray Traced Sun Shadows",
+                                "Shadows cast by the world onto itself, traced against the terrain "
+                                        + "rather than guessed from the screen. Needs Terrain "
+                                        + "Acceleration Structures on and a card that can trace "
+                                        + "from a shader; without either it does nothing and says "
+                                        + "so in the diagnostics report. The shadow lowers how "
+                                        + "much sky light a surface receives instead of darkening "
+                                        + "the finished picture — that is how this game shades, "
+                                        + "and it is why a cave lit by a torch is left alone and "
+                                        + "why night changes nothing. Creatures do not cast one "
+                                        + "yet: the mod does not own them.",
+                                Cost.of(Level.NONE, Level.HIGH, Level.NONE),
+                                "Needs Terrain Acceleration Structures.",
+                                0, 100, 5, "%", "OFF",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getSunShadows();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setSunShadows(value);
+                                    }
+                                }),
                         new VSwitchOption("Entity Capture",
                                 "Read what the game draws for every creature and draw none of it. "
                                         + "The first step of moving entities into Vulkan, and it "

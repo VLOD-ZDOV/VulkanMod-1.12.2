@@ -204,20 +204,76 @@ tasks.register('compileShaders') {
                             'Vulkan SDK) and these shaders changed since their SPIR-V was built: ' +
                             stale.collect { it.name }.join(', '))
         }
-        sources.each { source ->
-            def spv = new File(source.parentFile, "${source.name}.spv")
-            if (spv.exists() && spv.lastModified() >= source.lastModified()) {
-                return
+        // A second build of the same source, with ray query switched on.
+        //
+        // It has to be a second module and cannot be a switch inside one: a
+        // SPIR-V module that names an acceleration structure asks for a
+        // capability the driver either has or refuses the pipeline for, so a
+        // card without ray query must never be handed this variant at all. The
+        // source is one file either way — the define is inserted after the
+        // version line into a copy, so there is no second shader to keep in
+        // step with the first.
+        def rayQueryVariants = ['terrain.frag']
+        def build = { File source, File spv, boolean rayQuery ->
+            def input = source
+            if (rayQuery) {
+                // Two edits to a copy: the define that switches the tracing
+                // code on, and the language version. Ray query is specified
+                // against GLSL 4.60 and the compiler will not take it below
+                // that; the ordinary build stays where it was, so nothing
+                // about the shader every card runs changes here.
+                def text = source.text
+                def marker = text.indexOf('\n', text.indexOf('#version'))
+                input = new File(temporaryDir, source.name)
+                input.parentFile.mkdirs()
+                input.text = '#version 460\n#define RAY_QUERY 1\n' + text.substring(marker + 1)
             }
-            def cmd = compiler == 'glslc'
-                    ? [compiler, '-O', '--target-env=vulkan1.1', source.absolutePath, '-o', spv.absolutePath]
-                    : [compiler, '-V', '--target-env', 'vulkan1.1', source.absolutePath, '-o', spv.absolutePath]
+            // Ray query needs SPIR-V 1.4, and that needs a 1.2 target. The
+            // ordinary variants stay on 1.1 so nothing about them changes for
+            // a driver that has only that.
+            def env = rayQuery ? 'vulkan1.2' : 'vulkan1.1'
+            // Assembled by hand into a list of strings: a Groovy list built
+            // by concatenation carries GString elements, and ProcessBuilder
+            // takes only String.
+            def cmd = new ArrayList<String>()
+            cmd.add(compiler)
+            if (compiler == 'glslc') {
+                cmd.add('-O')
+                cmd.add('--target-env=' + env)
+                if (rayQuery) {
+                    cmd.add('--target-spv=spv1.4')
+                }
+            } else {
+                cmd.add('-V')
+                cmd.add('--target-env')
+                cmd.add(env)
+                if (rayQuery) {
+                    cmd.add('--target-spv')
+                    cmd.add('spv1.4')
+                }
+            }
+            cmd.add(input.absolutePath)
+            cmd.add('-o')
+            cmd.add(spv.absolutePath)
             def process = new ProcessBuilder(cmd).redirectErrorStream(true).start()
             def output = process.inputStream.text
             if (process.waitFor() != 0) {
-                throw new GradleException("Compiling ${source.name} failed:\n${output}")
+                throw new GradleException("Compiling ${spv.name} failed:\n${output}")
             }
-            logger.lifecycle "Compiled shader ${source.name}"
+            logger.lifecycle "Compiled shader ${spv.name}"
+        }
+        sources.each { source ->
+            def spv = new File(source.parentFile, "${source.name}.spv")
+            if (!spv.exists() || spv.lastModified() < source.lastModified()) {
+                build(source, spv, false)
+            }
+            if (rayQueryVariants.contains(source.name)) {
+                def rtName = source.name.replaceFirst(/\.(vert|frag|comp)$/, '_rt.$1')
+                def rtSpv = new File(source.parentFile, "${rtName}.spv")
+                if (!rtSpv.exists() || rtSpv.lastModified() < source.lastModified()) {
+                    build(source, rtSpv, true)
+                }
+            }
         }
     }
 }
