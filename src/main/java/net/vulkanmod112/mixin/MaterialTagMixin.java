@@ -71,7 +71,7 @@ public abstract class MaterialTagMixin {
     @Inject(method = "rebuildChunk", at = @At("HEAD"))
     private void vulkanmod112$beginRebuild(float x, float y, float z,
                                            ChunkCompileTaskGenerator generator, CallbackInfo ci) {
-        ChunkBuildStats.begin();
+        ChunkBuildStats.begin(x, y, z);
     }
 
     @Inject(method = "rebuildChunk", at = @At("RETURN"))

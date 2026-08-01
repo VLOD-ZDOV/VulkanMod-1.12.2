@@ -382,10 +382,53 @@ final class VkTerrainRenderer {
 
     // Atlas / lightmap
     private long atlasImage;
-    private long atlasStagingBuffer;
-    private long atlasStagingMemory;
-    private long atlasStagingMapped;
-    private long atlasStagingCapacity;
+    /**
+     * One staging buffer per frame in flight, because the frame that copies out
+     * of it is still running when the next tick wants to write.
+     *
+     * This used to be one buffer, filled and copied inside a submission of its
+     * own that the render thread then waited on with vkWaitForFences. Every tick
+     * in which any atlas sprite animates — lava, water, fire, a portal, which is
+     * to say nearly every scene — the thread drawing the frame stopped until the
+     * card had finished the copy. Twenty times a second, before anything else in
+     * the frame could happen.
+     *
+     * Nothing waits now. The pixels are converted where they arrive, into
+     * ordinary memory, and the copy is recorded into the frame's own command
+     * buffer alongside the lightmap's — where ordering against the shaders that
+     * read the atlas is a pipeline barrier rather than a stalled processor.
+     */
+    private long[] atlasStagingBuffer;
+    private long[] atlasStagingMemory;
+    private long[] atlasStagingMapped;
+    private long[] atlasStagingCapacity;
+
+    /**
+     * Pixels waiting for a frame to carry them, already in the image's byte
+     * order, plus the regions they belong to.
+     *
+     * More than one tick can arrive between two frames, and the second one does
+     * not replace the first: two ticks touch different sprites, and dropping
+     * either freezes an animation. So they accumulate, and the frame records
+     * them in the order they came — where two ticks did touch the same sprite,
+     * the later copy lands last, which is the right answer.
+     */
+    private java.nio.ByteBuffer atlasPendingPixels;
+    private int atlasPendingBytes;
+    private int[] atlasPendingHeader = new int[6 * 128];
+    private int atlasPendingHeaderCount;
+    /**
+     * The most that may pile up before the oldest is thrown away.
+     *
+     * Reached only when ticks keep coming and frames do not — the window losing
+     * focus, a long stall elsewhere. An animation frame missed while nothing is
+     * being drawn cannot be seen, and unbounded growth here would be a leak that
+     * only shows up on the machine that was already in trouble.
+     */
+    private static final int ATLAS_PENDING_MAX_BYTES = 8 << 20;
+    private long atlasTicksQueued;
+    private long atlasFramesCarried;
+    private long atlasPendingDropped;
     private long atlasMemory;
     private long atlasView;
     private int atlasWidth;
@@ -1037,108 +1080,144 @@ final class VkTerrainRenderer {
         if (atlasImage == 0 || headerCount == 0 || pixelCount == 0) {
             return;
         }
-        long bytes = (long) pixelCount * 4L;
-        try (MemoryStack stack = stackPush()) {
-            if (!ensureAtlasStaging(stack, bytes)) {
-                return;
-            }
-            // The game's pixels are 0xAARRGGBB in an int; the image wants the
-            // bytes in the order red, green, blue, alpha. Written straight into
-            // mapped memory rather than through a ByteBuffer view, because this
-            // runs every tick and the conversion is the whole cost.
-            long dst = atlasStagingMapped;
-            for (int i = 0; i < pixelCount; i++) {
-                int argb = pixels[i];
-                MemoryUtil.memPutByte(dst++, (byte) (argb >> 16));
-                MemoryUtil.memPutByte(dst++, (byte) (argb >> 8));
-                MemoryUtil.memPutByte(dst++, (byte) argb);
-                MemoryUtil.memPutByte(dst++, (byte) (argb >>> 24));
-            }
-
-            int regions = headerCount / 6;
-            VkCommandBufferAllocateInfo allocInfo = VkCommandBufferAllocateInfo.calloc(stack)
-                    .sType(VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO)
-                    .commandPool(commandPool)
-                    .level(VK_COMMAND_BUFFER_LEVEL_PRIMARY)
-                    .commandBufferCount(1);
-            PointerBuffer pBuffer = stack.mallocPointer(1);
-            check(vkAllocateCommandBuffers(device(), allocInfo, pBuffer),
-                    "vkAllocateCommandBuffers(atlas regions)");
-            VkCommandBuffer cmd = new VkCommandBuffer(pBuffer.get(0), device());
-            VkCommandBufferBeginInfo begin = VkCommandBufferBeginInfo.calloc(stack)
-                    .sType(VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO)
-                    .flags(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
-            check(vkBeginCommandBuffer(cmd, begin), "vkBeginCommandBuffer(atlas regions)");
-
-            VkImageMemoryBarrier.Buffer barrier = VkImageMemoryBarrier.calloc(1, stack)
-                    .sType(VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER)
-                    .srcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-                    .dstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-                    .image(atlasImage)
-                    .srcAccessMask(VK_ACCESS_SHADER_READ_BIT)
-                    .dstAccessMask(VK_ACCESS_TRANSFER_WRITE_BIT)
-                    .oldLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
-                    .newLayout(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-            barrier.get(0).subresourceRange()
-                    .aspectMask(VK_IMAGE_ASPECT_COLOR_BIT)
-                    .baseMipLevel(0).levelCount(VK_REMAINING_MIP_LEVELS)
-                    .baseArrayLayer(0).layerCount(1);
-            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                    VK_PIPELINE_STAGE_TRANSFER_BIT, 0, null, null, barrier);
-
-            VkBufferImageCopy.Buffer copy = VkBufferImageCopy.calloc(regions, stack);
-            for (int r = 0; r < regions; r++) {
-                int base = r * 6;
-                final int level = header[base];
-                final int x = header[base + 1];
-                final int y = header[base + 2];
-                final int w = header[base + 3];
-                final int h = header[base + 4];
-                copy.get(r)
-                        .bufferOffset((long) header[base + 5] * 4L)
-                        .bufferRowLength(0)
-                        .bufferImageHeight(0)
-                        .imageOffset(o -> o.x(x).y(y).z(0))
-                        .imageExtent(e -> e.width(w).height(h).depth(1));
-                copy.get(r).imageSubresource()
-                        .aspectMask(VK_IMAGE_ASPECT_COLOR_BIT)
-                        .mipLevel(level).baseArrayLayer(0).layerCount(1);
-            }
-            vkCmdCopyBufferToImage(cmd, atlasStagingBuffer, atlasImage,
-                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, copy);
-
-            barrier.get(0)
-                    .srcAccessMask(VK_ACCESS_TRANSFER_WRITE_BIT)
-                    .dstAccessMask(VK_ACCESS_SHADER_READ_BIT)
-                    .oldLayout(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
-                    .newLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                    VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, null, null, barrier);
-            check(vkEndCommandBuffer(cmd), "vkEndCommandBuffer(atlas regions)");
-
-            VkFenceCreateInfo fenceInfo = VkFenceCreateInfo.calloc(stack)
-                    .sType(VK_STRUCTURE_TYPE_FENCE_CREATE_INFO);
-            LongBuffer pFence = stack.mallocLong(1);
-            check(vkCreateFence(device(), fenceInfo, null, pFence), "vkCreateFence(atlas regions)");
-            long fence = pFence.get(0);
-            VkSubmitInfo submit = VkSubmitInfo.calloc(stack)
-                    .sType(VK_STRUCTURE_TYPE_SUBMIT_INFO)
-                    .pCommandBuffers(stack.pointers(cmd));
-            check(vkQueueSubmit(ctx.getGraphicsQueue(), submit, fence),
-                    "vkQueueSubmit(atlas regions)");
-            check(vkWaitForFences(device(), fence, true, 5_000_000_000L),
-                    "vkWaitForFences(atlas regions)");
-            vkDestroyFence(device(), fence, null);
-            vkFreeCommandBuffers(device(), commandPool, cmd);
+        int bytes = pixelCount * 4;
+        if (atlasPendingBytes + bytes > ATLAS_PENDING_MAX_BYTES) {
+            // Frames have stopped coming. Start again from this tick rather than
+            // growing without limit; what is thrown away is animation nobody is
+            // looking at.
+            atlasPendingBytes = 0;
+            atlasPendingHeaderCount = 0;
+            atlasPendingDropped++;
         }
+        ensurePendingCapacity(atlasPendingBytes + bytes);
+        if (atlasPendingHeaderCount + headerCount > atlasPendingHeader.length) {
+            atlasPendingHeader = java.util.Arrays.copyOf(atlasPendingHeader,
+                    Math.max(atlasPendingHeaderCount + headerCount, atlasPendingHeader.length * 2));
+        }
+        // The game's pixels are 0xAARRGGBB in an int; the image wants the bytes
+        // in the order red, green, blue, alpha. Written straight into the
+        // scratch rather than through a ByteBuffer view, because this runs every
+        // tick and the conversion is the whole cost.
+        long dst = MemoryUtil.memAddress(atlasPendingPixels) + atlasPendingBytes;
+        for (int i = 0; i < pixelCount; i++) {
+            int argb = pixels[i];
+            MemoryUtil.memPutByte(dst++, (byte) (argb >> 16));
+            MemoryUtil.memPutByte(dst++, (byte) (argb >> 8));
+            MemoryUtil.memPutByte(dst++, (byte) argb);
+            MemoryUtil.memPutByte(dst++, (byte) (argb >>> 24));
+        }
+        // The offsets in the header count pixels from the start of this tick's
+        // array; they have to count from the start of everything waiting.
+        int pixelsAlready = atlasPendingBytes / 4;
+        for (int i = 0; i < headerCount; i += 6) {
+            System.arraycopy(header, i, atlasPendingHeader, atlasPendingHeaderCount + i, 5);
+            atlasPendingHeader[atlasPendingHeaderCount + i + 5] = header[i + 5] + pixelsAlready;
+        }
+        atlasPendingHeaderCount += headerCount;
+        atlasPendingBytes += bytes;
+        atlasTicksQueued++;
     }
 
-    /** Host-visible staging for the frames of one tick; grows and stays. */
-    private boolean ensureAtlasStaging(MemoryStack stack, long bytes) {
-        if (atlasStagingBuffer != 0 && bytes <= atlasStagingCapacity) {
+    private void ensurePendingCapacity(int bytes) {
+        if (atlasPendingPixels != null && atlasPendingPixels.capacity() >= bytes) {
+            return;
+        }
+        int want = Math.max(bytes, atlasPendingPixels == null
+                ? 1 << 20 : atlasPendingPixels.capacity() * 2);
+        java.nio.ByteBuffer grown = MemoryUtil.memAlloc(want);
+        if (atlasPendingPixels != null) {
+            MemoryUtil.memCopy(MemoryUtil.memAddress(atlasPendingPixels),
+                    MemoryUtil.memAddress(grown), atlasPendingBytes);
+            MemoryUtil.memFree(atlasPendingPixels);
+        }
+        atlasPendingPixels = grown;
+    }
+
+    /**
+     * Puts whatever the ticks have piled up into this frame's command buffer.
+     *
+     * Called where the lightmap's upload is called, and for the same reason:
+     * inside one command buffer, a barrier is enough to order a copy against the
+     * shaders that read what it wrote, and nothing on the processor has to wait
+     * to find that out.
+     */
+    private void recordAtlasUpload(MemoryStack stack) {
+        if (atlasPendingBytes == 0 || atlasImage == 0) {
+            return;
+        }
+        int slot = activeFrameSlot;
+        if (!ensureAtlasStaging(stack, slot, atlasPendingBytes)) {
+            // No staging, no upload. The pixels stay pending rather than being
+            // thrown away: the next frame may well find the memory.
+            return;
+        }
+        MemoryUtil.memCopy(MemoryUtil.memAddress(atlasPendingPixels),
+                atlasStagingMapped[slot], atlasPendingBytes);
+
+        VkImageMemoryBarrier.Buffer barrier = VkImageMemoryBarrier.calloc(1, stack)
+                .sType(VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER)
+                .srcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+                .dstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+                .image(atlasImage)
+                .srcAccessMask(VK_ACCESS_SHADER_READ_BIT)
+                .dstAccessMask(VK_ACCESS_TRANSFER_WRITE_BIT)
+                .oldLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+                .newLayout(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+        barrier.get(0).subresourceRange()
+                .aspectMask(VK_IMAGE_ASPECT_COLOR_BIT)
+                .baseMipLevel(0).levelCount(VK_REMAINING_MIP_LEVELS)
+                .baseArrayLayer(0).layerCount(1);
+        vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                VK_PIPELINE_STAGE_TRANSFER_BIT, 0, null, null, barrier);
+
+        int regions = atlasPendingHeaderCount / 6;
+        VkBufferImageCopy.Buffer copy = VkBufferImageCopy.calloc(regions, stack);
+        for (int r = 0; r < regions; r++) {
+            int base = r * 6;
+            final int level = atlasPendingHeader[base];
+            final int x = atlasPendingHeader[base + 1];
+            final int y = atlasPendingHeader[base + 2];
+            final int w = atlasPendingHeader[base + 3];
+            final int h = atlasPendingHeader[base + 4];
+            copy.get(r)
+                    .bufferOffset((long) atlasPendingHeader[base + 5] * 4L)
+                    .bufferRowLength(0)
+                    .bufferImageHeight(0)
+                    .imageOffset(o -> o.x(x).y(y).z(0))
+                    .imageExtent(e -> e.width(w).height(h).depth(1));
+            copy.get(r).imageSubresource()
+                    .aspectMask(VK_IMAGE_ASPECT_COLOR_BIT)
+                    .mipLevel(level).baseArrayLayer(0).layerCount(1);
+        }
+        vkCmdCopyBufferToImage(commandBuffer, atlasStagingBuffer[slot], atlasImage,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, copy);
+
+        barrier.get(0)
+                .srcAccessMask(VK_ACCESS_TRANSFER_WRITE_BIT)
+                .dstAccessMask(VK_ACCESS_SHADER_READ_BIT)
+                .oldLayout(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
+                .newLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, null, null, barrier);
+
+        atlasPendingBytes = 0;
+        atlasPendingHeaderCount = 0;
+        atlasFramesCarried++;
+    }
+
+    private boolean ensureAtlasStaging(MemoryStack stack, int slot, long bytes) {
+        if (atlasStagingBuffer == null) {
+            atlasStagingBuffer = new long[framesInFlight];
+            atlasStagingMemory = new long[framesInFlight];
+            atlasStagingMapped = new long[framesInFlight];
+            atlasStagingCapacity = new long[framesInFlight];
+        }
+        if (atlasStagingBuffer[slot] != 0 && bytes <= atlasStagingCapacity[slot]) {
             return true;
         }
-        destroyAtlasStaging();
+        // Only this slot's buffer, and only when this slot's fence has already
+        // been waited on — which is true wherever this is called from.
+        destroyAtlasStaging(slot);
         VkBufferCreateInfo info = VkBufferCreateInfo.calloc(stack)
                 .sType(VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO)
                 .size(bytes)
@@ -1148,9 +1227,9 @@ final class VkTerrainRenderer {
         if (vkCreateBuffer(device(), info, null, pBuffer) != VK_SUCCESS) {
             return false;
         }
-        atlasStagingBuffer = pBuffer.get(0);
+        atlasStagingBuffer[slot] = pBuffer.get(0);
         VkMemoryRequirements req = VkMemoryRequirements.malloc(stack);
-        vkGetBufferMemoryRequirements(device(), atlasStagingBuffer, req);
+        vkGetBufferMemoryRequirements(device(), atlasStagingBuffer[slot], req);
         VkMemoryAllocateInfo alloc = VkMemoryAllocateInfo.calloc(stack)
                 .sType(VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO)
                 .allocationSize(req.size())
@@ -1158,33 +1237,50 @@ final class VkTerrainRenderer {
                         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT));
         LongBuffer pMemory = stack.mallocLong(1);
         if (vkAllocateMemory(device(), alloc, null, pMemory) != VK_SUCCESS) {
-            vkDestroyBuffer(device(), atlasStagingBuffer, null);
-            atlasStagingBuffer = 0;
+            vkDestroyBuffer(device(), atlasStagingBuffer[slot], null);
+            atlasStagingBuffer[slot] = 0;
             return false;
         }
-        atlasStagingMemory = pMemory.get(0);
-        check(vkBindBufferMemory(device(), atlasStagingBuffer, atlasStagingMemory, 0),
+        atlasStagingMemory[slot] = pMemory.get(0);
+        check(vkBindBufferMemory(device(), atlasStagingBuffer[slot], atlasStagingMemory[slot], 0),
                 "vkBindBufferMemory(atlas staging)");
         PointerBuffer pMapped = stack.mallocPointer(1);
-        check(vkMapMemory(device(), atlasStagingMemory, 0, req.size(), 0, pMapped),
+        check(vkMapMemory(device(), atlasStagingMemory[slot], 0, req.size(), 0, pMapped),
                 "vkMapMemory(atlas staging)");
-        atlasStagingMapped = pMapped.get(0);
-        atlasStagingCapacity = bytes;
+        atlasStagingMapped[slot] = pMapped.get(0);
+        atlasStagingCapacity[slot] = bytes;
         return true;
     }
 
+    private void destroyAtlasStaging(int slot) {
+        if (atlasStagingBuffer == null) {
+            return;
+        }
+        if (atlasStagingMemory[slot] != 0) {
+            vkUnmapMemory(device(), atlasStagingMemory[slot]);
+            vkFreeMemory(device(), atlasStagingMemory[slot], null);
+            atlasStagingMemory[slot] = 0;
+        }
+        if (atlasStagingBuffer[slot] != 0) {
+            vkDestroyBuffer(device(), atlasStagingBuffer[slot], null);
+            atlasStagingBuffer[slot] = 0;
+        }
+        atlasStagingMapped[slot] = 0;
+        atlasStagingCapacity[slot] = 0;
+    }
+
     private void destroyAtlasStaging() {
-        if (atlasStagingMemory != 0) {
-            vkUnmapMemory(device(), atlasStagingMemory);
-            vkFreeMemory(device(), atlasStagingMemory, null);
-            atlasStagingMemory = 0;
+        if (atlasStagingBuffer != null) {
+            for (int i = 0; i < atlasStagingBuffer.length; i++) {
+                destroyAtlasStaging(i);
+            }
         }
-        if (atlasStagingBuffer != 0) {
-            vkDestroyBuffer(device(), atlasStagingBuffer, null);
-            atlasStagingBuffer = 0;
+        if (atlasPendingPixels != null) {
+            MemoryUtil.memFree(atlasPendingPixels);
+            atlasPendingPixels = null;
         }
-        atlasStagingMapped = 0;
-        atlasStagingCapacity = 0;
+        atlasPendingBytes = 0;
+        atlasPendingHeaderCount = 0;
     }
 
     synchronized void updateAtlas(int atlasGlId) {
@@ -1333,10 +1429,115 @@ final class VkTerrainRenderer {
             rememberFrame();
             submitCompositeNanos += System.nanoTime() - t1;
             frameCounter++;
+            notePacing();
             logFrameDiagnostics();
             logFrameTimings();
         }
         return true;
+    }
+
+    /**
+     * How long each frame actually took, so that a stutter stops being a word.
+     *
+     * The averages printed elsewhere cannot show this. A frame that takes forty
+     * milliseconds once a second is invisible in a mean over three hundred
+     * frames and is the single thing a player calls a lag. What is kept here is
+     * the distribution — the middle, the worst one in twenty, the worst one at
+     * all — and, for the worst frame, where its time went.
+     *
+     * The clock is read at the end of our own work, so the gap between two
+     * readings is the whole frame including everything the game does that this
+     * renderer has no part in. That is deliberate: a stall in vanilla's chunk
+     * queue and a stall in our upload both show up, and telling them apart is
+     * exactly what the breakdown beside the worst frame is for.
+     */
+    private final long[] frameGaps = new long[1024];
+    private int frameGapAt;
+    private int frameGapCount;
+    private long lastFrameEndNanos;
+    private long previousFenceWaitNanos;
+    private long previousRecordNanos;
+    private long previousSubmitNanos;
+    private long worstGapNanos;
+    private long worstGapFrame;
+    private long worstGapFence;
+    private long worstGapRecord;
+    private long worstGapSubmit;
+
+    private void notePacing() {
+        long end = System.nanoTime();
+        long fence = fenceWaitNanos - previousFenceWaitNanos;
+        long record = recordNanos - previousRecordNanos;
+        long submit = submitCompositeNanos - previousSubmitNanos;
+        previousFenceWaitNanos = fenceWaitNanos;
+        previousRecordNanos = recordNanos;
+        previousSubmitNanos = submitCompositeNanos;
+        if (lastFrameEndNanos != 0L) {
+            long gap = end - lastFrameEndNanos;
+            frameGaps[frameGapAt] = gap;
+            frameGapAt = (frameGapAt + 1) % frameGaps.length;
+            if (frameGapCount < frameGaps.length) {
+                frameGapCount++;
+            }
+            if (gap > worstGapNanos) {
+                worstGapNanos = gap;
+                worstGapFrame = frameCounter;
+                worstGapFence = fence;
+                worstGapRecord = record;
+                worstGapSubmit = submit;
+            }
+        }
+        lastFrameEndNanos = end;
+    }
+
+    /**
+     * The pacing line, and it resets itself: every number here describes the
+     * interval since the last report, not the session. A worst frame from ten
+     * minutes ago answers nothing about what is happening now.
+     */
+    private void appendPacing(StringBuilder sb) {
+        if (frameGapCount < 8) {
+            sb.append("  frame pacing: not enough frames yet\n");
+            return;
+        }
+        long[] sorted = new long[frameGapCount];
+        System.arraycopy(frameGaps, 0, sorted, 0, frameGapCount);
+        java.util.Arrays.sort(sorted);
+        long median = sorted[frameGapCount / 2];
+        // The worst one in twenty and the worst one in a hundred. Named from the
+        // player's side — a "1% low" is the frame rate at the moment it feels
+        // worst — rather than as a percentile of a time.
+        long p95 = sorted[(int) (frameGapCount * 0.95)];
+        long p99 = sorted[Math.min(frameGapCount - 1, (int) (frameGapCount * 0.99))];
+        int overThreshold = 0;
+        long threshold = median * 3;
+        for (int i = frameGapCount - 1; i >= 0 && sorted[i] > threshold; i--) {
+            overThreshold++;
+        }
+        sb.append(String.format(
+                "  frame pacing: median %.1f ms (%.0f fps), 5%% low %.1f ms (%.0f fps), "
+                        + "1%% low %.1f ms (%.0f fps)\n",
+                median / 1e6, 1e9 / Math.max(1, median),
+                p95 / 1e6, 1e9 / Math.max(1, p95),
+                p99 / 1e6, 1e9 / Math.max(1, p99)));
+        sb.append(String.format(
+                "    worst frame %.1f ms at frame %d (of it: fence wait %.2f, record %.2f, "
+                        + "submit+composite %.2f); %d frames over three times the median\n",
+                worstGapNanos / 1e6, worstGapFrame, worstGapFence / 1e6,
+                worstGapRecord / 1e6, worstGapSubmit / 1e6, overThreshold));
+        // What is left when our three numbers are taken off the worst frame is
+        // everything else in it — the game's own work, the driver, the operating
+        // system. Printed as one number because it is one question: was the
+        // worst frame ours at all?
+        long ours = worstGapFence + worstGapRecord + worstGapSubmit;
+        sb.append(String.format("    of that worst frame, %.0f%% was this renderer\n",
+                100.0 * ours / Math.max(1, worstGapNanos)));
+        frameGapCount = 0;
+        frameGapAt = 0;
+        worstGapNanos = 0;
+        worstGapFence = 0;
+        worstGapRecord = 0;
+        worstGapSubmit = 0;
     }
 
     private void logFrameTimings() {
@@ -1475,6 +1676,14 @@ final class VkTerrainRenderer {
         // Whether the pass ran, and not only whether it was asked for: it turns
         // itself off when nothing is traced, and "on but doing nothing" and "on
         // and working" look identical in the settings screen.
+        appendPacing(sb);
+        sb.append("  atlas animation: ").append(atlasTicksQueued).append(" ticks queued, ")
+                .append(atlasFramesCarried).append(" frames carried them")
+                .append(atlasPendingBytes > 0
+                        ? ", " + (atlasPendingBytes / 1024) + " KiB waiting" : "")
+                .append(atlasPendingDropped > 0
+                        ? ", " + atlasPendingDropped + " backlogs dropped" : "")
+                .append(" (no fence wait on the render thread)\n");
         sb.append("  frame accumulation: ");
         if (accumFailed) {
             sb.append("off for this session (see the main log)");
@@ -1648,6 +1857,7 @@ final class VkTerrainRenderer {
                         queryPool, slot * 2);
             }
 
+            recordAtlasUpload(stack);
             if (lightmapDirty) {
                 recordLightmapUpload(stack);
             }
