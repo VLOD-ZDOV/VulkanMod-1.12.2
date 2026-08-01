@@ -84,11 +84,24 @@ public final class SessionLog {
             Diagnostics.flushNow("command " + message + " | " + cameraLine());
         }
 
+        /**
+         * The one place per frame where the chat window is certainly there and
+         * certainly not being drawn. The renderer cannot say anything from
+         * inside the frame that failed.
+         */
+        @SubscribeEvent
+        public void onClientTick(net.minecraftforge.fml.common.gameevent.TickEvent.ClientTickEvent event) {
+            if (event.phase == net.minecraftforge.fml.common.gameevent.TickEvent.Phase.END) {
+                RenderNotice.flushToChat();
+            }
+        }
+
         @SubscribeEvent
         public void onWorldLoad(WorldEvent.Load event) {
             if (event.getWorld() == null || !event.getWorld().isRemote) {
                 return;
             }
+            RenderNotice.reset();
             Diagnostics.flushNow("world loaded, dimension " + event.getWorld().provider.getDimension()
                     + ", render distance " + Minecraft.getMinecraft().gameSettings.renderDistanceChunks);
         }

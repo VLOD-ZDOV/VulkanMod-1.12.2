@@ -11,33 +11,99 @@ import net.minecraft.client.settings.GameSettings;
  * That is why the rows are buttons rather than a selector — a selector would
  * keep claiming a preset is active after it stopped being true.
  *
- * Only the vanilla settings that cost real frames are touched, and each one is
- * saved through GameSettings so the game reacts the way it does on its own
- * options screen.
+ * Every preset writes the whole set of values it owns, never a subset. That
+ * sounds like bookkeeping and is the difference between a preset and a trap:
+ * one that only sets what it wants to lower cannot undo the one applied before
+ * it, so going back up the list left the world looking like the heaviest preset
+ * anyone had tried that session, with no row on the screen admitting it. The
+ * lists below are therefore deliberately repetitive.
+ *
+ * Render distance is the one exception, and it is capped rather than set: no
+ * preset here raises a distance the player chose, because that is the setting
+ * where a surprise costs frames rather than looks.
  */
 public final class VulkanPresets {
 
     private VulkanPresets() {
     }
 
-    /** Everything back to the shipped values; vanilla settings untouched. */
+    /**
+     * The complete set of what a preset decides. Named fields rather than a row
+     * of arguments, because fifteen numbers in a row is how the wrong two end up
+     * swapped.
+     */
+    private static final class Look {
+        int entityDistance;
+        int tileEntityDistance;
+        int backgroundFps;
+        boolean animations;
+        boolean flatBlockColours;
+        int framesInFlight;
+        int chunkBuildThreads = -1;   // -1 leaves the setting alone
+
+        int particles;
+        boolean fancy;
+        int ambientOcclusion;
+        int clouds;
+        boolean entityShadows;
+        int mipmap;
+        int renderDistanceCap;
+        int fpsLimit;
+        boolean vsync;
+    }
+
+    /** Everything this mod owns back to the shipped values; vanilla untouched. */
     public static void stable() {
         VulkanConfig.resetToDefaults();
     }
 
     /** Caps the draw distances that vanilla leaves far wider than anyone can see. */
     public static void balanced(Minecraft mc) {
-        VulkanConfig.setTerrainEnabled(true);
-        VulkanConfig.setEntityDistance(128);
-        VulkanConfig.setTileEntityDistance(64);
-        VulkanConfig.setBackgroundFpsLimit(10);
-        VulkanConfig.setAnimationsEnabled(true);
-        VulkanConfig.setDepthBlitEnabled(true);
-        VulkanConfig.setCullingEnabled(true);
-        VulkanConfig.setFramesInFlight(2);
-        VulkanConfig.setGeometryBudgetMiB(0);
-        mc.gameSettings.particleSetting = 1;
-        mc.gameSettings.saveOptions();
+        Look look = new Look();
+        look.entityDistance = 128;
+        look.tileEntityDistance = 64;
+        look.backgroundFps = 10;
+        look.animations = true;
+        look.flatBlockColours = false;
+        look.framesInFlight = 2;
+        look.particles = 1;
+        look.fancy = true;
+        look.ambientOcclusion = 2;
+        look.clouds = 2;
+        look.entityShadows = true;
+        look.mipmap = 4;
+        look.renderDistanceCap = 32;
+        look.fpsLimit = 260;
+        look.vsync = false;
+        apply(mc, look);
+    }
+
+    /** Trades looks for frames: shorter distances, no animation, fewer particles. */
+    public static void performance(Minecraft mc) {
+        Look look = new Look();
+        look.entityDistance = 64;
+        look.tileEntityDistance = 32;
+        look.backgroundFps = 5;
+        look.animations = false;
+        look.flatBlockColours = false;
+        // A third frame in flight gives the processor more room when it is the
+        // thing holding the frame up, which is what this preset assumes.
+        look.framesInFlight = 3;
+        // Chunk building is what the frame waits for at long render distances,
+        // and vanilla sizes that thread pool from the heap rather than from the
+        // processor. A preset named for performance is the right place to take
+        // the core count seriously; the shipped default still leaves it alone.
+        look.chunkBuildThreads = VulkanConfig.coresForChunkBuilding();
+        look.particles = 2;
+        look.fancy = false;
+        look.ambientOcclusion = 0;
+        look.clouds = 0;
+        look.entityShadows = false;
+        look.mipmap = 4;
+        look.renderDistanceCap = 16;
+        look.fpsLimit = 260;
+        look.vsync = false;
+        apply(mc, look);
     }
 
     /**
@@ -50,70 +116,98 @@ public final class VulkanPresets {
      * has to go for the game to be playable at all. On a laptop with shared
      * memory and a sixty-hertz screen, frames above sixty are not a gain — they
      * are heat and fan noise for pictures nobody sees, which is why this is the
-     * one preset that puts a ceiling on rather than removing one.
+     * one preset that puts a ceiling on rather than taking one off.
      */
     public static void potato(Minecraft mc) {
-        performance(mc);
-        VulkanConfig.setEntityDistance(32);
-        VulkanConfig.setTileEntityDistance(16);
+        Look look = new Look();
+        look.entityDistance = 32;
+        look.tileEntityDistance = 16;
         // One frame a second out of focus. The game keeps running; the card
         // stops being asked to draw a menu nobody is looking at.
-        VulkanConfig.setBackgroundFpsLimit(1);
+        look.backgroundFps = 1;
+        look.animations = false;
+        // Flat colours instead of textures, with the mip chain deliberately
+        // left switched on — it is what flat colours are made of. Turning
+        // mipmaps off is the obvious-looking way to make textures cheap and it
+        // does the reverse: distant chunks then read the full-size atlas at
+        // random, which is what a texture cache is worst at. The last level of
+        // that same chain has each sprite reduced to one texel, so pinning the
+        // sampler there makes every face a single read.
+        look.flatBlockColours = true;
         // Two, not three. Frames in flight buy the processor room when it is
         // the thing holding the frame up — on this class of machine the card
         // is, and a third frame only adds a frame of delay to the controls.
-        VulkanConfig.setFramesInFlight(2);
-        mc.gameSettings.limitFramerate = 60;
-        mc.gameSettings.enableVsync = true;
-        mc.gameSettings.particleSetting = 2;
-        mc.gameSettings.entityShadows = false;
-        // Through the game's own setter rather than the field: it rebinds the
-        // atlas, turns off mipmap filtering and raises the flag Forge added to
-        // stop the models being rebuilt once per notch of the slider. Writing
-        // the field alone changes the number and nothing else.
-        mc.gameSettings.setOptionFloatValue(GameSettings.Options.MIPMAP_LEVELS, 0.0f);
-        mc.gameSettings.clouds = 0;
-        mc.gameSettings.ambientOcclusion = 0;
-        if (mc.gameSettings.renderDistanceChunks > 8) {
-            mc.gameSettings.renderDistanceChunks = 8;
-        }
-        mc.gameSettings.saveOptions();
-        // The flag raised above is only acted on when a settings screen closes,
-        // and this one was applied from a button in the middle of ours. Said
-        // here so the models are rebuilt at the next safe moment rather than
-        // whenever the player happens to open and shut the vanilla options.
-        mc.gameSettings.onGuiClosed();
-        // Smooth lighting and the render distance are baked into chunk
-        // geometry, so neither takes effect until the chunks are made again.
-        mc.renderGlobal.loadRenderers();
+        look.framesInFlight = 2;
+        look.chunkBuildThreads = VulkanConfig.coresForChunkBuilding();
+        look.particles = 2;
+        look.fancy = false;
+        look.ambientOcclusion = 0;
+        look.clouds = 0;
+        look.entityShadows = false;
+        look.mipmap = 4;
+        look.renderDistanceCap = 8;
+        look.fpsLimit = 60;
+        look.vsync = true;
+        apply(mc, look);
     }
 
-    /** Trades looks for frames: shorter distances, no animation, fewer particles. */
-    public static void performance(Minecraft mc) {
+    /**
+     * Writes one complete look and rebuilds only what has to be rebuilt.
+     *
+     * Graphics quality, smooth lighting, the render distance and the mipmap
+     * level are baked into chunk geometry or into the atlas, so changing them
+     * means nothing until those are made again — and making them again is the
+     * expensive part, which is why it happens once at the end and only if one
+     * of those four actually moved.
+     */
+    private static void apply(Minecraft mc, Look look) {
         VulkanConfig.setTerrainEnabled(true);
-        VulkanConfig.setEntityDistance(64);
-        VulkanConfig.setTileEntityDistance(32);
-        VulkanConfig.setBackgroundFpsLimit(5);
-        VulkanConfig.setAnimationsEnabled(false);
+        VulkanConfig.setEntityDistance(look.entityDistance);
+        VulkanConfig.setTileEntityDistance(look.tileEntityDistance);
+        VulkanConfig.setBackgroundFpsLimit(look.backgroundFps);
+        VulkanConfig.setAnimationsEnabled(look.animations);
+        VulkanConfig.setFlatBlockColours(look.flatBlockColours);
         VulkanConfig.setDepthBlitEnabled(true);
         VulkanConfig.setCullingEnabled(true);
-        // A third frame in flight gives the CPU more room when it is the
-        // bottleneck, which is what this preset assumes.
-        VulkanConfig.setFramesInFlight(3);
+        VulkanConfig.setFramesInFlight(look.framesInFlight);
         VulkanConfig.setGeometryBudgetMiB(0);
-        // Chunk building is what the frame waits for at long render distances,
-        // and vanilla sizes that thread pool from the heap rather than from the
-        // CPU. A preset named for performance is the right place to take the
-        // core count seriously; the shipped default still leaves it alone.
-        VulkanConfig.setChunkBuildThreads(VulkanConfig.coresForChunkBuilding());
-        mc.gameSettings.particleSetting = 2;
-        mc.gameSettings.entityShadows = false;
-        boolean wasFancy = mc.gameSettings.fancyGraphics;
-        mc.gameSettings.fancyGraphics = false;
-        mc.gameSettings.saveOptions();
-        if (wasFancy) {
-            // Graphics quality is baked into chunk geometry, so it only takes
-            // effect once the chunks are rebuilt.
+        if (look.chunkBuildThreads > 0) {
+            VulkanConfig.setChunkBuildThreads(look.chunkBuildThreads);
+        }
+
+        GameSettings settings = mc.gameSettings;
+        boolean wasFancy = settings.fancyGraphics;
+        int wasAo = settings.ambientOcclusion;
+        int wasDistance = settings.renderDistanceChunks;
+        int wasMipmap = settings.mipmapLevels;
+
+        settings.particleSetting = look.particles;
+        settings.fancyGraphics = look.fancy;
+        settings.ambientOcclusion = look.ambientOcclusion;
+        settings.clouds = look.clouds;
+        settings.entityShadows = look.entityShadows;
+        settings.limitFramerate = look.fpsLimit;
+        settings.enableVsync = look.vsync;
+        if (settings.renderDistanceChunks > look.renderDistanceCap) {
+            settings.renderDistanceChunks = look.renderDistanceCap;
+        }
+        if (settings.mipmapLevels != look.mipmap) {
+            // Through the game's own setter rather than the field: it rebinds
+            // the atlas, sets the filtering and raises the flag Forge added to
+            // stop the models being rebuilt once per notch of the slider.
+            // Writing the field alone changes the number and nothing else.
+            settings.setOptionFloatValue(GameSettings.Options.MIPMAP_LEVELS, look.mipmap);
+            // That flag is only acted on when a settings screen closes, and
+            // this was applied from a button in the middle of ours.
+            settings.onGuiClosed();
+        }
+        settings.saveOptions();
+
+        if (mc.renderGlobal != null
+                && (settings.fancyGraphics != wasFancy
+                    || settings.ambientOcclusion != wasAo
+                    || settings.renderDistanceChunks != wasDistance
+                    || settings.mipmapLevels != wasMipmap)) {
             mc.renderGlobal.loadRenderers();
         }
     }

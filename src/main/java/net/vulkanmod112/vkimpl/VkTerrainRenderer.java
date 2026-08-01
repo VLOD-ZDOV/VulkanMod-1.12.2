@@ -1171,6 +1171,7 @@ final class VkTerrainRenderer {
             reflectionBindingsDirty = false;
             updateDescriptors();
         }
+        refreshSamplerIfNeeded();
         if (layerOrdinal == LAYER_TRANSLUCENT) {
             // Its own pass, its own submission, and it runs after the opaque
             // frame has already been composited — so none of the state machine
@@ -3299,7 +3300,44 @@ final class VkTerrainRenderer {
         LOGGER.info("Terrain renderer base resources ready");
     }
 
+    private long createAtlasSampler(MemoryStack stack) {
+        VkSamplerCreateInfo info = VkSamplerCreateInfo.calloc(stack)
+                .sType(VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO)
+                .magFilter(VK_FILTER_NEAREST)
+                .minFilter(VK_FILTER_NEAREST)
+                // Nearest inside a level keeps the pixel-art look; linear
+                // between levels kills the shimmer on distant chunks. maxLod
+                // is clamped by the image's actual level count.
+                .mipmapMode(VK_SAMPLER_MIPMAP_MODE_LINEAR)
+                .maxLod(VK_LOD_CLAMP_NONE)
+                // Flat colours: every block face reads the smallest level of the
+                // atlas, where a sprite has been reduced to a single texel.
+                //
+                // This is not the opposite of mipmapping, it is the far end of
+                // it. Sampling costs what it costs because of cache misses, and
+                // the whole purpose of a mip chain is to keep roughly one texel
+                // per pixel so the cache stays warm; pinning it to the last
+                // level means one texel per face, which is the cheapest a
+                // texture read can be. Turning mipmaps off entirely — the
+                // obvious-looking way to make textures cheap — does the reverse,
+                // sending distant chunks to read the full-size atlas at random.
+                //
+                // Fifteen rather than "no clamp": the level count of a
+                // 512-pixel atlas cannot reach it, so it always lands on the
+                // last level there is, and it still reads as a number rather
+                // than as a sentinel that means the opposite on the other field.
+                .minLod(flatBlockColours() ? 15.0f : 0.0f)
+                .addressModeU(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
+                .addressModeV(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
+                .addressModeW(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
+        LongBuffer pSampler = stack.mallocLong(1);
+        check(vkCreateSampler(device(), info, null, pSampler), "vkCreateSampler(atlas)");
+        samplerFlatColours = flatBlockColours();
+        return pSampler.get(0);
+    }
+
     private void createDescriptorInfrastructure(MemoryStack stack) {
+        atlasSampler = createAtlasSampler(stack);
         VkSamplerCreateInfo samplerInfo = VkSamplerCreateInfo.calloc(stack)
                 .sType(VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO)
                 .magFilter(VK_FILTER_NEAREST)
@@ -3309,12 +3347,25 @@ final class VkTerrainRenderer {
                 // is clamped by the image's actual level count.
                 .mipmapMode(VK_SAMPLER_MIPMAP_MODE_LINEAR)
                 .maxLod(VK_LOD_CLAMP_NONE)
+                // Flat colours: every block face reads the smallest level of the
+                // atlas, where a sprite has been reduced to a single texel.
+                //
+                // This is not the opposite of mipmapping, it is the far end of
+                // it. Sampling costs what it costs because of cache misses, and
+                // the whole purpose of a mip chain is to keep roughly one texel
+                // per pixel so the cache stays warm; pinning it to the last
+                // level means one texel per face, which is the cheapest a
+                // texture read can be. Turning mipmaps off entirely — the
+                // obvious-looking way to make textures cheap — does the reverse,
+                // sending distant chunks to read the full-size atlas at random.
+                // Fifteen rather than "no clamp": the level count of a 512-pixel
+                // atlas cannot reach it, so it always lands on the last one
+                // there is, and it still reads as a number rather than as a
+                // sentinel that means the opposite on the other field.
                 .addressModeU(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
                 .addressModeV(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
                 .addressModeW(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
         LongBuffer pSampler = stack.mallocLong(1);
-        check(vkCreateSampler(device(), samplerInfo, null, pSampler), "vkCreateSampler(atlas)");
-        atlasSampler = pSampler.get(0);
 
         samplerInfo.magFilter(VK_FILTER_LINEAR).minFilter(VK_FILTER_LINEAR)
                 .mipmapMode(VK_SAMPLER_MIPMAP_MODE_NEAREST).maxLod(0.0f);
@@ -3720,6 +3771,38 @@ final class VkTerrainRenderer {
         int clamped = Math.max(0, Math.min(count, MAX_DYNAMIC_LIGHTS));
         System.arraycopy(lights, 0, dynamicLights, 0, clamped * 4);
         dynamicLightCount = clamped;
+    }
+
+    /** What the atlas sampler was built for, so a change to it can be noticed. */
+    private boolean samplerFlatColours;
+
+    /**
+     * Rebuilds the atlas sampler when the flat-colour setting has moved.
+     *
+     * The setting decides one number inside a sampler, and a sampler cannot be
+     * edited — it is made once and handed to a descriptor. Checked here, on the
+     * frame path, because the alternative is what shipped first: the value was
+     * read where the sampler is created, the sampler already existed by the time
+     * anyone could press the switch, and the setting did nothing at all until
+     * the world was reloaded. A switch that needs a world reload to be believed
+     * is a switch nobody trusts.
+     *
+     * The comparison is against what the sampler was actually built for rather
+     * than against a previous reading of the setting, so this stays right if
+     * something else rebuilds the sampler.
+     */
+    private void refreshSamplerIfNeeded() {
+        if (atlasSampler == 0 || samplerFlatColours == flatBlockColours()) {
+            return;
+        }
+        try (MemoryStack stack = stackPush()) {
+            vkDeviceWaitIdle(device());
+            vkDestroySampler(device(), atlasSampler, null);
+            atlasSampler = createAtlasSampler(stack);
+            updateDescriptors();
+            LOGGER.info("Block texture sampling switched to {}",
+                    flatBlockColours() ? "one flat colour per face" : "the full atlas");
+        }
     }
 
     private void updateDescriptors() {
@@ -4558,6 +4641,11 @@ final class VkTerrainRenderer {
 
     private static boolean depthBlitAllowed() {
         return !"false".equals(System.getProperty("vulkanmod112.depthBlit"));
+    }
+
+    /** Read where the sampler is built; the world has to be reloaded to change it. */
+    private static boolean flatBlockColours() {
+        return "true".equals(System.getProperty("vulkanmod112.flatBlockColours"));
     }
 
     /**

@@ -351,6 +351,8 @@ public final class VulkanConfig {
     private static int ultraLogSeconds = DEF_ULTRA_LOG_SECONDS;
     private static boolean depthBlitEnabled = DEF_DEPTH_BLIT;
     private static boolean cullingEnabled = DEF_CULLING;
+    /** Every block face reduced to its average colour; see the sampler that reads it. */
+    private static boolean flatBlockColours = false;
     /** MiB of VRAM the chunk geometry buffer may take; 0 = derive from the GPU. */
     private static int geometryBudgetMiB = DEF_GEOMETRY_BUDGET;
     private static int framesInFlight = DEF_FRAMES_IN_FLIGHT;
@@ -395,6 +397,7 @@ public final class VulkanConfig {
 
     public static void load(File configDirectory) {
         config = new Configuration(new File(configDirectory, "vulkanmod112.cfg"));
+        VulkanProfiles.setDirectory(configDirectory);
         // Where the driver may keep its compiled pipelines between runs. It
         // travels as a property because the Vulkan half runs under its own
         // class loader and cannot see the game, so a string is the whole of the
@@ -423,6 +426,10 @@ public final class VulkanConfig {
                 "Copy Vulkan depth into the game's depth buffer with glBlitFramebuffer instead of a shader.");
         cullingEnabled = config.getBoolean("cullingEnabled", CATEGORY_ADVANCED, DEF_CULLING,
                 "Skip triangles facing away from the camera. Off is for diagnosing geometry only.");
+        flatBlockColours = config.getBoolean("flatBlockColours", CATEGORY_ADVANCED, false,
+                "Draw every block face in one flat colour by reading the smallest level of the "
+                        + "block atlas. The cheapest a texture read can be; the world stops having "
+                        + "textures.");
         geometryBudgetMiB = config.getInt("geometryBudgetMiB", CATEGORY_ADVANCED, DEF_GEOMETRY_BUDGET, 0, 8192,
                 "VRAM in MiB the chunk geometry buffer may take before growth becomes cautious. "
                         + "0 derives it from the amount of memory the GPU reports.");
@@ -674,6 +681,7 @@ public final class VulkanConfig {
         setUltraLogSeconds(DEF_ULTRA_LOG_SECONDS);
         setDepthBlitEnabled(DEF_DEPTH_BLIT);
         setCullingEnabled(DEF_CULLING);
+        setFlatBlockColours(false);
         setGeometryBudgetMiB(DEF_GEOMETRY_BUDGET);
         setFramesInFlight(DEF_FRAMES_IN_FLIGHT);
         setChunkPreloadEnabled(DEF_CHUNK_PRELOAD);
@@ -1141,6 +1149,16 @@ public final class VulkanConfig {
         return cullingEnabled;
     }
 
+    public static boolean isFlatBlockColours() {
+        return flatBlockColours;
+    }
+
+    public static void setFlatBlockColours(boolean value) {
+        flatBlockColours = value;
+        store(CATEGORY_ADVANCED, "flatBlockColours", value);
+        applySystemProperties();
+    }
+
     public static void setCullingEnabled(boolean value) {
         cullingEnabled = value;
         store(CATEGORY_ADVANCED, "cullingEnabled", value);
@@ -1208,6 +1226,7 @@ public final class VulkanConfig {
     private static void applySystemProperties() {
         publish("vulkanmod112.depthBlit", Boolean.toString(depthBlitEnabled));
         publish("vulkanmod112.cull", Boolean.toString(cullingEnabled));
+        publish("vulkanmod112.flatBlockColours", Boolean.toString(flatBlockColours));
         publish("vulkanmod112.geometryBudget", Integer.toString(geometryBudgetMiB));
         publish("vulkanmod112.framesInFlight", Integer.toString(framesInFlight));
         publish("vulkanmod112.directionalLight", Integer.toString(directionalLight));

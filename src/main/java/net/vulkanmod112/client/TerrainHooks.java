@@ -306,6 +306,8 @@ public final class TerrainHooks {
             broken = true;
             LOGGER.error("Vulkan terrain rendering failed — falling back to vanilla GL permanently", t);
             Diagnostics.flushNow("terrain failed permanently: " + t);
+            RenderNotice.fellBackToOpenGL(t.getClass().getSimpleName()
+                    + (t.getMessage() == null ? "" : ": " + t.getMessage()));
             return false;
         }
     }
