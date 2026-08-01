@@ -459,6 +459,13 @@ tasks.matching { it.name in ['runClient', 'runObfClient'] }.configureEach {
     if (project.hasProperty('noDepthBlit')) {
         jvmArgs '-Dvulkanmod112.depthBlit=false'
     }
+    // -PnoInteropSemaphores hands the shared images between the two APIs by
+    // making both sides go idle instead of by semaphore. Slow on purpose: it is
+    // for drivers that accept an imported semaphore and never signal it, where
+    // the alternative is a card the operating system has to reset.
+    if (project.hasProperty('noInteropSemaphores')) {
+        jvmArgs '-Dvulkanmod112.interopSemaphores=false'
+    }
 }
 
 apply from: 'gradle/scripts/publishing.gradle'

@@ -672,6 +672,20 @@ final class VkTerrainRenderer {
      */
     private boolean tracingFirstFrame = true;
 
+    /**
+     * Whether the two APIs are allowed to hand the shared images to each other
+     * with semaphores rather than by both going idle.
+     *
+     * Semaphores are the whole point of the interop: neither side stalls, the
+     * card stays fed. But a driver that accepts an imported semaphore and never
+     * signals it does not fail — it stops, and Windows eventually takes the
+     * process with the card. Turning this off replaces the handshake with a
+     * full stop on each side per frame. That is slower by a wide margin and it
+     * is correct, which beats a machine that cannot open a world at all.
+     */
+    private static final boolean SHARED_SEMAPHORES =
+            !"false".equals(System.getProperty("vulkanmod112.interopSemaphores"));
+
     private void firstFrameStage(String stage) {
         if (tracingFirstFrame) {
             LOGGER.info("First terrain frame: {}", stage);
@@ -1406,9 +1420,11 @@ final class VkTerrainRenderer {
 
             VkSubmitInfo submit = VkSubmitInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_SUBMIT_INFO)
-                    .pCommandBuffers(stack.pointers(commandBuffer))
-                    .pSignalSemaphores(stack.longs(vkSignalSemaphore));
-            if (!firstFrame) {
+                    .pCommandBuffers(stack.pointers(commandBuffer));
+            if (SHARED_SEMAPHORES) {
+                submit.pSignalSemaphores(stack.longs(vkSignalSemaphore));
+            }
+            if (!firstFrame && SHARED_SEMAPHORES) {
                 submit.waitSemaphoreCount(1)
                         .pWaitSemaphores(stack.longs(vkWaitSemaphore))
                         .pWaitDstStageMask(stack.ints(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT));
@@ -1416,6 +1432,11 @@ final class VkTerrainRenderer {
             firstFrame = false;
             firstFrameStage("submitting the opaque frame");
             check(vkQueueSubmit(ctx.getGraphicsQueue(), submit, fence), "vkQueueSubmit(terrain)");
+            if (!SHARED_SEMAPHORES) {
+                // Nothing will tell OpenGL when these images are finished, so
+                // finishing them here is the only ordering left.
+                vkQueueWaitIdle(ctx.getGraphicsQueue());
+            }
             firstFrameStage("submitted");
             frameOpen = false;
         }
@@ -1605,9 +1626,13 @@ final class VkTerrainRenderer {
             // graphics driver has to honour across two APIs, and a driver that
             // never signals it stalls here until the operating system decides
             // the card is gone. That looks exactly like the log simply ending.
-            firstFrameStage("waiting on the Vulkan semaphore from OpenGL");
-            EXTSemaphore.glWaitSemaphoreEXT(glWaitSemaphore, noBuffers, textures, layouts);
-            firstFrameStage("semaphore taken, compositing");
+            if (SHARED_SEMAPHORES) {
+                firstFrameStage("waiting on the Vulkan semaphore from OpenGL");
+                EXTSemaphore.glWaitSemaphoreEXT(glWaitSemaphore, noBuffers, textures, layouts);
+                firstFrameStage("semaphore taken, compositing");
+            } else {
+                firstFrameStage("compositing (semaphores off, both sides go idle)");
+            }
 
             int prevProgram = GL11C.glGetInteger(GL20C.GL_CURRENT_PROGRAM);
             int prevActive = GL11C.glGetInteger(GL13C.GL_ACTIVE_TEXTURE);
@@ -1718,8 +1743,14 @@ final class VkTerrainRenderer {
             GL13C.glActiveTexture(prevActive);
 
             firstFrameStage("terrain drawn into the game's frame");
-            EXTSemaphore.glSignalSemaphoreEXT(glSignalSemaphore, noBuffers, textures, layouts);
-            GL11C.glFlush();
+            if (SHARED_SEMAPHORES) {
+                EXTSemaphore.glSignalSemaphoreEXT(glSignalSemaphore, noBuffers, textures, layouts);
+                GL11C.glFlush();
+            } else {
+                // The next Vulkan frame writes these images with nothing told
+                // to wait for this read, so the read has to be over first.
+                GL11C.glFinish();
+            }
             if (tracingFirstFrame) {
                 tracingFirstFrame = false;
                 LOGGER.info("First terrain frame: complete");
@@ -2957,9 +2988,17 @@ final class VkTerrainRenderer {
             VkExportSemaphoreCreateInfo export = VkExportSemaphoreCreateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO)
                     .handleTypes(Interop.SEMAPHORE_HANDLE_TYPE);
+            // Windows hands out a handle with access rights attached, and the
+            // rights are only defaulted when this structure is absent — which
+            // a driver is free to read as "none". A handle like that imports
+            // without complaint and then never becomes signalled, so the wait
+            // on the OpenGL side never returns and the card is reset out from
+            // under the process. Asking for full access costs nothing and is
+            // what the specification expects for an exported Win32 handle.
+            long exportChain = Interop.appendWin32SemaphoreRights(stack, export.address());
             VkSemaphoreCreateInfo semInfo = VkSemaphoreCreateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO)
-                    .pNext(export.address());
+                    .pNext(exportChain);
             LongBuffer pSem = stack.mallocLong(1);
             check(vkCreateSemaphore(device(), semInfo, null, pSem), "vkCreateSemaphore");
             vkSignalSemaphore = pSem.get(0);

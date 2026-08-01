@@ -69,6 +69,33 @@ final class Interop {
     /** Both GL_DEVICE_UUID_EXT and VkPhysicalDeviceIDProperties::deviceUUID are 16 bytes. */
     private static final int UUID_BYTES = 16;
 
+    /** Windows GENERIC_ALL: every right the importing side could want. */
+    private static final int GENERIC_ALL = 0x10000000;
+
+    /**
+     * Puts the Win32 access rights in front of an export structure, and hands
+     * back whatever should now start the chain.
+     *
+     * On anything but Windows this is the export structure unchanged, because
+     * a file descriptor carries no rights to ask for. On Windows the rights are
+     * only defaulted when the structure is missing, and a driver may default
+     * them to nothing: the handle then imports cleanly and never signals, which
+     * is indistinguishable from a hang until the card is reset.
+     */
+    static long appendWin32SemaphoreRights(MemoryStack stack, long exportInfo) {
+        if (!WINDOWS) {
+            return exportInfo;
+        }
+        org.lwjgl.vulkan.VkExportSemaphoreWin32HandleInfoKHR rights =
+                org.lwjgl.vulkan.VkExportSemaphoreWin32HandleInfoKHR.calloc(stack)
+                        .sType(KHRExternalSemaphoreWin32
+                                .VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_WIN32_HANDLE_INFO_KHR)
+                        .pNext(exportInfo)
+                        .pAttributes(null)
+                        .dwAccess(GENERIC_ALL);
+        return rights.address();
+    }
+
     private static final String[] DEVICE_EXTENSIONS_FD = {
             "VK_KHR_external_memory_fd",
             "VK_KHR_external_semaphore_fd"
@@ -293,6 +320,16 @@ final class Interop {
                     "vkGetSemaphoreWin32HandleKHR");
             EXTSemaphoreWin32.glImportSemaphoreWin32HandleEXT(glSem,
                     EXTSemaphoreWin32.GL_HANDLE_TYPE_OPAQUE_WIN32_EXT, pHandle.get(0));
+            // Checked here and nowhere else, because a refused import has no
+            // other symptom: the semaphore object exists, the wait on it is
+            // accepted, and it simply never returns. Better to fail loudly at
+            // startup and fall back to vanilla than to hang the card.
+            int error = org.lwjgl.opengl.GL11C.glGetError();
+            if (error != 0) {
+                throw new IllegalStateException("glImportSemaphoreWin32HandleEXT refused the "
+                        + "exported semaphore (GL error 0x" + Integer.toHexString(error)
+                        + "). Waiting on it from OpenGL would never return.");
+            }
             closeHandle(pHandle.get(0));
         } else {
             VkSemaphoreGetFdInfoKHR info = VkSemaphoreGetFdInfoKHR.calloc(stack)
