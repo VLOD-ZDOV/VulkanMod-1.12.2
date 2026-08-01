@@ -890,6 +890,31 @@ final class VulkanOptions {
                                         VulkanConfig.setNearPlaneHundredths(value);
                                     }
                                 }),
+                        new VSwitchOption("Flat Block Colours",
+                                "Draw every block face in one flat colour instead of its texture. "
+                                        + "The block atlas is kept at its smallest size, where a "
+                                        + "sprite has been reduced to a single dot, and every face "
+                                        + "reads that one dot — the cheapest a texture read can "
+                                        + "possibly be, and worth real frames on a machine whose "
+                                        + "memory is shared with the processor. The world stops "
+                                        + "having textures, so this is for making an unplayable "
+                                        + "game playable rather than for looks. Note that it is "
+                                        + "not the same as turning mipmaps off, which sounds "
+                                        + "similar and does the opposite: without them the distant "
+                                        + "world reads the full-size atlas at random and gets "
+                                        + "slower, not faster.",
+                                Cost.of(Level.NONE, Level.NONE, Level.NONE), null,
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return VulkanConfig.isFlatBlockColours();
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        VulkanConfig.setFlatBlockColours(value);
+                                    }
+                                }),
                         new VSwitchOption("Drop Vanilla Chunk Buffers",
                                 "Stop filling the game's own chunk buffers once Vulkan has the "
                                         + "geometry. The world is currently held twice in video "
