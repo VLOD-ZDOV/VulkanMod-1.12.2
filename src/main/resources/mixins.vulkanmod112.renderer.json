@@ -27,6 +27,8 @@
     "FrustumTestMixin",
     "EntityBrightnessMixin",
     "ParticleBrightnessMixin",
+    "ParticleRenderMixin",
+    "WeatherRenderMixin",
     "HeldItemLightMixin",
     "MaterialTagMixin",
     "SceneBloomMixin"

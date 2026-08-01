@@ -163,6 +163,9 @@ public final class TerrainHooks {
     /** Marks the block atlas for re-upload (initial stitch and resource reloads). */
     public static void invalidateAtlas() {
         atlasUploaded = false;
+        // The particle, rain and snow sheets are reloaded on the same event and
+        // handed fresh GL names; copies made from the old ones are last pack's.
+        SpriteHooks.forgetSheets();
     }
 
     public static String stats() {
@@ -322,6 +325,19 @@ public final class TerrainHooks {
 
     private static boolean terrainEnabled() {
         return TERRAIN_ALLOWED_BY_PROPERTY && VulkanConfig.isTerrainEnabled();
+    }
+
+    /**
+     * Whether this frame's translucent layer is going through Vulkan.
+     *
+     * Sprites ride in that pass, and they are handed over a third of the way
+     * through the frame — long before the layer itself is asked for. So the
+     * question has to be answerable early, from state rather than from what has
+     * happened this frame, and every term below is state.
+     */
+    static boolean vulkanOwnsTranslucent() {
+        return !broken && terrainEnabled() && !incompatibleRenderer
+                && VulkanConfig.isVulkanTranslucent();
     }
 
     private static boolean checkRendererCompatibility() {
@@ -523,6 +539,10 @@ public final class TerrainHooks {
         AtlasAnimations.arm();
         bridge.setLightmap(lightmap.getGlTextureId());
         lightmapColors = lightmap.getTextureData(); // backing array of the 16x16 lightmap
+        // Same moment, same reason: the sheets particles and weather are drawn
+        // from are the game's textures, and this is the one point in the frame
+        // where copying one costs nothing that is already in flight.
+        SpriteHooks.sendSheets(bridge);
         atlasUploaded = true;
         LOGGER.info("Block atlas (GL {}) and lightmap (GL {}) handed to Vulkan", atlasId, lightmap.getGlTextureId());
         return true;

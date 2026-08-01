@@ -217,6 +217,66 @@ final class VkTerrainRenderer {
     private final GlTimer compositeTimer = new GlTimer();
     private final GlTimer depthImportTimer = new GlTimer();
 
+    // ------------------------------------------------------------------
+    // Sprites: particles, rain and snow
+    // ------------------------------------------------------------------
+
+    /** Vanilla PARTICLE_POSITION_TEX_COLOR_LMAP: pos 3f | uv 2f | colour 4ub | light 2s. */
+    private static final int SPRITE_VERTEX_STRIDE = 28;
+    /** 0 is the block atlas, then the particle sheet, rain and snow. */
+    private static final int SPRITE_SLOTS = 4;
+    /**
+     * Ceiling on one frame's sprite geometry, in vertices.
+     *
+     * The game caps itself at 16 384 particles in each of six queues, which at
+     * four vertices each is just under 400 000 — and weather at fancy graphics
+     * adds a few thousand more. This is that ceiling with room over it, and it
+     * exists so that a mod spawning particles without limit costs a dropped
+     * batch and a line in the log rather than an allocation the size of the
+     * card.
+     */
+    private static final int MAX_SPRITE_VERTICES = 1 << 20;
+
+    private long spritePipeline;
+    private long spritePipelineLayout;
+    private long spriteSetLayout;
+    private long spriteDescriptorPool;
+    private long spriteSampler;
+    private final long[] spriteSets = new long[SPRITE_SLOTS];
+    private final long[] spriteImages = new long[SPRITE_SLOTS];
+    private final long[] spriteMemories = new long[SPRITE_SLOTS];
+    private final long[] spriteViews = new long[SPRITE_SLOTS];
+    private final int[] spriteGlIds = new int[SPRITE_SLOTS];
+
+    private long[] spriteVertexBuffers;
+    private long[] spriteVertexMemories;
+    private long[] spriteVertexMapped;
+    private long[] spriteVertexCapacity;
+
+    /**
+     * This frame's sprite vertices, gathered on the processor before the pass
+     * that draws them exists.
+     *
+     * The game hands particles over a third of the way through the frame and
+     * weather right after, but the pass they are drawn in does not begin until
+     * the translucent layer — and the buffer that pass reads from may still be
+     * in use by a frame two behind. Rather than wait on that fence early, at a
+     * point in the frame chosen by nothing in particular, the bytes are parked
+     * here and copied across in one move once the fence has been waited for
+     * anyway. A few hundred kilobytes of memcpy against a stall of unknown
+     * length is not a close call.
+     */
+    private ByteBuffer spriteScratch;
+    private int spriteScratchVertices;
+    /** Triples: first vertex, vertex count, texture slot. */
+    private int[] spriteBatches = new int[192];
+    private float[] spriteCutoffs = new float[64];
+    private int spriteBatchCount;
+    private int spriteFrameVertices;
+    private int spriteFrameBatches;
+    private long spriteDropped;
+    private boolean spriteOverflowLogged;
+
     /** Shader path for handing the game's depth back to Vulkan; see {@link #buildDepthImportProgram}. */
     private int depthImportProgram;
     private int depthImportInvSizeUniform = -1;
@@ -1076,6 +1136,11 @@ final class VkTerrainRenderer {
     synchronized void updateAtlas(int atlasGlId) {
         ctx.ensureGlCapabilities();
         destroyAtlas();
+        // The atlas is rebuilt on a resource reload, and so is every other
+        // sheet the game owns: their GL names are handed out again from
+        // scratch. Keeping copies made from the old ones would draw last
+        // pack's rain.
+        forgetSpriteSheets();
         try (MemoryStack stack = stackPush()) {
             int previous = GL11C.glGetInteger(GL11C.GL_TEXTURE_BINDING_2D);
             GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, atlasGlId);
@@ -1270,6 +1335,17 @@ final class VkTerrainRenderer {
                         ? String.format(" (1 per %.1f frames)", lightmapFrames / (double) Math.max(1, lightmapUploads))
                         : "")
                 .append("; the game recomputes it once a tick, so ~20/s is expected\n");
+        sb.append("  sprites: ").append(spritePipeline == 0 ? "pipeline missing" : "in Vulkan")
+                .append(", last frame ").append(spriteFrameBatches).append(" batches, ")
+                .append(spriteFrameVertices).append(" vertices; sheets");
+        for (int slot = 1; slot < SPRITE_SLOTS; slot++) {
+            sb.append(' ').append(slot).append('=')
+                    .append(spriteImages[slot] == 0 ? "-" : "ok");
+        }
+        if (spriteDropped > 0) {
+            sb.append(", ").append(spriteDropped).append(" batches dropped");
+        }
+        sb.append('\n');
         sb.append("  index buffer: ").append(quadIndexCapacityQuads).append(" quads")
                 .append(", draw batch ").append(indirectDrawCapacity)
                 .append(" in ").append(indirectMemoryIsDeviceLocal ? "BAR (device-local)" : "host")
@@ -1374,6 +1450,12 @@ final class VkTerrainRenderer {
             frameChunks = 0;
             frameVertices = 0;
             frameSkipped = 0;
+            // Anything left over belonged to a frame that never reached its
+            // translucent pass — a world that unloaded, a layer refused. It is
+            // stale by definition and must not be drawn a frame late.
+            clearSprites();
+            spriteFrameVertices = 0;
+            spriteFrameBatches = 0;
 
             // The lightmap changes when the light level does — dawn, dusk,
             // walking into a cave — and is identical on the great majority of
@@ -1655,6 +1737,323 @@ final class VkTerrainRenderer {
     }
 
     /**
+     * Whether particles and weather can go through Vulkan on this machine.
+     *
+     * Tied to the translucent pass and not a condition of its own, because it
+     * <em>is</em> that pass: sprites are drawn into the same target, in the
+     * same submission, against the same borrowed depth. A machine where the
+     * translucent layer stays in OpenGL has nowhere to put them that would not
+     * cost a second import of the game's depth and a second composite — about
+     * a third of a millisecond, to save drawing a few thousand quads.
+     */
+    synchronized boolean drawsSprites() {
+        return spritePipeline != 0 && drawsTranslucent();
+    }
+
+    /**
+     * Copies one of the game's sprite sheets into Vulkan.
+     *
+     * Slot 0 is the block atlas and is never uploaded here: it is already in
+     * Vulkan for the terrain, and its descriptor simply points at the same
+     * image. A second copy of an atlas that a resource pack can make sixteen
+     * megabytes large, to draw the handful of block-shaped particles a broken
+     * block throws off, would be a poor trade.
+     */
+    synchronized void updateSpriteTexture(int slot, int glTextureId) {
+        if (slot <= 0 || slot >= SPRITE_SLOTS || glTextureId <= 0) {
+            return;
+        }
+        if (spriteGlIds[slot] == glTextureId && spriteImages[slot] != 0) {
+            return;
+        }
+        ctx.ensureGlCapabilities();
+        ensureBaseResources();
+        int previous = GL11C.glGetInteger(GL11C.GL_TEXTURE_BINDING_2D);
+        GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, glTextureId);
+        int w = GL11C.glGetTexLevelParameteri(GL11C.GL_TEXTURE_2D, 0, GL11C.GL_TEXTURE_WIDTH);
+        int h = GL11C.glGetTexLevelParameteri(GL11C.GL_TEXTURE_2D, 0, GL11C.GL_TEXTURE_HEIGHT);
+        if (w <= 0 || h <= 0) {
+            GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, previous);
+            LOGGER.warn("Sprite sheet in GL texture {} has no level 0; slot {} left empty", glTextureId, slot);
+            return;
+        }
+        // Level 0 only. These sheets are drawn at close range on quads facing
+        // the camera, so a mip chain would almost never be sampled from, and
+        // the game does not build one for them either.
+        ByteBuffer pixels = MemoryUtil.memAlloc(w * h * 4);
+        GL11C.glGetTexImage(GL11C.GL_TEXTURE_2D, 0, GL11C.GL_RGBA, GL11C.GL_UNSIGNED_BYTE, pixels);
+        GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, previous);
+        try (MemoryStack stack = stackPush()) {
+            destroySpriteImage(slot);
+            long[] out = new long[3];
+            createSampledImage(stack, w, h, new ByteBuffer[]{pixels}, out);
+            spriteImages[slot] = out[0];
+            spriteMemories[slot] = out[1];
+            spriteViews[slot] = out[2];
+            spriteGlIds[slot] = glTextureId;
+        } finally {
+            MemoryUtil.memFree(pixels);
+        }
+        writeSpriteSet(slot, spriteViews[slot], spriteSampler);
+        LOGGER.info("Sprite sheet copied to Vulkan: slot {}, {}x{}", slot, w, h);
+    }
+
+    /**
+     * Takes one batch of the game's own sprite vertices.
+     *
+     * The vertices are built by the game exactly as they always were — this
+     * renderer does not know what a particle is, only what a quad is — and what
+     * changes is where they go: into a buffer the card owns, instead of through
+     * a client-side vertex array, which is the slowest way OpenGL has of being
+     * handed geometry and the way this game has always drawn every particle in
+     * the world.
+     */
+    synchronized void submitSprites(ByteBuffer vertices, int vertexCount, int slot, float cutoff) {
+        if (vertices == null || slot < 0 || slot >= SPRITE_SLOTS) {
+            return;
+        }
+        vertexCount -= vertexCount % 4;
+        if (vertexCount < 4) {
+            return;
+        }
+        int bytes = vertexCount * SPRITE_VERTEX_STRIDE;
+        if (vertices.remaining() < bytes) {
+            return;
+        }
+        if (spriteScratchVertices + vertexCount > MAX_SPRITE_VERTICES
+                || spriteBatchCount >= spriteCutoffs.length && !growSpriteBatches()) {
+            spriteDropped++;
+            if (!spriteOverflowLogged) {
+                spriteOverflowLogged = true;
+                LOGGER.warn("More sprite geometry in one frame than this renderer will hold "
+                        + "({} vertices); the surplus is left to OpenGL", MAX_SPRITE_VERTICES);
+            }
+            return;
+        }
+        int used = spriteScratchVertices * SPRITE_VERTEX_STRIDE;
+        if (spriteScratch == null || spriteScratch.capacity() - used < bytes) {
+            int want = Integer.highestOneBit(Math.max(used + bytes, 1 << 16)) * 2;
+            ByteBuffer grown = MemoryUtil.memAlloc(want);
+            if (spriteScratch != null) {
+                MemoryUtil.memCopy(MemoryUtil.memAddress0(spriteScratch),
+                        MemoryUtil.memAddress0(grown), used);
+                MemoryUtil.memFree(spriteScratch);
+            }
+            spriteScratch = grown;
+        }
+        MemoryUtil.memCopy(MemoryUtil.memAddress(vertices),
+                MemoryUtil.memAddress0(spriteScratch) + used, bytes);
+        int b = spriteBatchCount++;
+        spriteBatches[b * 3] = spriteScratchVertices;
+        spriteBatches[b * 3 + 1] = vertexCount;
+        spriteBatches[b * 3 + 2] = slot;
+        spriteCutoffs[b] = cutoff;
+        spriteScratchVertices += vertexCount;
+    }
+
+    private boolean growSpriteBatches() {
+        int want = spriteCutoffs.length * 2;
+        if (want > 4096) {
+            return false;
+        }
+        int[] batches = new int[want * 3];
+        float[] cutoffs = new float[want];
+        System.arraycopy(spriteBatches, 0, batches, 0, spriteBatchCount * 3);
+        System.arraycopy(spriteCutoffs, 0, cutoffs, 0, spriteBatchCount);
+        spriteBatches = batches;
+        spriteCutoffs = cutoffs;
+        return true;
+    }
+
+    private void clearSprites() {
+        spriteBatchCount = 0;
+        spriteScratchVertices = 0;
+    }
+
+    /**
+     * Moves this frame's sprite vertices onto the card and makes sure there are
+     * enough quad indices for them.
+     *
+     * Called after the translucent fence has been waited for and before any
+     * command is recorded: both things it touches — the per-slot vertex buffer
+     * and the shared index buffer — may be destroyed and rebuilt here, and
+     * neither may be in flight when that happens.
+     */
+    private boolean prepareSprites() {
+        if (spriteBatchCount == 0 || spritePipeline == 0) {
+            return false;
+        }
+        int slot = activeFrameSlot;
+        long bytes = (long) spriteScratchVertices * SPRITE_VERTEX_STRIDE;
+        if (!ensureSpriteVertexCapacity(slot, bytes)) {
+            clearSprites();
+            return false;
+        }
+        MemoryUtil.memCopy(MemoryUtil.memAddress0(spriteScratch), spriteVertexMapped[slot], bytes);
+        int quads = spriteScratchVertices / 4;
+        if (quads > quadIndexCapacityQuads) {
+            // Growing it destroys the buffer, and the opaque pass of the frame
+            // before this one may still be reading from it — its fence is a
+            // different one from the fence waited on above. Rare enough to
+            // afford the bluntest possible answer.
+            vkDeviceWaitIdle(device());
+            ensureQuadIndexCapacity(quads);
+        }
+        return true;
+    }
+
+    /** Records this frame's sprite batches into the translucent pass. */
+    private void drawSprites(MemoryStack stack, VkCommandBuffer cmd) {
+        int slot = activeFrameSlot;
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, spritePipeline);
+        vkCmdBindVertexBuffers(cmd, 0, stack.longs(spriteVertexBuffers[slot]), stack.longs(0L));
+        // The translucent set of this frame, for the light map and the frame
+        // constants. Set 1 is the one that changes between batches.
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, spritePipelineLayout, 0,
+                stack.longs(drawDescriptorSets[slot * BATCHES_PER_FRAME + LAYER_TRANSLUCENT]), null);
+        ByteBuffer push = stack.calloc(16);
+        // One allocation, reused: the stack frame is not popped until the whole
+        // pass has been recorded, and a batch list can be thousands long.
+        LongBuffer setHandle = stack.mallocLong(1);
+        long boundTexture = 0;
+        for (int b = 0; b < spriteBatchCount; b++) {
+            int first = spriteBatches[b * 3];
+            int count = spriteBatches[b * 3 + 1];
+            int sheet = spriteBatches[b * 3 + 2];
+            long set = spriteSets[sheet];
+            // Slot 0 borrows the terrain's atlas and has no image of its own;
+            // the rest must have one. A set whose image was freed by a resource
+            // reload still looks like a valid handle and would take the device
+            // down, which is the sort of thing that is invisible until it is
+            // fatal — so the check is on the image, not on the set.
+            if (set == 0 || (sheet != 0 && spriteImages[sheet] == 0)) {
+                continue; // sheet never arrived, or went away; dropped, not drawn wrong
+            }
+            push.putFloat(0, spriteCutoffs[b]);
+            vkCmdPushConstants(cmd, spritePipelineLayout,
+                    VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, push);
+            if (set != boundTexture) {
+                boundTexture = set;
+                setHandle.put(0, set);
+                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, spritePipelineLayout,
+                        1, setHandle, null);
+            }
+            // firstIndex stays at zero and the offset goes on the vertices:
+            // every batch is whole quads, so the same run of indices serves all
+            // of them and only where they read from moves.
+            vkCmdDrawIndexed(cmd, count / 4 * 6, 1, 0, first, 0);
+            spriteFrameBatches++;
+            spriteFrameVertices += count;
+        }
+    }
+
+    private boolean ensureSpriteVertexCapacity(int slot, long bytes) {
+        if (spriteVertexBuffers == null) {
+            spriteVertexBuffers = new long[framesInFlight];
+            spriteVertexMemories = new long[framesInFlight];
+            spriteVertexMapped = new long[framesInFlight];
+            spriteVertexCapacity = new long[framesInFlight];
+        }
+        if (spriteVertexCapacity[slot] >= bytes && spriteVertexBuffers[slot] != 0) {
+            return true;
+        }
+        long want = Math.max(bytes, 1L << 18);
+        want = Long.highestOneBit(want) * 2;
+        destroySpriteVertexBuffer(slot);
+        try (MemoryStack stack = stackPush()) {
+            VkBufferCreateInfo info = VkBufferCreateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO)
+                    .size(want)
+                    .usage(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT)
+                    .sharingMode(VK_SHARING_MODE_EXCLUSIVE);
+            LongBuffer pBuffer = stack.mallocLong(1);
+            if (vkCreateBuffer(device(), info, null, pBuffer) != VK_SUCCESS) {
+                return false;
+            }
+            long buffer = pBuffer.get(0);
+            VkMemoryRequirements req = VkMemoryRequirements.malloc(stack);
+            vkGetBufferMemoryRequirements(device(), buffer, req);
+            int type = findMemoryTypeOrNone(stack, req.memoryTypeBits(),
+                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+            if (type < 0) {
+                vkDestroyBuffer(device(), buffer, null);
+                return false;
+            }
+            VkMemoryAllocateInfo alloc = VkMemoryAllocateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO)
+                    .allocationSize(req.size())
+                    .memoryTypeIndex(type);
+            LongBuffer pMemory = stack.mallocLong(1);
+            if (vkAllocateMemory(device(), alloc, null, pMemory) != VK_SUCCESS) {
+                vkDestroyBuffer(device(), buffer, null);
+                return false;
+            }
+            long memory = pMemory.get(0);
+            check(vkBindBufferMemory(device(), buffer, memory, 0), "vkBindBufferMemory(sprites)");
+            PointerBuffer ppData = stack.mallocPointer(1);
+            check(vkMapMemory(device(), memory, 0, want, 0, ppData), "vkMapMemory(sprites)");
+            spriteVertexBuffers[slot] = buffer;
+            spriteVertexMemories[slot] = memory;
+            spriteVertexMapped[slot] = ppData.get(0);
+            spriteVertexCapacity[slot] = want;
+        }
+        LOGGER.info("Sprite vertex buffer {} sized for {} KiB", slot, want / 1024);
+        return true;
+    }
+
+    private void destroySpriteVertexBuffer(int slot) {
+        if (spriteVertexBuffers == null || spriteVertexBuffers[slot] == 0) {
+            return;
+        }
+        vkUnmapMemory(device(), spriteVertexMemories[slot]);
+        vkDestroyBuffer(device(), spriteVertexBuffers[slot], null);
+        vkFreeMemory(device(), spriteVertexMemories[slot], null);
+        spriteVertexBuffers[slot] = 0;
+        spriteVertexMemories[slot] = 0;
+        spriteVertexMapped[slot] = 0;
+        spriteVertexCapacity[slot] = 0;
+    }
+
+    private void destroySpriteImage(int slot) {
+        if (spriteImages[slot] == 0) {
+            return;
+        }
+        vkDeviceWaitIdle(device());
+        vkDestroyImageView(device(), spriteViews[slot], null);
+        vkDestroyImage(device(), spriteImages[slot], null);
+        vkFreeMemory(device(), spriteMemories[slot], null);
+        spriteImages[slot] = 0;
+        spriteViews[slot] = 0;
+        spriteMemories[slot] = 0;
+        spriteGlIds[slot] = 0;
+    }
+
+    /** Forgets every uploaded sheet, because a resource reload renumbers them. */
+    private void forgetSpriteSheets() {
+        for (int slot = 1; slot < SPRITE_SLOTS; slot++) {
+            destroySpriteImage(slot);
+        }
+    }
+
+    private void writeSpriteSet(int slot, long view, long sampler) {
+        if (spriteSets[slot] == 0 || view == 0 || sampler == 0) {
+            return;
+        }
+        vkDeviceWaitIdle(device());
+        try (MemoryStack stack = stackPush()) {
+            VkDescriptorImageInfo.Buffer info = VkDescriptorImageInfo.calloc(1, stack);
+            info.get(0).sampler(sampler).imageView(view)
+                    .imageLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+            VkWriteDescriptorSet.Buffer write = VkWriteDescriptorSet.calloc(1, stack);
+            write.get(0)
+                    .sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET)
+                    .dstSet(spriteSets[slot]).dstBinding(0).descriptorCount(1)
+                    .descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER).pImageInfo(info);
+            vkUpdateDescriptorSets(device(), write, null);
+        }
+    }
+
+    /**
      * Whether the depth the game owns can be put back into the shared image at
      * all — by the hardware copy, or failing that by the shader that replaced
      * it. Without one of the two the translucent layer has nothing to test
@@ -1667,16 +2066,27 @@ final class VkTerrainRenderer {
     private boolean renderTranslucent(int[] chunks, int chunkCount, float[] mvp,
                                       double viewX, double viewY, double viewZ,
                                       VkChunkMirror mirror) {
-        if (translucentFramebuffer == 0 || !canReturnDepth() || chunkCount == 0) {
+        // Sprites are drawn in this pass, so a frame with particles and no
+        // water still needs it. Without that second term, standing in a desert
+        // and breaking a block put the particles nowhere at all.
+        if (translucentFramebuffer == 0 || !canReturnDepth()
+                || (chunkCount == 0 && spriteBatchCount == 0)) {
             // With no way to get the game's depth back, drawing the layer
             // would be worse than leaving it where it is.
             return false;
         }
         int slot = activeFrameSlot;
+        boolean sprites;
         try (MemoryStack stack = stackPush()) {
             check(vkWaitForFences(device(), translucentFences[slot], true, Long.MAX_VALUE),
                     "vkWaitForFences(translucent)");
             check(vkResetFences(device(), translucentFences[slot]), "vkResetFences(translucent)");
+
+            // Both the buffer this writes and the index buffer it may resize
+            // are read by the commands recorded below, so it goes before the
+            // first of them and after the fence that says the last frame to
+            // use them has finished.
+            sprites = prepareSprites();
 
             importGlDepth();
 
@@ -1706,6 +2116,17 @@ final class VkTerrainRenderer {
             VkRect2D.Buffer scissor = VkRect2D.calloc(1, stack);
             scissor.get(0).extent(VkExtent2D.calloc(stack).width(width).height(height));
             vkCmdSetScissor(cmd, 0, scissor);
+
+            // Sprites first, water second, which is the order vanilla draws
+            // them in: a bubble behind a water surface has to end up under the
+            // water's colour rather than over it. Depth cannot settle it here —
+            // the attachment is read-only, so nothing in this pass occludes
+            // anything else in it — which leaves the order of the draws as the
+            // whole of the answer.
+            if (sprites) {
+                drawSprites(stack, cmd);
+            }
+            clearSprites();
 
             VkCommandBuffer previous = commandBuffer;
             commandBuffer = cmd;
@@ -3293,6 +3714,7 @@ final class VkTerrainRenderer {
             pipelineCacheHandle = pipelineCache.create(
                     device(), System.getProperty("vulkanmod112.pipelineCache"));
             createPipeline(stack);
+            createSpriteResources(stack);
             createCompositeProgram();
         }
         updateDescriptors();
@@ -3885,6 +4307,12 @@ final class VkTerrainRenderer {
             }
             vkUpdateDescriptorSets(device(), writes, null);
         }
+        // Slot 0 of the sprite textures is the block atlas itself — the image
+        // the terrain already draws from, not a copy of it. Block-shaped
+        // particles are a handful of quads a second; a second atlas for them
+        // would be sixteen megabytes of video memory on a high-resolution
+        // resource pack.
+        writeSpriteSet(0, atlasView, atlasSampler);
     }
 
     private void createRenderPass(MemoryStack stack) {
@@ -4169,6 +4597,185 @@ final class VkTerrainRenderer {
         for (int variant = 0; variant < TERRAIN_PIPELINES.length; variant++) {
             pipelines[variant] = pPipeline.get(variant);
         }
+
+        vkDestroyShaderModule(device(), vertModule, null);
+        vkDestroyShaderModule(device(), fragModule, null);
+    }
+
+    /**
+     * The one pipeline that draws everything the game builds as camera-facing
+     * quads, and the descriptors it picks a texture with.
+     *
+     * It lives in the translucent render pass, which is what makes the whole
+     * arrangement worth having: that pass already has the game's depth loaded
+     * into it and already ends in a composite over the game's frame. Particles
+     * and weather ride along in the submission that was going to happen
+     * anyway, and cost no extra transfer between the two APIs at all.
+     */
+    private void createSpriteResources(MemoryStack stack) {
+        VkSamplerCreateInfo samplerInfo = VkSamplerCreateInfo.calloc(stack)
+                .sType(VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO)
+                .magFilter(VK_FILTER_NEAREST).minFilter(VK_FILTER_NEAREST)
+                .mipmapMode(VK_SAMPLER_MIPMAP_MODE_NEAREST).maxLod(0.0f)
+                // Rain and snow scroll their texture coordinates past 1 to make
+                // the fall, so this one sheet genuinely needs to repeat.
+                .addressModeU(VK_SAMPLER_ADDRESS_MODE_REPEAT)
+                .addressModeV(VK_SAMPLER_ADDRESS_MODE_REPEAT)
+                .addressModeW(VK_SAMPLER_ADDRESS_MODE_REPEAT);
+        LongBuffer pSampler = stack.mallocLong(1);
+        check(vkCreateSampler(device(), samplerInfo, null, pSampler), "vkCreateSampler(sprite)");
+        spriteSampler = pSampler.get(0);
+
+        VkDescriptorSetLayoutBinding.Buffer binding = VkDescriptorSetLayoutBinding.calloc(1, stack);
+        binding.get(0).binding(0)
+                .descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+                .descriptorCount(1)
+                .stageFlags(VK_SHADER_STAGE_FRAGMENT_BIT);
+        VkDescriptorSetLayoutCreateInfo layoutInfo = VkDescriptorSetLayoutCreateInfo.calloc(stack)
+                .sType(VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO)
+                .pBindings(binding);
+        LongBuffer pLayout = stack.mallocLong(1);
+        check(vkCreateDescriptorSetLayout(device(), layoutInfo, null, pLayout),
+                "vkCreateDescriptorSetLayout(sprite)");
+        spriteSetLayout = pLayout.get(0);
+
+        VkDescriptorPoolSize.Buffer poolSizes = VkDescriptorPoolSize.calloc(1, stack);
+        poolSizes.get(0).type(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER).descriptorCount(SPRITE_SLOTS);
+        VkDescriptorPoolCreateInfo poolInfo = VkDescriptorPoolCreateInfo.calloc(stack)
+                .sType(VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO)
+                .pPoolSizes(poolSizes)
+                .maxSets(SPRITE_SLOTS);
+        LongBuffer pPool = stack.mallocLong(1);
+        check(vkCreateDescriptorPool(device(), poolInfo, null, pPool), "vkCreateDescriptorPool(sprite)");
+        spriteDescriptorPool = pPool.get(0);
+
+        VkDescriptorSetAllocateInfo setInfo = VkDescriptorSetAllocateInfo.calloc(stack)
+                .sType(VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO)
+                .descriptorPool(spriteDescriptorPool)
+                .pSetLayouts(stack.mallocLong(SPRITE_SLOTS));
+        for (int i = 0; i < SPRITE_SLOTS; i++) {
+            setInfo.pSetLayouts().put(i, spriteSetLayout);
+        }
+        LongBuffer pSets = stack.mallocLong(SPRITE_SLOTS);
+        check(vkAllocateDescriptorSets(device(), setInfo, pSets), "vkAllocateDescriptorSets(sprite)");
+        for (int i = 0; i < SPRITE_SLOTS; i++) {
+            spriteSets[i] = pSets.get(i);
+        }
+
+        long vertModule = createShaderModule(stack, "vulkanmod112/shaders/sprite.vert.spv");
+        long fragModule = createShaderModule(stack, "vulkanmod112/shaders/sprite.frag.spv");
+        ByteBuffer entryPoint = stack.UTF8("main");
+
+        VkVertexInputBindingDescription.Buffer vertexBinding =
+                VkVertexInputBindingDescription.calloc(1, stack);
+        vertexBinding.get(0).binding(0).stride(SPRITE_VERTEX_STRIDE)
+                .inputRate(VK_VERTEX_INPUT_RATE_VERTEX);
+        VkVertexInputAttributeDescription.Buffer attrs =
+                VkVertexInputAttributeDescription.calloc(4, stack);
+        attrs.get(0).location(0).binding(0).format(VK_FORMAT_R32G32B32_SFLOAT).offset(0);
+        attrs.get(1).location(1).binding(0).format(VK_FORMAT_R32G32_SFLOAT).offset(12);
+        attrs.get(2).location(2).binding(0).format(VK_FORMAT_R8G8B8A8_UNORM).offset(20);
+        attrs.get(3).location(3).binding(0).format(VK_FORMAT_R16G16_SSCALED).offset(24);
+        VkPipelineVertexInputStateCreateInfo vertexInput =
+                VkPipelineVertexInputStateCreateInfo.calloc(stack)
+                        .sType(VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO)
+                        .pVertexBindingDescriptions(vertexBinding)
+                        .pVertexAttributeDescriptions(attrs);
+
+        VkPipelineInputAssemblyStateCreateInfo inputAssembly =
+                VkPipelineInputAssemblyStateCreateInfo.calloc(stack)
+                        .sType(VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO)
+                        .topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+        VkPipelineViewportStateCreateInfo viewportState =
+                VkPipelineViewportStateCreateInfo.calloc(stack)
+                        .sType(VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO)
+                        .viewportCount(1).scissorCount(1);
+        // No culling, and vanilla agrees: a particle is a quad turned to face
+        // the camera and weather turns culling off by hand. Which way round
+        // either of them comes out is not a fact anyone maintains.
+        VkPipelineRasterizationStateCreateInfo raster =
+                VkPipelineRasterizationStateCreateInfo.calloc(stack)
+                        .sType(VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO)
+                        .polygonMode(VK_POLYGON_MODE_FILL)
+                        .cullMode(VK_CULL_MODE_NONE)
+                        .frontFace(VK_FRONT_FACE_CLOCKWISE)
+                        .lineWidth(1.0f);
+        VkPipelineMultisampleStateCreateInfo multisample =
+                VkPipelineMultisampleStateCreateInfo.calloc(stack)
+                        .sType(VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO)
+                        .rasterizationSamples(VK_SAMPLE_COUNT_1_BIT);
+        // Tested, never written. The depth in this pass is the game's own,
+        // borrowed for the length of the pass and handed straight back, and the
+        // attachment is declared read-only for exactly that reason. What is
+        // lost by it is particles occluding each other, which vanilla does for
+        // one of its six queues; what would be lost by writing is the depth the
+        // game goes on drawing entities against.
+        VkPipelineDepthStencilStateCreateInfo depthState =
+                VkPipelineDepthStencilStateCreateInfo.calloc(stack)
+                        .sType(VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO)
+                        .depthTestEnable(true)
+                        .depthWriteEnable(false)
+                        .depthCompareOp(VK_COMPARE_OP_LESS_OR_EQUAL);
+        VkPipelineColorBlendAttachmentState.Buffer blendAttachment =
+                VkPipelineColorBlendAttachmentState.calloc(1, stack);
+        blendAttachment.get(0)
+                .blendEnable(true)
+                .colorWriteMask(VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT
+                        | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT)
+                .srcColorBlendFactor(VK_BLEND_FACTOR_ONE)
+                .dstColorBlendFactor(VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA)
+                .colorBlendOp(VK_BLEND_OP_ADD)
+                .srcAlphaBlendFactor(VK_BLEND_FACTOR_ONE)
+                .dstAlphaBlendFactor(VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA)
+                .alphaBlendOp(VK_BLEND_OP_ADD);
+        VkPipelineColorBlendStateCreateInfo blend = VkPipelineColorBlendStateCreateInfo.calloc(stack)
+                .sType(VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO)
+                .pAttachments(blendAttachment);
+        VkPipelineDynamicStateCreateInfo dynamic = VkPipelineDynamicStateCreateInfo.calloc(stack)
+                .sType(VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO)
+                .pDynamicStates(stack.ints(VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR));
+
+        VkPushConstantRange.Buffer pushRange = VkPushConstantRange.calloc(1, stack);
+        pushRange.get(0)
+                .stageFlags(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
+                .offset(0).size(16);
+        VkPipelineLayoutCreateInfo pipelineLayoutInfo = VkPipelineLayoutCreateInfo.calloc(stack)
+                .sType(VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO)
+                .pSetLayouts(stack.longs(descriptorSetLayout, spriteSetLayout))
+                .pPushConstantRanges(pushRange);
+        LongBuffer pPipelineLayout = stack.mallocLong(1);
+        check(vkCreatePipelineLayout(device(), pipelineLayoutInfo, null, pPipelineLayout),
+                "vkCreatePipelineLayout(sprite)");
+        spritePipelineLayout = pPipelineLayout.get(0);
+
+        VkPipelineShaderStageCreateInfo.Buffer stages =
+                VkPipelineShaderStageCreateInfo.calloc(2, stack);
+        stages.get(0)
+                .sType(VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO)
+                .stage(VK_SHADER_STAGE_VERTEX_BIT).module(vertModule).pName(entryPoint);
+        stages.get(1)
+                .sType(VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO)
+                .stage(VK_SHADER_STAGE_FRAGMENT_BIT).module(fragModule).pName(entryPoint);
+        VkGraphicsPipelineCreateInfo.Buffer pipelineInfo =
+                VkGraphicsPipelineCreateInfo.calloc(1, stack);
+        pipelineInfo.get(0)
+                .sType(VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO)
+                .pStages(stages)
+                .pVertexInputState(vertexInput)
+                .pInputAssemblyState(inputAssembly)
+                .pViewportState(viewportState)
+                .pRasterizationState(raster)
+                .pMultisampleState(multisample)
+                .pDepthStencilState(depthState)
+                .pColorBlendState(blend)
+                .pDynamicState(dynamic)
+                .layout(spritePipelineLayout)
+                .renderPass(translucentRenderPass)
+                .subpass(0);
+        LongBuffer pPipeline = stack.mallocLong(1);
+        check(vkCreateGraphicsPipelines(device(), pipelineCacheHandle, pipelineInfo, null, pPipeline),
+                "vkCreateGraphicsPipelines(sprite)");
+        spritePipeline = pPipeline.get(0);
 
         vkDestroyShaderModule(device(), vertModule, null);
         vkDestroyShaderModule(device(), fragModule, null);
@@ -5404,6 +6011,42 @@ final class VkTerrainRenderer {
     // Cleanup
     // ------------------------------------------------------------------
 
+    private void destroySprites() {
+        forgetSpriteSheets();
+        if (spriteVertexBuffers != null) {
+            for (int i = 0; i < spriteVertexBuffers.length; i++) {
+                destroySpriteVertexBuffer(i);
+            }
+            spriteVertexBuffers = null;
+        }
+        if (spritePipeline != 0) {
+            vkDestroyPipeline(device(), spritePipeline, null);
+            spritePipeline = 0;
+        }
+        if (spritePipelineLayout != 0) {
+            vkDestroyPipelineLayout(device(), spritePipelineLayout, null);
+            spritePipelineLayout = 0;
+        }
+        if (spriteDescriptorPool != 0) {
+            vkDestroyDescriptorPool(device(), spriteDescriptorPool, null);
+            spriteDescriptorPool = 0;
+            java.util.Arrays.fill(spriteSets, 0L);
+        }
+        if (spriteSetLayout != 0) {
+            vkDestroyDescriptorSetLayout(device(), spriteSetLayout, null);
+            spriteSetLayout = 0;
+        }
+        if (spriteSampler != 0) {
+            vkDestroySampler(device(), spriteSampler, null);
+            spriteSampler = 0;
+        }
+        if (spriteScratch != null) {
+            MemoryUtil.memFree(spriteScratch);
+            spriteScratch = null;
+        }
+        clearSprites();
+    }
+
     private void destroyAtlas() {
         destroyAtlasStaging();
         if (atlasImage != 0) {
@@ -5493,6 +6136,7 @@ final class VkTerrainRenderer {
         vkDeviceWaitIdle(device());
         destroyTargets();
         destroyAtlas();
+        destroySprites();
         if (lightmapImage != 0) {
             vkDestroyImageView(device(), lightmapView, null);
             vkDestroyImage(device(), lightmapImage, null);

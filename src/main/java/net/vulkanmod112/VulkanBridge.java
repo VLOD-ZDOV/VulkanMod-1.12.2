@@ -215,4 +215,42 @@ public interface VulkanBridge {
      */
     boolean drawsTranslucent();
 
+    /**
+     * Whether particles and weather can go through Vulkan on this machine.
+     *
+     * Always false where {@link #drawsTranslucent} is false, and for the same
+     * reason it is one question rather than two: sprites are drawn inside the
+     * translucent pass, and there is no second place to put them that would not
+     * cost another round trip of the game's depth.
+     */
+    boolean drawsSprites();
+
+    /**
+     * Copies one of the game's sprite sheets into Vulkan, by slot.
+     *
+     * Slot 0 is the block atlas and is never sent here — it is already in
+     * Vulkan for the terrain and is shared rather than copied. Slots 1 upwards
+     * are the particle sheet, rain and snow. Call after a resource reload: the
+     * game hands out fresh GL names then, and the old copies are last pack's.
+     */
+    void updateSpriteTexture(int slot, int glTextureId);
+
+    /**
+     * Hands over one batch of camera-facing quads for this frame.
+     *
+     * {@code vertices} is the game's own buffer in its
+     * PARTICLE_POSITION_TEX_COLOR_LMAP layout — position, texture, colour,
+     * light map, 28 bytes a vertex — positioned at the payload, and it is read
+     * without its position or limit being touched, like every other buffer that
+     * crosses this boundary.
+     *
+     * Batches are drawn in the order they arrive, which is the whole of what
+     * decides what ends up over what: the pass they are drawn in borrows the
+     * game's depth read-only, so nothing in it occludes anything else in it.
+     *
+     * {@code alphaCutoff} is the game's own alpha test for this batch, and the
+     * two values differ: particles cut at one 255th, weather at a tenth.
+     */
+    void submitSprites(java.nio.ByteBuffer vertices, int vertexCount, int spriteSlot, float alphaCutoff);
+
 }
