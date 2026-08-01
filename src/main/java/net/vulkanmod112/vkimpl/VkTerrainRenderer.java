@@ -4263,6 +4263,12 @@ final class VkTerrainRenderer {
         // How many moving lights a fragment may ask about. Nothing at all when
         // there is no structure to ask.
         MemoryUtil.memPutFloat(base + 972, tracingWanted() ? tracedLights() : 0.0f);
+        // vec4 lightShadow at 976: how wide a torch's flame is treated as
+        // being. Tied to the same softness the sun uses, because a player who
+        // wants one edge soft wants the other soft too, and two sliders for one
+        // preference is one slider too many.
+        MemoryUtil.memPutFloat(base + 976,
+                clampPercent(intProperty("vulkanmod112.shadowSoftness", 35)) * MAX_LIGHT_RADIUS);
     }
 
     /**
@@ -4288,6 +4294,17 @@ final class VkTerrainRenderer {
      * reading as speckle.
      */
     private static final float MAX_SUN_SPREAD = 0.052f;
+
+    /**
+     * How wide a moving light may be treated as being, in blocks.
+     *
+     * Three quarters of a block at full softness, which is several times a
+     * torch flame. A flame-sized source gives a border a few centimetres wide,
+     * and a few centimetres at this resolution is the hard edge again — so
+     * this, like the sun's width, is really choosing how far a single ray may
+     * be thrown off rather than describing anything.
+     */
+    private static final float MAX_LIGHT_RADIUS = 0.75f;
 
     /** Camera-relative, which for this axis-aligned frame is world direction. */
     private final float[] sunDirection = {0.0f, 1.0f, 0.0f};

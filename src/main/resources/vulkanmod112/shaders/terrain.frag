@@ -60,6 +60,10 @@ layout(set = 0, binding = 3, std140) uniform Frame {
     // w = how many of the moving lights may be traced per fragment. 0 leaves
     //     them shining through walls, which is what they always did.
     vec4 sunParams;
+    // x = how wide a moving light is treated as being, in blocks. A torch is a
+    //     flame rather than a point, and a point casts an edge with no width
+    //     at all.
+    vec4 lightShadow;
 } frame;
 
 layout(push_constant) uniform Draw {
@@ -310,14 +314,45 @@ float lightBlocked(vec3 normal, vec3 toSource, float distance) {
 #ifdef RAY_QUERY
     vec3 direction = toSource / distance;
     float facing = dot(normal, direction);
-    if (facing <= 0.0) {
-        return 0.0;
+    // Somewhere on the flame, not at its centre.
+    //
+    // A point source casts an edge with no width, and a torch is not a point:
+    // the shadow it throws has a soft border that widens the further the
+    // shadow falls from what cast it, which comes out of this on its own —
+    // aim at a different spot on the flame for every pixel and a distant
+    // shadow's border spreads while a contact shadow's stays tight.
+    vec3 target = toSource;
+    float radius = frame.lightShadow.x;
+    if (radius > 0.0) {
+        vec3 tangent = normalize(cross(direction,
+                abs(direction.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
+        vec3 bitangent = cross(direction, tangent);
+        float angle = ditherValue(gl_FragCoord.xy + 11.13) * 6.2831853;
+        float offset = sqrt(ditherValue(gl_FragCoord.xy + 17.71)) * radius;
+        target += (cos(angle) * tangent + sin(angle) * bitangent) * offset;
     }
-    vec3 from = vRelative + normal * (0.02 + 0.14 * (1.0 - facing));
+    float travel = length(target);
+    direction = target / travel;
+    // Off the surface along the light, and along the face as well where the
+    // face is turned towards it.
+    //
+    // Both, because either alone fails somewhere. Along the normal is what
+    // keeps a lit floor from finding itself, and it is nothing at all for a
+    // surface turned away from the light — a blade of grass is two crossed
+    // quads and one of them always is, and that one used to be skipped
+    // entirely and lit straight through the block in front of it. Along the
+    // light works for that one and is useless where the light runs flat along
+    // the ground, which is what the second term is for.
+    vec3 from = vRelative + direction * 0.05
+            + normal * (facing > 0.0 ? (0.02 + 0.14 * (1.0 - facing)) : 0.0);
     rayQueryEXT query;
     rayQueryInitializeEXT(query, terrainStructure,
             gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT,
-            0xFFu, from, 0.02, direction, max(distance - 0.6, 0.05));
+            // Stopping short of the source, and never inside half of the way:
+            // a torch is a piece of geometry standing in front of the light it
+            // emits, and a fixed margin that is right for a lamp across the
+            // room is most of the distance to one held in the hand.
+            0xFFu, from, 0.02, direction, max(travel - 0.5, travel * 0.5));
     rayQueryProceedEXT(query);
     return rayQueryGetIntersectionTypeEXT(query, true)
             != gl_RayQueryCommittedIntersectionNoneEXT ? 1.0 : 0.0;
