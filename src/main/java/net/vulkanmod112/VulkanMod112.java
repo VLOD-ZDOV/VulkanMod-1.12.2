@@ -33,6 +33,12 @@ public class VulkanMod112 {
         net.vulkanmod112.client.Zoom.register();
         net.minecraftforge.common.MinecraftForge.EVENT_BUS.register(
                 new net.vulkanmod112.client.Zoom.Handler());
+        // Same reason, and more so: the settings screen is where a fallback is
+        // diagnosed, so the shortcut to it has to exist on exactly the machines
+        // where the renderer did not come up.
+        net.vulkanmod112.client.SettingsKey.register();
+        net.minecraftforge.common.MinecraftForge.EVENT_BUS.register(
+                new net.vulkanmod112.client.SettingsKey.Handler());
         // Also independent of Vulkan: a frame-time graph is wanted most in the
         // case where the renderer did not come up.
         net.minecraftforge.common.MinecraftForge.EVENT_BUS.register(

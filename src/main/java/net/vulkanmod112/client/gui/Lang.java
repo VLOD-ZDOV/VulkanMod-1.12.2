@@ -110,6 +110,20 @@ public final class Lang {
         return out.toString();
     }
 
+    /**
+     * The mod's key bindings, in pairs of key and English name.
+     *
+     * Written out literally because Minecraft names these itself — nothing here
+     * derives them from English text the way every other string in this class
+     * does, so the generator has to be told about them or they vanish from the
+     * file it generates.
+     */
+    private static final String[] KEY_STRINGS = {
+            "key.categories.vulkanmod112", "VulkanMod112",
+            "key.vulkanmod112.zoom", "Zoom",
+            "key.vulkanmod112.settings", "VulkanMod112 Settings",
+    };
+
     /** Chrome that belongs to no option. */
     private static final String[] UI_STRINGS = {
             "Reset", "Cost", "CPU", "GPU", "VRAM", "Vulkan unavailable",
@@ -133,6 +147,13 @@ public final class Lang {
         StringBuilder out = new StringBuilder(16384);
         out.append("# Generated with -Dvulkanmod112.dumpLang=true. Keys are derived from the\n");
         out.append("# English text in the source; see Lang.\n");
+        // Key bindings are named by Minecraft's own key format, not by this
+        // class's derived keys — so they have to be written here or the
+        // generated file loses them. It did once: regenerating dropped both,
+        // and Controls showed players the raw key string instead of a name.
+        for (int i = 0; i < KEY_STRINGS.length; i += 2) {
+            out.append(KEY_STRINGS[i]).append('=').append(KEY_STRINGS[i + 1]).append('\n');
+        }
         for (String ui : UI_STRINGS) {
             emit(out, UI, ui, ui);
         }

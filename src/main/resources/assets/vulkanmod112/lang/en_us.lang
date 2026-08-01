@@ -1,5 +1,8 @@
 # Generated with -Dvulkanmod112.dumpLang=true. Keys are derived from the
 # English text in the source; see Lang.
+key.categories.vulkanmod112=VulkanMod112
+key.vulkanmod112.zoom=Zoom
+key.vulkanmod112.settings=VulkanMod112 Settings
 vulkanmod112.ui.reset=Reset
 vulkanmod112.ui.cost=Cost
 vulkanmod112.ui.cpu=CPU
@@ -195,6 +198,11 @@ vulkanmod112.option.frames_in_flight=Frames In Flight
 vulkanmod112.tooltip.frames_in_flight=How many terrain frames the CPU may prepare before waiting for the GPU. Higher hides stalls when the CPU is the bottleneck, at the cost of one more frame of input delay and another copy of the per-frame buffers. 2 is the safe default.
 vulkanmod112.applies.frames_in_flight=Applies after the game restarts.
 vulkanmod112.unit.frames= frames
+vulkanmod112.option.entity_capture=Entity Capture
+vulkanmod112.tooltip.entity_capture=Read what the game draws for every creature and draw none of it. The first step of moving entities into Vulkan, and it takes nothing over: entities are the part of the game other mods hook hardest, so before anything is replaced this measures how much of a real scene comes through the ordinary model path, and what asking OpenGL where each part is costs. Nothing on screen changes; the answer is a line in the diagnostics report.
+vulkanmod112.option.terrain_acceleration_structures=Terrain Acceleration Structures
+vulkanmod112.tooltip.terrain_acceleration_structures=Build the structures a traced ray needs over the terrain this mod draws. Nothing uses them yet, and the world looks exactly the same with this on. What it produces is a measurement: the obstacle to ray tracing in this game has always been that the structure has to be rebuilt whenever a chunk is, and rebuilding chunks is already the largest cost in a moving frame — this turns that sentence into a number in the diagnostics report. Needs Vulkan 1.2 and the acceleration-structure extension; if the card cannot, the report says which part is missing.
+vulkanmod112.applies.terrain_acceleration_structures=Applies after the game restarts.
 vulkanmod112.option.vulkan_gpu=Vulkan GPU
 vulkanmod112.tooltip.vulkan_gpu=Which graphics card Vulkan renders on, by the number the log gives it — open the diagnostics report to see which card is which. Automatic does not mean the fastest card: it means the card OpenGL is already running on, because memory cannot be shared between two devices at all, and the game's OpenGL context was placed by the driver long before this mod loaded. On a laptop with two GPUs that is what decides whether the Vulkan terrain runs or quietly stays on OpenGL. To move the whole game to the other card, launch it with that card selected for OpenGL — this setting cannot do it, because the context exists before the mod does.
 vulkanmod112.applies.vulkan_gpu=Applies after the game restarts.
