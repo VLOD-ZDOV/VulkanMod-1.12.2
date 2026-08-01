@@ -1510,6 +1510,17 @@ final class VkTerrainRenderer {
                 vkQueueWaitIdle(ctx.getGraphicsQueue());
             }
             firstFrameStage("submitted");
+            if (tracingFirstFrame) {
+                // The one question three attempted fixes never asked: does the
+                // card finish our work at all? Everything after this waits on
+                // that being true, and if it is not, nothing on the OpenGL side
+                // was ever the defect. Bounded, so the answer arrives even when
+                // it is "no" — an unbounded wait here would look exactly like
+                // the hang it is meant to explain.
+                int done = vkWaitForFences(device(), fence, true, 3_000_000_000L);
+                LOGGER.info("First terrain frame: the card {} our work ({})",
+                        done == VK_SUCCESS ? "finished" : "did NOT finish", done);
+            }
             frameOpen = false;
         }
     }
