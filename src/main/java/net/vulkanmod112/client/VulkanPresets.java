@@ -18,9 +18,12 @@ import net.minecraft.client.settings.GameSettings;
  * anyone had tried that session, with no row on the screen admitting it. The
  * lists below are therefore deliberately repetitive.
  *
- * Render distance is the one exception, and it is capped rather than set: no
- * preset here raises a distance the player chose, because that is the setting
- * where a surprise costs frames rather than looks.
+ * Render distance is the one value treated differently, and which way depends
+ * on what the preset is for. The ones that trade looks for frames cap it and
+ * never raise it, because raising a distance somebody chose takes frames away
+ * without saying so. Beautiful sets it outright — asking for the best-looking
+ * world and being left at eight chunks would be the same failure in the other
+ * direction.
  */
 public final class VulkanPresets {
 
@@ -47,9 +50,69 @@ public final class VulkanPresets {
         int clouds;
         boolean entityShadows;
         int mipmap;
+        /** Never raised above what the player chose. */
         int renderDistanceCap;
+        /** Set outright rather than capped; -1 to use the cap instead. */
+        int renderDistanceExact = -1;
         int fpsLimit;
         boolean vsync;
+
+        // The effects this mod adds on top of the world. Every preset states
+        // all of them for the same reason it states everything else: one that
+        // only turns effects on cannot be undone by one that never heard of
+        // them, and a bloom left burning after switching to Performance is
+        // exactly the complaint this class exists to stop.
+        int directionalLight = VulkanConfig.DEF_DIRECTIONAL_LIGHT;
+        int heightFog;
+        int heightFogDepth = VulkanConfig.DEF_HEIGHT_FOG_DEPTH;
+        int waterReflection;
+        int waterWaves;
+        int foliageSway;
+        int bloom;
+        int screenReflections;
+        int shaderAmbientOcclusion;
+        int aoRadius = VulkanConfig.DEF_AO_RADIUS;
+    }
+
+    /**
+     * Everything on, on the assumption that the machine can afford it.
+     *
+     * The mirror image of Potato, and written second on purpose: a preset that
+     * only ever gives things up leaves nothing to come back to. This is what
+     * "come back" means.
+     *
+     * Screen reflections are set well below their maximum. They are the newest
+     * and least settled of the effects here, and a preset is the wrong place to
+     * show somebody an effect at its most demanding and least finished — the
+     * slider is still there for anyone who wants to push it.
+     */
+    public static void beautiful(Minecraft mc) {
+        Look look = new Look();
+        look.entityDistance = 256;
+        look.tileEntityDistance = 128;
+        look.backgroundFps = 10;
+        look.animations = true;
+        look.flatBlockColours = false;
+        look.framesInFlight = 3;
+        look.particles = 0;
+        look.fancy = true;
+        look.ambientOcclusion = 2;
+        look.clouds = 2;
+        look.entityShadows = true;
+        look.mipmap = 4;
+        look.renderDistanceExact = 32;
+        look.fpsLimit = 260;
+        look.vsync = false;
+
+        look.directionalLight = 65;
+        look.heightFog = 35;
+        look.waterReflection = 70;
+        look.waterWaves = 50;
+        look.foliageSway = 55;
+        look.bloom = 45;
+        look.screenReflections = 35;
+        look.shaderAmbientOcclusion = 60;
+        apply(mc, look);
     }
 
     /** Everything this mod owns back to the shipped values; vanilla untouched. */
@@ -171,6 +234,16 @@ public final class VulkanPresets {
         VulkanConfig.setCullingEnabled(true);
         VulkanConfig.setFramesInFlight(look.framesInFlight);
         VulkanConfig.setGeometryBudgetMiB(0);
+        VulkanConfig.setDirectionalLight(look.directionalLight);
+        VulkanConfig.setHeightFog(look.heightFog);
+        VulkanConfig.setHeightFogDepth(look.heightFogDepth);
+        VulkanConfig.setWaterReflection(look.waterReflection);
+        VulkanConfig.setWaterWaves(look.waterWaves);
+        VulkanConfig.setFoliageSway(look.foliageSway);
+        VulkanConfig.setBloom(look.bloom);
+        VulkanConfig.setScreenReflections(look.screenReflections);
+        VulkanConfig.setAmbientOcclusion(look.shaderAmbientOcclusion);
+        VulkanConfig.setAoRadius(look.aoRadius);
         if (look.chunkBuildThreads > 0) {
             VulkanConfig.setChunkBuildThreads(look.chunkBuildThreads);
         }
@@ -188,7 +261,9 @@ public final class VulkanPresets {
         settings.entityShadows = look.entityShadows;
         settings.limitFramerate = look.fpsLimit;
         settings.enableVsync = look.vsync;
-        if (settings.renderDistanceChunks > look.renderDistanceCap) {
+        if (look.renderDistanceExact > 0) {
+            settings.renderDistanceChunks = look.renderDistanceExact;
+        } else if (settings.renderDistanceChunks > look.renderDistanceCap) {
             settings.renderDistanceChunks = look.renderDistanceCap;
         }
         if (settings.mipmapLevels != look.mipmap) {

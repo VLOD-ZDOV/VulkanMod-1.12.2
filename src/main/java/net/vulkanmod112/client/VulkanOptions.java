@@ -59,6 +59,22 @@ final class VulkanOptions {
                                         VulkanPresets.stable();
                                     }
                                 }),
+                        new VActionOption("Beautiful",
+                                "Everything this mod can add, turned on: directional light, height "
+                                        + "fog, water that reflects and moves, swaying leaves, glow "
+                                        + "and ambient occlusion — with fancy graphics, full "
+                                        + "particles and thirty-two chunks of view. This is the one "
+                                        + "preset that raises the render distance rather than "
+                                        + "capping it. Screen reflections are set well below their "
+                                        + "maximum on purpose: they are the newest effect here and "
+                                        + "the least settled. Expect to lose frames.",
+                                Cost.of(Level.MEDIUM, Level.HIGH, Level.MEDIUM), null,
+                                new VActionOption.Action() {
+                                    @Override
+                                    public void run() {
+                                        VulkanPresets.beautiful(mc);
+                                    }
+                                }),
                         new VActionOption("Balanced",
                                 "Caps the draw distances vanilla leaves far wider than anyone can "
                                         + "actually see, and thins out particles. Costs almost nothing "
