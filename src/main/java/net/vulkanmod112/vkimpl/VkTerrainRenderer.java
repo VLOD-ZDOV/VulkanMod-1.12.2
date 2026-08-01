@@ -710,6 +710,27 @@ final class VkTerrainRenderer {
             !"false".equals(System.getProperty("vulkanmod112.interopSemaphores"));
 
     /**
+     * The layout the images shared with OpenGL are left in between frames.
+     *
+     * The semaphore calls are the only place the two APIs ever agree on a
+     * layout: glWaitSemaphoreEXT and glSignalSemaphoreEXT carry one per texture
+     * and nothing else does. Switching them off therefore removes the agreement
+     * along with the wait, and leaves OpenGL reading images in a layout it was
+     * never told about — which was a defect in that fallback rather than an
+     * observation about the driver it was written for.
+     *
+     * GENERAL is the layout that is valid for every access and the one an
+     * importing API assumes when it has been told nothing. It costs a little on
+     * the Vulkan side, which is beside the point on a path already stopping
+     * both APIs dead once a frame.
+     */
+    private static int sharedLayout() {
+        return SHARED_SEMAPHORES
+                ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                : VK_IMAGE_LAYOUT_GENERAL;
+    }
+
+    /**
      * Whether the shared images change hands between Vulkan and OpenGL by an
      * explicit ownership transfer.
      *
@@ -757,8 +778,8 @@ final class VkTerrainRenderer {
                     .sType(VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER)
                     .srcAccessMask(release ? VK_ACCESS_SHADER_READ_BIT : 0)
                     .dstAccessMask(release ? 0 : VK_ACCESS_SHADER_READ_BIT)
-                    .oldLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
-                    .newLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+                    .oldLayout(sharedLayout())
+                    .newLayout(sharedLayout())
                     .srcQueueFamilyIndex(release ? owner : external)
                     .dstQueueFamilyIndex(release ? external : owner)
                     .image(images[i]);
@@ -3104,7 +3125,7 @@ final class VkTerrainRenderer {
 
             VkExportSemaphoreCreateInfo export = VkExportSemaphoreCreateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO)
-                    .handleTypes(Interop.SEMAPHORE_HANDLE_TYPE);
+                    .handleTypes(Interop.semaphoreHandleType());
             // Windows hands out a handle with access rights attached, and the
             // rights are only defaulted when this structure is absent — which
             // a driver is free to read as "none". A handle like that imports
@@ -3658,7 +3679,7 @@ final class VkTerrainRenderer {
                 .stencilLoadOp(VK_ATTACHMENT_LOAD_OP_DONT_CARE)
                 .stencilStoreOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
                 .initialLayout(VK_IMAGE_LAYOUT_UNDEFINED)
-                .finalLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                .finalLayout(sharedLayout());
         attachments.get(1)
                 .format(depthFormat(stack))
                 .samples(VK_SAMPLE_COUNT_1_BIT)
@@ -3667,7 +3688,7 @@ final class VkTerrainRenderer {
                 .stencilLoadOp(VK_ATTACHMENT_LOAD_OP_DONT_CARE)
                 .stencilStoreOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
                 .initialLayout(VK_IMAGE_LAYOUT_UNDEFINED)
-                .finalLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                .finalLayout(sharedLayout());
 
         VkAttachmentReference.Buffer colorRef = VkAttachmentReference.calloc(1, stack);
         colorRef.get(0).attachment(0).layout(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
@@ -3713,7 +3734,7 @@ final class VkTerrainRenderer {
                 .stencilLoadOp(VK_ATTACHMENT_LOAD_OP_DONT_CARE)
                 .stencilStoreOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
                 .initialLayout(VK_IMAGE_LAYOUT_UNDEFINED)
-                .finalLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                .finalLayout(sharedLayout());
         attachments.get(1)
                 .format(depthFormat(stack))
                 .samples(VK_SAMPLE_COUNT_1_BIT)
@@ -3723,8 +3744,8 @@ final class VkTerrainRenderer {
                 .stencilStoreOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
                 // What the opaque pass left it in, and what it is handed back as
                 // so the GL side can go on sampling it.
-                .initialLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
-                .finalLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                .initialLayout(sharedLayout())
+                .finalLayout(sharedLayout());
 
         VkAttachmentReference.Buffer colorRef = VkAttachmentReference.calloc(1, stack);
         colorRef.get(0).attachment(0).layout(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);

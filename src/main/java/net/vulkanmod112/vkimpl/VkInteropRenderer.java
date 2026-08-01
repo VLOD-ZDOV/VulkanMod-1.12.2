@@ -277,7 +277,7 @@ final class VkInteropRenderer {
         try (MemoryStack stack = stackPush()) {
             VkExportSemaphoreCreateInfo export = VkExportSemaphoreCreateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO)
-                    .handleTypes(Interop.SEMAPHORE_HANDLE_TYPE);
+                    .handleTypes(Interop.semaphoreHandleType());
             VkSemaphoreCreateInfo semInfo = VkSemaphoreCreateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO)
                     .pNext(export.address());

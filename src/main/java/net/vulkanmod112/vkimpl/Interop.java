@@ -77,20 +77,35 @@ final class Interop {
      * -Dvulkanmod112.d3d12FenceSemaphores=false restores the opaque path for
      * comparison.
      */
-    static final boolean D3D12_FENCE_SEMAPHORES = WINDOWS
-            && !"false".equals(System.getProperty("vulkanmod112.d3d12FenceSemaphores"));
+    static boolean D3D12_FENCE_SEMAPHORES;
 
     /** Vulkan handle type the renderers must request when exporting memory. */
     static final int MEMORY_HANDLE_TYPE = WINDOWS
             ? VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT
             : VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
 
-    /** Vulkan handle type the renderers must request when exporting semaphores. */
-    static final int SEMAPHORE_HANDLE_TYPE = !WINDOWS
-            ? VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT
-            : (D3D12_FENCE_SEMAPHORES
-                    ? VK11.VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_D3D12_FENCE_BIT
-                    : VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_BIT);
+    /**
+     * Vulkan handle type the renderers request when exporting semaphores.
+     *
+     * Not a constant, and that is the whole point. Creating a semaphore with an
+     * export structure is not required to fail on a handle type the driver
+     * cannot actually export — it may hand back an object that simply does not
+     * work, and then the export itself returns success and produces a handle
+     * the operating system does not recognise. That is not a hypothesis: asking
+     * for a D3D12 fence on a card that answers "exportable=false" did exactly
+     * that, four times, once per semaphore, and the only trace of it was
+     * CloseHandle refusing all four.
+     *
+     * So the driver picks. {@link #chooseSemaphoreHandleType} asks it before
+     * anything is created, and this holds the answer.
+     */
+    private static int semaphoreHandleType = WINDOWS
+            ? VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_BIT
+            : VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT;
+
+    static int semaphoreHandleType() {
+        return semaphoreHandleType;
+    }
 
     /** Both GL_DEVICE_UUID_EXT and VkPhysicalDeviceIDProperties::deviceUUID are 16 bytes. */
     private static final int UUID_BYTES = 16;
@@ -262,6 +277,7 @@ final class Interop {
                     VK11.VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_D3D12_FENCE_BIT
             };
             String[] names = {"OPAQUE_WIN32", "D3D12_FENCE"};
+            boolean[] usable = new boolean[2];
             for (int i = 0; i < handleTypes.length; i++) {
                 VkPhysicalDeviceExternalSemaphoreInfo info =
                         VkPhysicalDeviceExternalSemaphoreInfo.calloc(stack)
@@ -278,6 +294,29 @@ final class Interop {
                         names[i], exportable, importable,
                         Integer.toHexString(props.compatibleHandleTypes()),
                         Integer.toHexString(props.exportFromImportedHandleTypes()));
+                usable[i] = exportable && importable;
+            }
+
+            // A fence is the better-worn road where it exists, but only where
+            // the driver says it can hand one out. Preference never outranks
+            // the answer: a type that cannot be exported produces a handle
+            // that is not one, and nothing downstream notices until the wait
+            // that never returns.
+            boolean preferFence = !"false".equals(
+                    System.getProperty("vulkanmod112.d3d12FenceSemaphores"));
+            if (preferFence && usable[1]) {
+                semaphoreHandleType = VK11.VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_D3D12_FENCE_BIT;
+                D3D12_FENCE_SEMAPHORES = true;
+            } else {
+                semaphoreHandleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+                D3D12_FENCE_SEMAPHORES = false;
+            }
+            LOGGER.info("Exporting semaphores as {}", D3D12_FENCE_SEMAPHORES
+                    ? "D3D12 fences" : "opaque Win32 handles");
+            if (!usable[0] && !usable[1]) {
+                LOGGER.warn("This driver can neither export nor import a semaphore OpenGL could "
+                        + "wait on. Sharing frames by semaphore cannot work here — start with "
+                        + "-Dvulkanmod112.interopSemaphores=false.");
             }
         }
     }
@@ -407,7 +446,7 @@ final class Interop {
             VkSemaphoreGetWin32HandleInfoKHR info = VkSemaphoreGetWin32HandleInfoKHR.calloc(stack)
                     .sType(KHRExternalSemaphoreWin32.VK_STRUCTURE_TYPE_SEMAPHORE_GET_WIN32_HANDLE_INFO_KHR)
                     .semaphore(semaphore)
-                    .handleType(SEMAPHORE_HANDLE_TYPE);
+                    .handleType(semaphoreHandleType());
             PointerBuffer pHandle = stack.mallocPointer(1);
             check(KHRExternalSemaphoreWin32.vkGetSemaphoreWin32HandleKHR(device, info, pHandle),
                     "vkGetSemaphoreWin32HandleKHR");
@@ -430,7 +469,7 @@ final class Interop {
             VkSemaphoreGetFdInfoKHR info = VkSemaphoreGetFdInfoKHR.calloc(stack)
                     .sType(KHRExternalSemaphoreFd.VK_STRUCTURE_TYPE_SEMAPHORE_GET_FD_INFO_KHR)
                     .semaphore(semaphore)
-                    .handleType(SEMAPHORE_HANDLE_TYPE);
+                    .handleType(semaphoreHandleType());
             IntBuffer pFd = stack.mallocInt(1);
             check(KHRExternalSemaphoreFd.vkGetSemaphoreFdKHR(device, info, pFd),
                     "vkGetSemaphoreFdKHR");
