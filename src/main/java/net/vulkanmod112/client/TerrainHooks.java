@@ -82,6 +82,8 @@ public final class TerrainHooks {
 
     private static long framesDrawn;
     private static int lastChunksDrawn;
+    /** Size of the list vanilla handed us for the opaque layer, before we touched it. */
+    private static int lastVanillaChunks;
 
     /**
      * How long vanilla spends drawing the layers we did not take, and how many
@@ -180,7 +182,14 @@ public final class TerrainHooks {
         if (bridge == null || !bridge.isInitialized()) {
             return "terrain: vanilla, Vulkan renderer never started";
         }
-        return "terrain: Vulkan, " + lastChunksDrawn + " chunks, frame " + framesDrawn;
+        // Both numbers, because one of them alone has now cost two rounds of
+        // asking a tester for a screenshot. The list is vanilla's: whatever it
+        // hands us for the opaque layer is everything we could possibly draw.
+        // A world that is missing with the two far apart is ours to fix; with
+        // the two equal and both small, vanilla decided that before we saw it,
+        // and the search to look at is the visibility walk.
+        return "terrain: Vulkan, " + lastChunksDrawn + " of " + lastVanillaChunks
+                + " chunks vanilla listed, frame " + framesDrawn;
     }
 
     /**
@@ -241,6 +250,10 @@ public final class TerrainHooks {
     /** Returns true when the Vulkan side took the layer and GL must skip it. */
     public static boolean renderChunkLayer(BlockRenderLayer layer, List<RenderChunk> chunks) {
         if (layer == BlockRenderLayer.SOLID) {
+            // Recorded before every guard below, because the case worth
+            // diagnosing is the one where we hand the layer straight back and
+            // draw nothing: what vanilla offered still has to be visible then.
+            lastVanillaChunks = chunks == null ? 0 : chunks.size();
             updateVanillaBufferDrop();
         }
         // Leaving before packChunks matters when the layer is not taken: water
