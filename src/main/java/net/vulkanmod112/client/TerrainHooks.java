@@ -546,9 +546,21 @@ public final class TerrainHooks {
         }
     }
 
+    /**
+     * Off with -Dvulkanmod112.noAtlasAnimations=true.
+     *
+     * A way to take the atlas upload out of the frame without taking the
+     * renderer out with it: animations freeze, everything else carries on. It
+     * exists because this path was rewritten to live across a frame instead of
+     * finishing inside a wait, and a driver fault is a poor place to start
+     * guessing which change caused it.
+     */
+    private static final boolean ATLAS_ANIMATIONS_OFF =
+            "true".equals(System.getProperty("vulkanmod112.noAtlasAnimations"));
+
     public static void flushAtlasAnimations() {
         VulkanBridge bridge = liveBridge();
-        if (bridge == null || !VulkanConfig.isTerrainEnabled()) {
+        if (bridge == null || ATLAS_ANIMATIONS_OFF || !VulkanConfig.isTerrainEnabled()) {
             AtlasAnimations.discard();
             return;
         }

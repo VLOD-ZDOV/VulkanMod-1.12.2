@@ -1118,6 +1118,37 @@ final class VkTerrainRenderer {
         atlasTicksQueued++;
     }
 
+    /**
+     * Whether every waiting region still lands inside the atlas.
+     *
+     * Cheap — a handful of comparisons per animated sprite — and it is the only
+     * thing standing between a resource reload arriving between two frames and
+     * a copy that writes past the end of an image.
+     */
+    private boolean pendingFitsAtlas() {
+        for (int base = 0; base < atlasPendingHeaderCount; base += 6) {
+            int level = atlasPendingHeader[base];
+            if (level < 0 || level >= atlasLevels) {
+                return false;
+            }
+            int levelWidth = Math.max(1, atlasWidth >> level);
+            int levelHeight = Math.max(1, atlasHeight >> level);
+            int x = atlasPendingHeader[base + 1];
+            int y = atlasPendingHeader[base + 2];
+            int w = atlasPendingHeader[base + 3];
+            int h = atlasPendingHeader[base + 4];
+            if (x < 0 || y < 0 || w <= 0 || h <= 0
+                    || x + w > levelWidth || y + h > levelHeight) {
+                return false;
+            }
+            long need = ((long) atlasPendingHeader[base + 5] + (long) w * h) * 4L;
+            if (need > atlasPendingBytes) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private void ensurePendingCapacity(int bytes) {
         if (atlasPendingPixels != null && atlasPendingPixels.capacity() >= bytes) {
             return;
@@ -1143,6 +1174,16 @@ final class VkTerrainRenderer {
      */
     private void recordAtlasUpload(MemoryStack stack) {
         if (atlasPendingBytes == 0 || atlasImage == 0) {
+            return;
+        }
+        if (!pendingFitsAtlas()) {
+            // The regions were measured against an atlas that no longer exists —
+            // a resource pack changed, or the mipmap slider moved. Copying them
+            // into the new one would write outside it, and a write outside an
+            // image is not a wrong pixel, it is the card faulting.
+            atlasPendingBytes = 0;
+            atlasPendingHeaderCount = 0;
+            atlasPendingDropped++;
             return;
         }
         int slot = activeFrameSlot;
@@ -6837,9 +6878,21 @@ final class VkTerrainRenderer {
     }
 
     private void destroyAtlas() {
+        // Before anything is freed, and not only before the image is.
+        //
+        // The staging buffer used to be referenced by a submission this thread
+        // had already waited on, so freeing it here could not race anything.
+        // It is now read by a copy recorded into the frame's own command
+        // buffer, which may be running on the card at this moment — and a
+        // resource reload calls this from the game thread, where holding the
+        // renderer's lock says nothing about what the card is doing. Freeing
+        // memory a copy is reading from is a fault in the driver, not an
+        // exception here.
+        if (atlasImage != 0 || atlasStagingBuffer != null) {
+            vkDeviceWaitIdle(device());
+        }
         destroyAtlasStaging();
         if (atlasImage != 0) {
-            vkDeviceWaitIdle(device());
             vkDestroyImageView(device(), atlasView, null);
             vkDestroyImage(device(), atlasImage, null);
             vkFreeMemory(device(), atlasMemory, null);
