@@ -493,6 +493,12 @@ tasks.matching { it.name in ['runClient', 'runObfClient'] }.configureEach {
     if (project.hasProperty('validation')) {
         jvmArgs '-Dvulkanmod112.validation=true'
     }
+    // -PultraLog forces the diagnostics file on whatever the config says. Every
+    // measurement run wants it, it is off by default, and a run that produces no
+    // file looks the same as a run that failed.
+    if (project.hasProperty('ultraLog')) {
+        jvmArgs '-Dvulkanmod112.ultraLog=true'
+    }
 }
 
 apply from: 'gradle/scripts/publishing.gradle'

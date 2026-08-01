@@ -33,7 +33,15 @@ public final class GuiVulkanSettings extends GuiScreen {
     private static final int ROW_HEIGHT = 20;
     private static final int ROW_GAP = 2;
     private static final int BLOCK_TITLE_HEIGHT = 14;
-    private static final int TOP = 42;
+    /**
+     * Room for the memory bar and its line of numbers between the GPU name and
+     * the list. Fourteen pixels of list given up for it, deliberately: the
+     * settings that cost video memory are spread over three tabs, and the only
+     * place their total can be seen at once is above all of them.
+     */
+    private static final int TOP = 58;
+    private static final int BAR_TOP = 34;
+    private static final int BAR_HEIGHT = 8;
     private static final int BOTTOM_GAP = 36;
     /** Below this the tooltip panel is dropped and descriptions follow the cursor. */
     private static final int TOOLTIP_MIN_WIDTH = 150;
@@ -143,6 +151,7 @@ public final class GuiVulkanSettings extends GuiScreen {
             gpu = gpu + " — " + vram + " MiB";
         }
         this.drawCenteredString(this.fontRenderer, gpu, this.width / 2, 24, 0x909090);
+        drawVramBar();
 
         drawRect(this.listLeft - 2, this.listTop - 2, this.listLeft + this.listWidth + 2,
                 this.listBottom + 2, 0x50000000);
@@ -173,6 +182,48 @@ public final class GuiVulkanSettings extends GuiScreen {
         drawScrollbar();
 
         super.drawScreen(mouseX, mouseY, partialTicks);
+    }
+
+    /**
+     * What the settings are asking of the card, against what the card has.
+     *
+     * The numbers behind it are two different kinds of thing and the bar says
+     * which is which rather than blending them into one confident total: the
+     * screen-sized targets are arithmetic, the world is a measurement of this
+     * player's world, and with no world loaded there is nothing to measure and
+     * the bar says so instead of inventing a figure.
+     */
+    private void drawVramBar() {
+        int available = VramEstimate.availableMiB();
+        if (available <= 0) {
+            return;
+        }
+        VramEstimate.Breakdown estimate = VramEstimate.current();
+        int used = estimate.totalMiB();
+        int left = this.listLeft;
+        int right = this.listLeft + this.listWidth;
+        int bottom = BAR_TOP + BAR_HEIGHT;
+
+        drawRect(left, BAR_TOP, right, bottom, 0x60000000);
+        double fraction = Math.min(1.0, used / (double) available);
+        int filled = left + (int) ((right - left) * fraction);
+        // Three colours rather than a gradient: the question a player has here
+        // is not "how full" but "am I about to run out", and that has three
+        // answers.
+        int colour = fraction < 0.6 ? 0xFF4C9E5A : fraction < 0.85 ? 0xFFC8A03C : 0xFFC85A4C;
+        drawRect(left, BAR_TOP, filled, bottom, colour);
+
+        String label = String.format("%s of %s used by these settings", size(used), size(available));
+        if (!estimate.geometryKnown) {
+            label = size(used) + " of " + size(available) + " — world not loaded, terrain not counted";
+        }
+        this.fontRenderer.drawString(label, left, bottom + 3, 0xA0A0A0);
+    }
+
+    private static String size(int mib) {
+        return mib >= 1024
+                ? String.format("%.1f GiB", mib / 1024.0)
+                : mib + " MiB";
     }
 
     private void drawRow(VOption option, int y, boolean hover) {

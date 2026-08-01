@@ -420,6 +420,15 @@ public final class VulkanConfig {
                 "Framerate cap while the game window is not active. 0 disables the cap.");
         ultraLogEnabled = config.getBoolean("ultraLog", CATEGORY_ADVANCED, DEF_ULTRA_LOG,
                 "Write a detailed diagnostics report to logs/vulkanmod112-diagnostics.log.");
+        // The command line wins, and says so. A measurement run that asks for
+        // the diagnostics file and gets nothing because the setting happened to
+        // be off is a session spent for no answer — and the silence looks
+        // exactly like the run having failed.
+        if (Boolean.getBoolean("vulkanmod112.ultraLog") && !ultraLogEnabled) {
+            ultraLogEnabled = true;
+            net.vulkanmod112.VulkanMod112.LOGGER.info(
+                    "Diagnostics file turned on by the command line, over the setting in the config");
+        }
         ultraLogSeconds = config.getInt("ultraLogSeconds", CATEGORY_ADVANCED, DEF_ULTRA_LOG_SECONDS, 1, 120,
                 "Seconds between diagnostics snapshots.");
         depthBlitEnabled = config.getBoolean("depthBlitEnabled", CATEGORY_ADVANCED, DEF_DEPTH_BLIT,

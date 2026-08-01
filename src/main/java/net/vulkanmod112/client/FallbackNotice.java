@@ -28,7 +28,11 @@ public final class FallbackNotice {
     private final String reason;
 
     public FallbackNotice(Throwable failure) {
-        this.reason = describe(failure);
+        this.reason = describe(failure, REASON_LIMIT);
+        // Also in the chat, once. F3 is where a player looks second; the first
+        // place is the screen in front of them, and this failure has no other
+        // symptom than every setting in the mod quietly meaning nothing.
+        RenderNotice.fellBackToOpenGL(describe(failure, Integer.MAX_VALUE));
     }
 
     @SubscribeEvent
@@ -36,6 +40,10 @@ public final class FallbackNotice {
         if (event.phase == TickEvent.Phase.END) {
             Diagnostics.tick();
             BackgroundThrottle.afterFrame();
+            // Said from here as well as from the session handler: when the
+            // renderer never started, this object may be the only one of the
+            // two that got registered.
+            RenderNotice.flushToChat();
         }
     }
 
@@ -60,7 +68,7 @@ public final class FallbackNotice {
      * game more memory — a change that cannot help. Those throws say so
      * themselves, and are taken at their word.
      */
-    private static String describe(Throwable failure) {
+    private static String describe(Throwable failure, int limit) {
         if (failure == null) {
             return "reason unknown, see the log";
         }
@@ -77,8 +85,8 @@ public final class FallbackNotice {
             message = root.getClass().getSimpleName();
         }
         message = message.replace('\n', ' ').trim();
-        if (message.length() > REASON_LIMIT) {
-            message = message.substring(0, REASON_LIMIT - 1) + "…";
+        if (message.length() > limit) {
+            message = message.substring(0, limit - 1) + "…";
         }
         return message;
     }

@@ -29,6 +29,19 @@ public interface VulkanBridge {
     int vramMegabytes();
 
     /**
+     * MiB of chunk geometry mirrored into Vulkan right now, or 0 with no world.
+     *
+     * Read by the estimate in the settings screen, which is why it is a
+     * measurement rather than a calculation. How much a world costs depends on
+     * what is in it — a plains biome and a cave system at the same render
+     * distance are not close — so a figure derived from the render distance
+     * alone would be confidently wrong. Anchored to what this player's world
+     * actually uses, the same arithmetic becomes a fair prediction of what
+     * changing a setting would do to it.
+     */
+    int geometryMegabytes();
+
+    /**
      * Renders the demo scene offscreen on the GPU via Vulkan and returns the
      * frame as tightly packed RGBA8 pixels ({@code width * height * 4} bytes,
      * top row first). Direct java.nio buffers are safe to pass across the

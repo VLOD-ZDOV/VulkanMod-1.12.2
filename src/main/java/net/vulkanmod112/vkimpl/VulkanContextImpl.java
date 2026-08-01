@@ -883,6 +883,12 @@ public final class VulkanContextImpl implements VulkanBridge {
         return vramMegabytes;
     }
 
+    @Override
+    public int geometryMegabytes() {
+        VkChunkMirror mirror = chunkMirror;
+        return mirror == null ? 0 : (int) (mirror.geometryBytes() / (1024L * 1024L));
+    }
+
     public VkDevice getDevice() {
         return device;
     }

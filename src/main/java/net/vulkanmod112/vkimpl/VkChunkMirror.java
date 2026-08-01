@@ -271,6 +271,20 @@ final class VkChunkMirror {
     private final List<Retired> retired = new ArrayList<Retired>();
     private long frameStamp;
     private long totalBytes;
+
+    /**
+     * What the card has committed to chunk geometry — the allocation, not the
+     * part of it that currently holds something.
+     *
+     * The distinction is the whole point. Video memory is taken by the
+     * allocation: a buffer of a gigabyte with six hundred megabytes of world in
+     * it occupies a gigabyte, and the driver's own figures agree. Reporting the
+     * filled part instead is how an estimate came out a third low against
+     * nvidia-smi.
+     */
+    synchronized long geometryBytes() {
+        return Math.max(geometryCapacity, totalBytes) + stagingCapacity;
+    }
     private long uploadCount;
 
     private long geometryBuffer;
