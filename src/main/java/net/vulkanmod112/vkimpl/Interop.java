@@ -82,6 +82,28 @@ final class Interop {
      * them to nothing: the handle then imports cleanly and never signals, which
      * is indistinguishable from a hang until the card is reset.
      */
+    /**
+     * The same rights, for an exported memory handle.
+     *
+     * Separate structure, identical reasoning: without it the rights on the
+     * handle are whatever the driver defaults to, and a handle imported without
+     * the right to read is not refused — OpenGL takes it, samples it, and the
+     * card stops on work it is not allowed to do.
+     */
+    static long appendWin32MemoryRights(MemoryStack stack, long exportInfo) {
+        if (!WINDOWS) {
+            return exportInfo;
+        }
+        org.lwjgl.vulkan.VkExportMemoryWin32HandleInfoKHR rights =
+                org.lwjgl.vulkan.VkExportMemoryWin32HandleInfoKHR.calloc(stack)
+                        .sType(KHRExternalMemoryWin32
+                                .VK_STRUCTURE_TYPE_EXPORT_MEMORY_WIN32_HANDLE_INFO_KHR)
+                        .pNext(exportInfo)
+                        .pAttributes(null)
+                        .dwAccess(GENERIC_ALL);
+        return rights.address();
+    }
+
     static long appendWin32SemaphoreRights(MemoryStack stack, long exportInfo) {
         if (!WINDOWS) {
             return exportInfo;

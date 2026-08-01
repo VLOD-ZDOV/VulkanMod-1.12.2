@@ -4311,7 +4311,7 @@ final class VkTerrainRenderer {
                 .handleTypes(Interop.MEMORY_HANDLE_TYPE);
         VkMemoryAllocateInfo alloc = VkMemoryAllocateInfo.calloc(stack)
                 .sType(VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO)
-                .pNext(export.address())
+                .pNext(Interop.appendWin32MemoryRights(stack, export.address()))
                 .allocationSize(req.size())
                 .memoryTypeIndex(findMemoryType(stack, req.memoryTypeBits(), VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT));
         LongBuffer pMemory = stack.mallocLong(1);
