@@ -452,6 +452,13 @@ tasks.matching { it.name in ['runClient', 'runObfClient'] }.configureEach {
     if (project.hasProperty('stackSizeKb')) {
         jvmArgs "-Dvulkanmod112.stackSizeKb=${project.property('stackSizeKb')}"
     }
+    // -PnoDepthBlit forces the depth path a driver without sampleable D24 gets:
+    // D32F targets, depth handed back to GL by the gl_FragDepth composite, and
+    // the translucent pass declining every frame. That is what every AMD card
+    // runs, so it is not an edge case — it is the other half of the users.
+    if (project.hasProperty('noDepthBlit')) {
+        jvmArgs '-Dvulkanmod112.depthBlit=false'
+    }
 }
 
 apply from: 'gradle/scripts/publishing.gradle'

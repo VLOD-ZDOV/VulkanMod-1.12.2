@@ -300,7 +300,10 @@ public final class Diagnostics {
                 + ", entity distance " + VulkanConfig.getEntityDistance()
                 + ", block entity distance " + VulkanConfig.getTileEntityDistance()
                 + ", animations " + VulkanConfig.areAnimationsEnabled()
-                + ", depth blit " + VulkanConfig.isDepthBlitEnabled()
+                // "asked for", not "depth blit": the driver decides whether it
+                // happens, and the answer is on the targets line below. Reading
+                // this one as the truth cost a morning.
+                + ", depth blit asked for " + VulkanConfig.isDepthBlitEnabled()
                 + ", culling " + VulkanConfig.isCullingEnabled());
         out.println("  memory: " + used() + " MiB used of " + max() + " MiB");
         out.println();

@@ -1168,29 +1168,63 @@ public final class VulkanConfig {
     }
 
     /**
+     * Properties the JVM was started with, captured before this class writes
+     * any of its own. A value given on the command line has to survive the
+     * settings file, or a switch meant to reproduce another machine reports
+     * success and changes nothing — which is how the LWJGL stack size cost two
+     * builds.
+     */
+    private static final java.util.Set<String> PINNED = new java.util.HashSet<String>();
+
+    /**
+     * Writes one property unless the command line already claimed it. The first
+     * call per key decides: after that the key is either ours to write every
+     * time, or never.
+     */
+    private static void publish(String key, String value) {
+        if (PINNED.contains(key)) {
+            return;
+        }
+        if (!published.contains(key)) {
+            published.add(key);
+            if (System.getProperty(key) != null) {
+                PINNED.add(key);
+                net.vulkanmod112.VulkanMod112.LOGGER.info(
+                        "{} pinned to {} by the command line — the settings screen cannot move it",
+                        key, System.getProperty(key));
+                return;
+            }
+        }
+        System.setProperty(key, value);
+    }
+
+    /** Keys {@link #publish} has already decided about. */
+    private static final java.util.Set<String> published = new java.util.HashSet<String>();
+
+    /**
      * The renderer lives behind the bridge in its own classloader and reads
      * these as system properties, which both sides share.
      */
     private static void applySystemProperties() {
-        System.setProperty("vulkanmod112.depthBlit", Boolean.toString(depthBlitEnabled));
-        System.setProperty("vulkanmod112.cull", Boolean.toString(cullingEnabled));
-        System.setProperty("vulkanmod112.geometryBudget", Integer.toString(geometryBudgetMiB));
-        System.setProperty("vulkanmod112.framesInFlight", Integer.toString(framesInFlight));
-        System.setProperty("vulkanmod112.directionalLight", Integer.toString(directionalLight));
-        System.setProperty("vulkanmod112.heightFog", Integer.toString(heightFog));
-        System.setProperty("vulkanmod112.heightFogDepth", Integer.toString(heightFogDepth));
-        System.setProperty("vulkanmod112.waterReflection", Integer.toString(waterReflection));
-        System.setProperty("vulkanmod112.waterWaves", Integer.toString(waterWaves));
-        System.setProperty("vulkanmod112.foliageSway", Integer.toString(foliageSway));
-        System.setProperty("vulkanmod112.bloom", Integer.toString(bloom));
-        System.setProperty("vulkanmod112.ambientOcclusion", Integer.toString(ambientOcclusion));
-        System.setProperty("vulkanmod112.screenReflections", Integer.toString(screenReflections));
-        System.setProperty("vulkanmod112.aoRadius", Integer.toString(aoRadius));
-        System.setProperty("vulkanmod112.showMaterials", Boolean.toString(showMaterials));
-        System.setProperty("vulkanmod112.showOcclusion", Boolean.toString(showOcclusion));
-        System.setProperty("vulkanmod112.showMotion", Boolean.toString(showMotion));
-        System.setProperty("vulkanmod112.motionOverWorld", Boolean.toString(motionOverWorld));
-        System.setProperty("vulkanmod112.showReflections", Boolean.toString(showReflections));
+        publish("vulkanmod112.depthBlit", Boolean.toString(depthBlitEnabled));
+        publish("vulkanmod112.cull", Boolean.toString(cullingEnabled));
+        publish("vulkanmod112.geometryBudget", Integer.toString(geometryBudgetMiB));
+        publish("vulkanmod112.framesInFlight", Integer.toString(framesInFlight));
+        publish("vulkanmod112.directionalLight", Integer.toString(directionalLight));
+        publish("vulkanmod112.heightFog", Integer.toString(heightFog));
+        publish("vulkanmod112.heightFogDepth", Integer.toString(heightFogDepth));
+        publish("vulkanmod112.waterReflection", Integer.toString(waterReflection));
+        publish("vulkanmod112.waterWaves", Integer.toString(waterWaves));
+        publish("vulkanmod112.foliageSway", Integer.toString(foliageSway));
+        publish("vulkanmod112.bloom", Integer.toString(bloom));
+        publish("vulkanmod112.ambientOcclusion", Integer.toString(ambientOcclusion));
+        publish("vulkanmod112.screenReflections", Integer.toString(screenReflections));
+        publish("vulkanmod112.aoRadius", Integer.toString(aoRadius));
+        publish("vulkanmod112.showMaterials", Boolean.toString(showMaterials));
+        publish("vulkanmod112.showOcclusion", Boolean.toString(showOcclusion));
+        publish("vulkanmod112.showMotion", Boolean.toString(showMotion));
+        publish("vulkanmod112.motionOverWorld", Boolean.toString(motionOverWorld));
+        publish("vulkanmod112.showReflections", Boolean.toString(showReflections));
     }
 
     private static void store(String category, String key, int value) {
