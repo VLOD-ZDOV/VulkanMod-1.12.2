@@ -43,6 +43,62 @@ public final class VulkanContextImpl implements VulkanBridge {
 
     private static final Logger LOGGER = LogManager.getLogger("VulkanMod112/Vulkan");
     private static final String VALIDATION_LAYER = "VK_LAYER_KHRONOS_validation";
+    private boolean validationWanted;
+    private long debugMessenger;
+    private org.lwjgl.vulkan.VkDebugUtilsMessengerCallbackEXT debugCallback;
+
+    /**
+     * Routes what the validation layer finds into this mod's own log.
+     *
+     * A lost device is reported by whatever call happens to notice, which is
+     * never the call that caused it — the card is told to do something illegal
+     * and dies some frames later, in a wait. The layer is the only thing that
+     * sees the illegal command at the moment it is recorded, and it names it.
+     */
+    private void createDebugMessenger() {
+        try (MemoryStack stack = stackPush()) {
+            debugCallback = org.lwjgl.vulkan.VkDebugUtilsMessengerCallbackEXT.create(
+                    new org.lwjgl.vulkan.VkDebugUtilsMessengerCallbackEXTI() {
+                        @Override
+                        public int invoke(int severity, int types, long pCallbackData, long pUserData) {
+                            org.lwjgl.vulkan.VkDebugUtilsMessengerCallbackDataEXT data =
+                                    org.lwjgl.vulkan.VkDebugUtilsMessengerCallbackDataEXT.create(pCallbackData);
+                            String message = data.pMessageString();
+                            if ((severity & org.lwjgl.vulkan.EXTDebugUtils
+                                    .VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) != 0) {
+                                LOGGER.error("Vulkan validation: {}", message);
+                            } else {
+                                LOGGER.warn("Vulkan validation: {}", message);
+                            }
+                            return VK_FALSE;
+                        }
+                    });
+            org.lwjgl.vulkan.VkDebugUtilsMessengerCreateInfoEXT info =
+                    org.lwjgl.vulkan.VkDebugUtilsMessengerCreateInfoEXT.calloc(stack)
+                            .sType(org.lwjgl.vulkan.EXTDebugUtils
+                                    .VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT)
+                            .messageSeverity(org.lwjgl.vulkan.EXTDebugUtils
+                                            .VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT
+                                    | org.lwjgl.vulkan.EXTDebugUtils
+                                            .VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
+                            .messageType(org.lwjgl.vulkan.EXTDebugUtils
+                                            .VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT
+                                    | org.lwjgl.vulkan.EXTDebugUtils
+                                            .VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT)
+                            .pfnUserCallback(debugCallback);
+            java.nio.LongBuffer pMessenger = stack.mallocLong(1);
+            int result = org.lwjgl.vulkan.EXTDebugUtils.vkCreateDebugUtilsMessengerEXT(
+                    instance, info, null, pMessenger);
+            if (result == VK_SUCCESS) {
+                debugMessenger = pMessenger.get(0);
+                LOGGER.info("Validation findings will appear in this log");
+            } else {
+                LOGGER.warn("Could not attach the validation reporter ({})", result);
+            }
+        } catch (Throwable t) {
+            LOGGER.warn("Could not attach the validation reporter", t);
+        }
+    }
 
     private VkInstance instance;
     private VkPhysicalDevice physicalDevice;
@@ -114,8 +170,27 @@ public final class VulkanContextImpl implements VulkanBridge {
                     .sType(VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO)
                     .pApplicationInfo(appInfo);
 
-            if (Boolean.getBoolean("vulkanmod112.validation") && isValidationLayerAvailable(stack)) {
+            boolean validationAsked = Boolean.getBoolean("vulkanmod112.validation");
+            if (validationAsked && !isValidationLayerAvailable(stack)) {
+                // Said out loud because the alternative is what already
+                // happened: a whole session run to read an answer that was
+                // never going to be written. A capability this mod asked for
+                // and did not get is a log line, always.
+                LOGGER.warn("{} was asked for and is not installed on this machine — nothing will"
+                        + " be validated. Install the Vulkan validation layers and run again.",
+                        VALIDATION_LAYER);
+            }
+            if (validationAsked && isValidationLayerAvailable(stack)) {
                 LOGGER.info("Enabling {}", VALIDATION_LAYER);
+                // Without this the layer writes its findings to the process
+                // output, where a modded 1.12 client buries them under
+                // everything else. They belong in our own log, next to the
+                // frame they are about.
+                PointerBuffer extensions = stack.mallocPointer(1);
+                extensions.put(0, memAddress(stack.UTF8(
+                        org.lwjgl.vulkan.EXTDebugUtils.VK_EXT_DEBUG_UTILS_EXTENSION_NAME)));
+                createInfo.ppEnabledExtensionNames(extensions);
+                validationWanted = true;
                 // put(long) + memAddress instead of put(ByteBuffer): compiles against
                 // both LWJGL 2's and LWJGL 3's org.lwjgl.PointerBuffer
                 // put(int, long): the only PointerBuffer write API whose descriptor is
@@ -129,6 +204,9 @@ public final class VulkanContextImpl implements VulkanBridge {
             check(vkCreateInstance(createInfo, null, pInstance), "vkCreateInstance");
             this.instance = wrapInstance(pInstance.get(0), createInfo);
             LOGGER.info("VkInstance created (loader reports Vulkan {})", apiVersionString(VK.getInstanceVersionSupported()));
+            if (validationWanted) {
+                createDebugMessenger();
+            }
         }
     }
 
@@ -768,6 +846,15 @@ public final class VulkanContextImpl implements VulkanBridge {
         // After every renderer that could still import, before the device that
         // owns what the handles name.
         Interop.releaseImportedHandles();
+        if (debugMessenger != 0L) {
+            org.lwjgl.vulkan.EXTDebugUtils.vkDestroyDebugUtilsMessengerEXT(
+                    instance, debugMessenger, null);
+            debugMessenger = 0L;
+        }
+        if (debugCallback != null) {
+            debugCallback.free();
+            debugCallback = null;
+        }
         if (device != null) {
             vkDeviceWaitIdle(device);
             vkDestroyDevice(device, null);

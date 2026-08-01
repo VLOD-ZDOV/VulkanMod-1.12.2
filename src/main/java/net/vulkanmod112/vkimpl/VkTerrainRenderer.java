@@ -7,9 +7,12 @@ import org.lwjgl.opengl.EXTMemoryObject;
 import org.lwjgl.opengl.EXTSemaphore;
 import org.lwjgl.opengl.GL11C;
 import org.lwjgl.opengl.GL12C;
+import org.lwjgl.opengl.GL;
 import org.lwjgl.opengl.GL13C;
+import org.lwjgl.opengl.GL15C;
 import org.lwjgl.opengl.GL20C;
 import org.lwjgl.opengl.GL30C;
+import org.lwjgl.opengl.GL33C;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
 import org.lwjgl.vulkan.VkAttachmentDescription;
@@ -199,6 +202,28 @@ final class VkTerrainRenderer {
     private long[] translucentFences;
     private int translucentCompositeProgram;
     private int translucentInvSizeUniform = -1;
+    /**
+     * How long the card spends on the OpenGL half of our work.
+     *
+     * The Vulkan half has been timed since the query pool went in, and it reads
+     * as fractions of a millisecond — which was quietly taken to mean the
+     * renderer is cheap. It measures the wrong half on the path where the cost
+     * lives: composing the terrain into the game's frame, exporting depth per
+     * fragment, and now importing it back, all happen in OpenGL and none of it
+     * was ever timed. A card is not asked how long it took; it is asked to
+     * count for itself and answer a frame later, which is why the result is
+     * read on the following pass rather than waited for.
+     */
+    private final GlTimer compositeTimer = new GlTimer();
+    private final GlTimer depthImportTimer = new GlTimer();
+
+    /** Shader path for handing the game's depth back to Vulkan; see {@link #buildDepthImportProgram}. */
+    private int depthImportProgram;
+    private int depthImportInvSizeUniform = -1;
+    /** The game's depth, copied where a shader can read it. Its own format, not ours. */
+    private int gameDepthTexture;
+    /** Draw target whose depth attachment is the shared image. */
+    private int glDepthWriteFbo = -1;
     private long renderPass;
     private long descriptorSetLayout;
     private long descriptorPool;
@@ -731,6 +756,30 @@ final class VkTerrainRenderer {
     }
 
     /**
+     * The layout the shared depth image is in when OpenGL hands it back for the
+     * translucent pass — which is not the one it was lent out in.
+     *
+     * It goes out for the composite to sample, comes back written as an
+     * attachment, and the name OpenGL signals has to be the name Vulkan
+     * expects. Kept beside {@link #sharedLayout} so the pair cannot drift, and
+     * paired in turn with the layout named in {@link #importGlDepth}: those two
+     * places are the entire agreement, and there is no third place where a
+     * disagreement between them would show up as anything but a dead card.
+     */
+    private static int depthHandoffLayout() {
+        return SHARED_SEMAPHORES
+                ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+                : VK_IMAGE_LAYOUT_GENERAL;
+    }
+
+    /** The same layout under the name OpenGL knows it by. */
+    private static int glDepthHandoffLayout() {
+        return SHARED_SEMAPHORES
+                ? EXTSemaphore.GL_LAYOUT_DEPTH_STENCIL_ATTACHMENT_EXT
+                : EXTSemaphore.GL_LAYOUT_GENERAL_EXT;
+    }
+
+    /**
      * Whether the shared images change hands between Vulkan and OpenGL by an
      * explicit ownership transfer.
      *
@@ -1207,6 +1256,13 @@ final class VkTerrainRenderer {
                 .append(" ms, submit+composite ")
                 .append(String.format("%.2f", submitCompositeNanos / (double) Math.max(1, timingSamples()) / 1e6))
                 .append(" ms, GPU ").append(gpuTimeText()).append('\n');
+        // The three numbers above are the processor's view plus the Vulkan
+        // queue's own. This is the other half of the frame: what the card
+        // spends inside OpenGL doing our work, which nothing measured before.
+        sb.append("  gl cost: composite ").append(glTimeText(compositeTimer))
+                .append(" (includes waiting for Vulkan), depth back to Vulkan ")
+                .append(depthBlit ? "by hardware copy, untimed" : glTimeText(depthImportTimer))
+                .append('\n');
         sb.append("  lightmap: ").append(lightmapUploads).append(" changes over ")
                 .append(lightmapFrames).append(" frames")
                 .append(lightmapFrames > 0
@@ -1594,16 +1650,25 @@ final class VkTerrainRenderer {
      * answer.
      */
     synchronized boolean drawsTranslucent() {
-        return translucentFramebuffer != 0 && depthBlit;
+        return translucentFramebuffer != 0 && canReturnDepth();
+    }
+
+    /**
+     * Whether the depth the game owns can be put back into the shared image at
+     * all — by the hardware copy, or failing that by the shader that replaced
+     * it. Without one of the two the translucent layer has nothing to test
+     * itself against and must stay where it is.
+     */
+    private boolean canReturnDepth() {
+        return depthBlit || (glDepthWriteFbo != -1 && gameDepthTexture != 0);
     }
 
     private boolean renderTranslucent(int[] chunks, int chunkCount, float[] mvp,
                                       double viewX, double viewY, double viewZ,
                                       VkChunkMirror mirror) {
-        if (translucentFramebuffer == 0 || !depthBlit || chunkCount == 0) {
-            // Without the depth blit there is no way to get the game's depth
-            // back, and drawing the layer without it would be worse than
-            // leaving it where it is.
+        if (translucentFramebuffer == 0 || !canReturnDepth() || chunkCount == 0) {
+            // With no way to get the game's depth back, drawing the layer
+            // would be worse than leaving it where it is.
             return false;
         }
         int slot = activeFrameSlot;
@@ -1678,21 +1743,25 @@ final class VkTerrainRenderer {
      */
     private void importGlDepth() {
         GL11C.glGetError();
-        int prevDraw = GL11C.glGetInteger(GL30C.GL_DRAW_FRAMEBUFFER_BINDING);
-        GL30C.glBindFramebuffer(GL30C.GL_DRAW_FRAMEBUFFER, glDepthBlitFbo);
-        GL30C.glBlitFramebuffer(0, 0, width, height, 0, 0, width, height,
-                GL11C.GL_DEPTH_BUFFER_BIT, GL11C.GL_NEAREST);
-        GL30C.glBindFramebuffer(GL30C.GL_DRAW_FRAMEBUFFER, prevDraw);
+        if (depthBlit) {
+            int prevDraw = GL11C.glGetInteger(GL30C.GL_DRAW_FRAMEBUFFER_BINDING);
+            GL30C.glBindFramebuffer(GL30C.GL_DRAW_FRAMEBUFFER, glDepthBlitFbo);
+            GL30C.glBlitFramebuffer(0, 0, width, height, 0, 0, width, height,
+                    GL11C.GL_DEPTH_BUFFER_BIT, GL11C.GL_NEAREST);
+            GL30C.glBindFramebuffer(GL30C.GL_DRAW_FRAMEBUFFER, prevDraw);
+        } else {
+            importGlDepthByShader();
+        }
         int error = GL11C.glGetError();
         if (error != 0 && !glErrorLogged) {
             glErrorLogged = true;
-            LOGGER.error("glBlitFramebuffer(depth back into Vulkan) failed with 0x{}",
+            LOGGER.error("Handing the game's depth back to Vulkan failed with 0x{}",
                     Integer.toHexString(error));
         }
         try (MemoryStack stack = stackPush()) {
             IntBuffer noBuffers = stack.mallocInt(0);
             IntBuffer textures = stack.ints(glDepthTexture);
-            IntBuffer layouts = stack.ints(EXTSemaphore.GL_LAYOUT_DEPTH_STENCIL_ATTACHMENT_EXT);
+            IntBuffer layouts = stack.ints(glDepthHandoffLayout());
             translucentWaitFenceValue++;
             setFenceValue(glTranslucentSignalSemaphore, translucentWaitFenceValue);
             EXTSemaphore.glSignalSemaphoreEXT(glTranslucentSignalSemaphore, noBuffers, textures, layouts);
@@ -1700,6 +1769,63 @@ final class VkTerrainRenderer {
         // Without this the signal can sit in the GL command stream while the
         // Vulkan queue is already waiting on it, and neither side moves.
         GL11C.glFlush();
+    }
+
+    /**
+     * The same hand-off as the blit above, for cards whose shared depth image
+     * is not in the game's format.
+     *
+     * Two steps, because a shader can only read a texture and the game's depth
+     * is not one: it is copied into a texture of the game's own format first,
+     * then written into the shared image a fragment at a time. Both steps stay
+     * on the card — nothing travels back to the processor.
+     */
+    private void importGlDepthByShader() {
+        depthImportTimer.begin();
+        int prevDraw = GL11C.glGetInteger(GL30C.GL_DRAW_FRAMEBUFFER_BINDING);
+        int prevTexture = GL11C.glGetInteger(GL11C.GL_TEXTURE_BINDING_2D);
+        int prevProgram = GL11C.glGetInteger(GL20C.GL_CURRENT_PROGRAM);
+        int prevActive = GL11C.glGetInteger(GL13C.GL_ACTIVE_TEXTURE);
+
+        // Straight out of whatever the game is drawing into, in its format.
+        GL13C.glActiveTexture(GL13C.GL_TEXTURE0);
+        GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, gameDepthTexture);
+        GL11C.glCopyTexSubImage2D(GL11C.GL_TEXTURE_2D, 0, 0, 0, 0, 0, width, height);
+
+        GL30C.glBindFramebuffer(GL30C.GL_DRAW_FRAMEBUFFER, glDepthWriteFbo);
+        org.lwjgl.opengl.GL11.glPushAttrib(org.lwjgl.opengl.GL11.GL_ENABLE_BIT
+                | org.lwjgl.opengl.GL11.GL_DEPTH_BUFFER_BIT
+                | org.lwjgl.opengl.GL11.GL_COLOR_BUFFER_BIT
+                | org.lwjgl.opengl.GL11.GL_VIEWPORT_BIT
+                | org.lwjgl.opengl.GL11.GL_POLYGON_BIT);
+        GL11C.glViewport(0, 0, width, height);
+        GL11C.glDisable(GL11C.GL_BLEND);
+        GL11C.glDisable(GL11C.GL_CULL_FACE);
+        GL11C.glDisable(GL11C.GL_SCISSOR_TEST);
+        GL11C.glDisable(org.lwjgl.opengl.GL11.GL_ALPHA_TEST);
+        GL11C.glColorMask(false, false, false, false);
+        // Every fragment replaces what is there: this is a copy wearing the
+        // clothes of a draw, so the test that would normally reject the far
+        // half of it has to be told to accept everything.
+        GL11C.glEnable(GL11C.GL_DEPTH_TEST);
+        GL11C.glDepthFunc(GL11C.GL_ALWAYS);
+        GL11C.glDepthMask(true);
+
+        GL20C.glUseProgram(depthImportProgram);
+        GL20C.glUniform2f(depthImportInvSizeUniform, 1.0f / width, 1.0f / height);
+        org.lwjgl.opengl.GL11.glBegin(org.lwjgl.opengl.GL11.GL_QUADS);
+        org.lwjgl.opengl.GL11.glVertex2f(-1.0f, -1.0f);
+        org.lwjgl.opengl.GL11.glVertex2f(1.0f, -1.0f);
+        org.lwjgl.opengl.GL11.glVertex2f(1.0f, 1.0f);
+        org.lwjgl.opengl.GL11.glVertex2f(-1.0f, 1.0f);
+        org.lwjgl.opengl.GL11.glEnd();
+
+        org.lwjgl.opengl.GL11.glPopAttrib();
+        GL30C.glBindFramebuffer(GL30C.GL_DRAW_FRAMEBUFFER, prevDraw);
+        GL20C.glUseProgram(prevProgram);
+        GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, prevTexture);
+        GL13C.glActiveTexture(prevActive);
+        depthImportTimer.end();
     }
 
     /** Blends the translucent target over the game's frame. */
@@ -1752,6 +1878,15 @@ final class VkTerrainRenderer {
 
     /** GL side: wait for Vulkan, draw the shared frame into the game's framebuffer, signal back. */
     private void composite() {
+        compositeTimer.begin();
+        try {
+            compositeInner();
+        } finally {
+            compositeTimer.end();
+        }
+    }
+
+    private void compositeInner() {
         try (MemoryStack stack = stackPush()) {
             IntBuffer noBuffers = stack.mallocInt(0);
             IntBuffer textures = stack.ints(glColorTexture, glDepthTexture);
@@ -3742,9 +3877,20 @@ final class VkTerrainRenderer {
                 .storeOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
                 .stencilLoadOp(VK_ATTACHMENT_LOAD_OP_DONT_CARE)
                 .stencilStoreOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
-                // What the opaque pass left it in, and what it is handed back as
-                // so the GL side can go on sampling it.
-                .initialLayout(sharedLayout())
+                // Not what the opaque pass left it in — what OpenGL says it is
+                // handing over, which is a different thing and was the source
+                // of a hang.
+                //
+                // Between the two passes the GL side writes the game's depth
+                // into this image as an attachment and then signals, naming
+                // GL_LAYOUT_DEPTH_STENCIL_ATTACHMENT_EXT. That name is the
+                // whole of the agreement: a layout is how the card has packed
+                // and compressed the pixels, and the two APIs exchange it in
+                // the semaphore operation and nowhere else. Claiming here that
+                // the image arrives as a shader-read texture while OpenGL
+                // states it left as an attachment is not a mismatch of
+                // paperwork — it is reading one compression scheme as another.
+                .initialLayout(depthHandoffLayout())
                 .finalLayout(sharedLayout());
 
         VkAttachmentReference.Buffer colorRef = VkAttachmentReference.calloc(1, stack);
@@ -3949,6 +4095,36 @@ final class VkTerrainRenderer {
         compositePrograms[0] = buildCompositeProgram(true);
         compositePrograms[1] = buildCompositeProgram(false);
         translucentCompositeProgram = buildTranslucentCompositeProgram();
+        depthImportProgram = buildDepthImportProgram();
+        depthImportInvSizeUniform = GL20C.glGetUniformLocation(depthImportProgram, "uInvSize");
+    }
+
+    /**
+     * Writes the game's depth into the shared image one fragment at a time.
+     *
+     * The hardware copy that normally does this only works between buffers of
+     * the same depth format, and half the cards in use have no sampleable
+     * 24-bit depth at all — their shared image is 32-bit float while the game's
+     * buffer stays 24-bit integer, so that copy is refused and the translucent
+     * layer had nothing to test itself against. It was declining every frame on
+     * those machines, which is a strange way to describe "no water in Vulkan on
+     * every AMD card".
+     *
+     * A fragment shader does not care that the two formats differ: it reads a
+     * number and writes a number, and the hardware converts on the way in and
+     * on the way out. This is the same trick the opaque composite already uses
+     * to send depth the other way, pointed backwards.
+     */
+    private int buildDepthImportProgram() {
+        return buildQuadProgram(
+                "uniform sampler2D uSource;\n"
+                        + "uniform vec2 uInvSize;\n"
+                        + "void main() {\n"
+                        + "    gl_FragDepth = texture2D(uSource, gl_FragCoord.xy * uInvSize).r;\n"
+                        // Nothing is written to colour: the pass runs with the
+                        // colour mask closed, and a shader that assigns nothing
+                        // to gl_FragColor is legal in GLSL 120.
+                        + "}\n");
     }
 
     /**
@@ -4301,6 +4477,9 @@ final class VkTerrainRenderer {
                 glDepthBlitFbo = createDepthReadFbo();
                 depthBlit = glDepthBlitFbo != -1;
             }
+            if (!depthBlit) {
+                createDepthImportTargets();
+            }
 
             long[] translucentOut = new long[4];
             createExportedTarget(stack, VK_FORMAT_R8G8B8A8_UNORM,
@@ -4600,6 +4779,139 @@ final class VkTerrainRenderer {
         GL11C.glFinish();
         LOGGER.info("Shared memory probe {}: survived (glGetError 0x{})",
                 step, Integer.toHexString(GL11C.glGetError()));
+    }
+
+    /**
+     * The two things the shader path needs, built only when the hardware copy
+     * is unavailable: a texture in the game's depth format to copy into, and a
+     * draw target whose depth attachment is the shared image.
+     *
+     * A failure here is not fatal. It costs the translucent layer in Vulkan —
+     * the game keeps drawing water itself, exactly as before this existed.
+     */
+    private void createDepthImportTargets() {
+        int prevTexture = GL11C.glGetInteger(GL11C.GL_TEXTURE_BINDING_2D);
+        int prevDraw = GL11C.glGetInteger(GL30C.GL_DRAW_FRAMEBUFFER_BINDING);
+        try {
+            gameDepthTexture = GL11C.glGenTextures();
+            GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, gameDepthTexture);
+            GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_MIN_FILTER, GL11C.GL_NEAREST);
+            GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_MAG_FILTER, GL11C.GL_NEAREST);
+            GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_WRAP_S, GL12C.GL_CLAMP_TO_EDGE);
+            GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_WRAP_T, GL12C.GL_CLAMP_TO_EDGE);
+            // Sampled as a plain number, not compared against anything: the
+            // shader wants the depth itself, and a texture left in comparison
+            // mode answers with a nought or a one instead.
+            GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, org.lwjgl.opengl.GL14.GL_TEXTURE_COMPARE_MODE, GL11C.GL_NONE);
+            GL11C.glTexImage2D(GL11C.GL_TEXTURE_2D, 0, org.lwjgl.opengl.GL14.GL_DEPTH_COMPONENT24, width, height, 0,
+                    GL11C.GL_DEPTH_COMPONENT, GL11C.GL_UNSIGNED_INT, (java.nio.ByteBuffer) null);
+
+            glDepthWriteFbo = GL30C.glGenFramebuffers();
+            GL30C.glBindFramebuffer(GL30C.GL_DRAW_FRAMEBUFFER, glDepthWriteFbo);
+            GL30C.glFramebufferTexture2D(GL30C.GL_DRAW_FRAMEBUFFER, GL30C.GL_DEPTH_ATTACHMENT,
+                    GL11C.GL_TEXTURE_2D, glDepthTexture, 0);
+            // Depth only. Without saying so the target has no colour buffer to
+            // draw into and is incomplete by the rules, however little colour
+            // this pass intends to write.
+            GL20C.glDrawBuffers(GL11C.GL_NONE);
+            GL11C.glReadBuffer(GL11C.GL_NONE);
+            int status = GL30C.glCheckFramebufferStatus(GL30C.GL_DRAW_FRAMEBUFFER);
+            int error = GL11C.glGetError();
+            if (status != GL30C.GL_FRAMEBUFFER_COMPLETE || error != 0) {
+                LOGGER.warn("Depth import target incomplete (0x{}, glGetError 0x{}); the translucent"
+                                + " layer stays with the game", Integer.toHexString(status),
+                        Integer.toHexString(error));
+                destroyDepthImportTargets();
+            } else {
+                LOGGER.info("Depth handed back to Vulkan by shader — this card has no sampleable"
+                        + " 24-bit depth, so the translucent layer would otherwise be refused");
+            }
+        } catch (Throwable t) {
+            LOGGER.warn("Could not build the shader path for depth; the translucent layer stays"
+                    + " with the game", t);
+            destroyDepthImportTargets();
+        } finally {
+            GL30C.glBindFramebuffer(GL30C.GL_DRAW_FRAMEBUFFER, prevDraw);
+            GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, prevTexture);
+        }
+    }
+
+    private void destroyDepthImportTargets() {
+        if (gameDepthTexture != 0) {
+            GL11C.glDeleteTextures(gameDepthTexture);
+            gameDepthTexture = 0;
+        }
+        if (glDepthWriteFbo != -1) {
+            GL30C.glDeleteFramebuffers(glDepthWriteFbo);
+            glDepthWriteFbo = -1;
+        }
+    }
+
+    /**
+     * One GL pass, timed by the card itself.
+     *
+     * Two query objects used in turn, because reading the one just written
+     * means waiting for the card to reach it — which stops the processor dead
+     * and changes the very thing being measured. The other one holds last
+     * frame's answer and is ready by now.
+     */
+    private static String glTimeText(GlTimer timer) {
+        double ms = timer.millis();
+        return ms < 0.0 ? "n/a" : String.format("%.2f ms", ms);
+    }
+
+    private static final class GlTimer {
+        private final int[] query = new int[2];
+        private final boolean[] pending = new boolean[2];
+        private int slot;
+        private boolean unavailable;
+        private long nanos;
+
+        void begin() {
+            if (unavailable) {
+                return;
+            }
+            if (query[0] == 0) {
+                if (!GL.getCapabilities().OpenGL33) {
+                    unavailable = true;
+                    return;
+                }
+                query[0] = GL15C.glGenQueries();
+                query[1] = GL15C.glGenQueries();
+            }
+            slot ^= 1;
+            int other = slot ^ 1;
+            if (pending[other]
+                    && GL15C.glGetQueryObjecti(query[other], GL15C.GL_QUERY_RESULT_AVAILABLE) != 0) {
+                nanos = GL33C.glGetQueryObjecti64(query[other], GL15C.GL_QUERY_RESULT);
+                pending[other] = false;
+            }
+            GL15C.glBeginQuery(GL33C.GL_TIME_ELAPSED, query[slot]);
+        }
+
+        void end() {
+            if (unavailable || query[0] == 0) {
+                return;
+            }
+            GL15C.glEndQuery(GL33C.GL_TIME_ELAPSED);
+            pending[slot] = true;
+        }
+
+        /** Milliseconds, or -1 when the driver will not count for us. */
+        double millis() {
+            return unavailable ? -1.0 : nanos / 1_000_000.0;
+        }
+
+        void destroy() {
+            if (query[0] != 0) {
+                GL15C.glDeleteQueries(query[0]);
+                GL15C.glDeleteQueries(query[1]);
+                query[0] = 0;
+                query[1] = 0;
+            }
+            pending[0] = false;
+            pending[1] = false;
+        }
     }
 
     /** Read-only FBO wrapping the shared depth texture; -1 if incomplete. */
@@ -5051,6 +5363,14 @@ final class VkTerrainRenderer {
             GL30C.glDeleteFramebuffers(glDepthBlitFbo);
         }
         glDepthBlitFbo = -1;
+        if (glContextCurrent()) {
+            destroyDepthImportTargets();
+            compositeTimer.destroy();
+            depthImportTimer.destroy();
+        } else {
+            gameDepthTexture = 0;
+            glDepthWriteFbo = -1;
+        }
         depthBlit = false;
         glColorTexture = -1;
         glDepthTexture = -1;

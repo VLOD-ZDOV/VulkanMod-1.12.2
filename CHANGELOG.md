@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Water, glass and ice are drawn by Vulkan on cards that have no 24-bit depth** — which is every AMD card, on Windows and on Linux alike, and so about half the machines this runs on. The transparent layer has to be tested against the depth the game owns by then, and the only way of handing that depth over was a hardware copy that works between buffers of the same format. Those cards use a different one, the copy was refused, and the layer quietly declined every single frame. There is now a second way: a shader reads the depth and writes it, and the hardware converts between the formats on the way past. Measured at just under a tenth of a millisecond a frame at four megapixels.
+- The Vulkan validation layer's findings now go into this mod's log rather than the process output, where a modded 1.12 client buries them. A lost device is always reported by some later call that merely noticed — the layer is the only thing that sees the offending command as it is recorded.
+
 ### Performance
 
 - **The resource pack screen no longer decodes every icon it can see, on every frame.** Vanilla reads `pack.png` out of the pack and decodes it again for each visible row of the list, sixty times a second, for textures it has already uploaded — and packs without an icon of their own cost more the more packs are enabled, which is why the list only becomes unusable for people with a lot of them. Two hundred packs and a short scroll: two hundred decodes instead of forty-two thousand.
@@ -13,6 +18,8 @@
 - **Settings given on the command line were overwritten by the settings file** before the renderer could read them, so a `-D` switch appeared to work and changed nothing. The log now names every setting the command line has pinned.
 - The diagnostics snapshot reported the depth copy as enabled by the setting on one line and disabled by the driver twenty lines below. The first line now says it is a request, not the result.
 - **Handles the driver was given are no longer closed while it may still be holding them.** Sharing a frame between Vulkan and OpenGL is done by handing the second one a handle naming what the first one made, and this closed each handle the moment the import returned. That is what everyone does and it works on every driver it was written against, but nothing in either extension promises the driver copies what it keeps. One that stores the handle instead is left with a closed one, and then the object it names is dead while still answering as though it were alive — a wait that never returns, memory that faults when read. The handles are now held until the device that owns what they name is destroyed.
+- **The two APIs no longer disagree about the shared depth image, which hung the card.** A layout is how the card has packed and compressed the pixels, and the two sides exchange that knowledge inside the semaphore operation and nowhere else in either API. OpenGL wrote the depth as an attachment and said so; the Vulkan pass that took it back declared it was receiving a texture to sample. Every frame the same image was handed over under two different names — one compression scheme read as another. It had been that way for a while and cost nothing, because the pass that would have exercised it was declining on those machines anyway; turning the transparent layer on above is what set it off.
+- **A capability the mod asks for and does not get is now always a line in the log.** The validation layer was requested, was not installed, and the code went quietly on — a whole session spent to read an answer that was never going to be written. This is the fifth setting in two days to lose without saying so.
 - The reported operating system on Windows is no longer quietly wrong. Windows tells any program built before it that it is an older version, and Java 8 is such a program, so every Windows 10 and 11 machine reported itself as 8.1. The line now says as much rather than inviting a bug to be explained with the wrong system.
 
 ### Diagnostics

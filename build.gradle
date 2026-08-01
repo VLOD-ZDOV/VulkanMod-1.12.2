@@ -486,6 +486,13 @@ tasks.matching { it.name in ['runClient', 'runObfClient'] }.configureEach {
     if (project.hasProperty('closeHandlesEarly')) {
         jvmArgs '-Dvulkanmod112.closeHandlesEarly=true'
     }
+    // -Pvalidation turns on the Vulkan validation layer and routes what it
+    // finds into the mod's own log. It is how a lost device gets a cause: the
+    // call that reports one is never the call that caused it, and the layer is
+    // the only thing that sees the illegal command as it is recorded.
+    if (project.hasProperty('validation')) {
+        jvmArgs '-Dvulkanmod112.validation=true'
+    }
 }
 
 apply from: 'gradle/scripts/publishing.gradle'
