@@ -182,7 +182,7 @@ public final class VulkanProfiles {
         return true;
     }
 
-    /** The ten settings profiles used to hold, for files written before 01.08.2026. */
+    /** The ten settings profiles used to hold, for files in the older format. */
     private static void restoreLegacy(Properties values) {
         VulkanConfig.setTerrainEnabled(bool(values, "terrain", VulkanConfig.isTerrainEnabled()));
         VulkanConfig.setEntityDistance(number(values, "entityDistance", VulkanConfig.getEntityDistance()));

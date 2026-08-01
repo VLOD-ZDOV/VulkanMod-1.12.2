@@ -205,19 +205,18 @@ public final class VulkanConfig {
      * uploads out of the per-frame budget vanilla reserves for them, which is
      * the one place chunk loading is actually gated.
      *
-     * On by default since 01.08.2026, and it was off before that for a reason
-     * that has since been removed rather than out of caution. Every failure
-     * path in this mod ends in "fall back to vanilla rendering", which works
-     * only while the vanilla buffers still hold the world; with them empty the
-     * fallback has to rebuild the entire grid first. That is still true — it is
-     * the price of this setting — and what changed is that the second condition
-     * was met. Until the translucent layer went through Vulkan on cards without
-     * sampleable 24-bit depth, dropping these buffers on every AMD machine left
-     * water and glass with nobody drawing them at all.
+     * On by default, and it was off before for a reason that has since been
+     * removed rather than out of caution. Every failure path in this mod ends
+     * in "fall back to vanilla rendering", which works only while the vanilla
+     * buffers still hold the world; with them empty the fallback has to rebuild
+     * the entire grid first. That is still true — it is the price of this
+     * setting — and what changed is that the second condition was met. Until
+     * the translucent layer went through Vulkan on cards without sampleable
+     * 24-bit depth, dropping these buffers on every AMD machine left water and
+     * glass with nobody drawing them at all.
      *
-     * Measured at 900 MiB saved on one world, against a difference in mirrored
-     * geometry of three — one whole copy of the world, which is the largest
-     * single line in what this renderer asks of the card.
+     * What it saves is one whole copy of the world, the largest single line in
+     * what this renderer asks of the card. The measurement is in the roadmap.
      */
     static final boolean DEF_DROP_VANILLA_BUFFERS = true;
     /**
@@ -250,6 +249,23 @@ public final class VulkanConfig {
      * their numbers.
      */
     static final int DEF_VULKAN_DEVICE = -1;
+    /**
+     * Build acceleration structures over the terrain, so that rays can be
+     * traced against it.
+     *
+     * Off by default and nothing reads them yet. That is the point of this
+     * stage: the obstacle to ray tracing in this game has always been that the
+     * structure has to be rebuilt whenever a chunk is, and rebuilding chunks is
+     * already the largest cost in a moving frame — a claim that has never been
+     * a number. This makes it one. What it draws is exactly what it drew
+     * before; what it adds is a line in the diagnostics saying how many
+     * structures exist, what they cost in memory, and how long a frame's builds
+     * take to record.
+     *
+     * Needs Vulkan 1.2 and the acceleration-structure extension. Anything
+     * missing is reported and the setting does nothing.
+     */
+    static final boolean DEF_RAY_TRACING = false;
     /**
      * Let the render-distance slider go past 64, up to 128.
      *
@@ -412,6 +428,7 @@ public final class VulkanConfig {
     private static boolean vulkanParticles = DEF_VULKAN_PARTICLES;
     private static boolean vulkanWeather = DEF_VULKAN_WEATHER;
     private static int vulkanDevice = DEF_VULKAN_DEVICE;
+    private static boolean rayTracing = DEF_RAY_TRACING;
     private static boolean frameGraph = DEF_FRAME_GRAPH;
     private static int frameGraphInterval = DEF_FRAME_GRAPH_INTERVAL;
     private static boolean dynamicLights = DEF_DYNAMIC_LIGHTS;
@@ -635,6 +652,13 @@ public final class VulkanConfig {
                 DEF_VULKAN_WEATHER,
                 "The same for rain and snow. A separate switch from the one above so that either "
                         + "can be ruled out on its own.");
+        rayTracing = config.getBoolean("rayTracing", CATEGORY_ADVANCED, DEF_RAY_TRACING,
+                "Build acceleration structures over the terrain. Nothing draws with them yet — "
+                        + "this stage measures whether keeping them up to date is affordable at "
+                        + "all, which is the one thing that decides whether ray tracing is "
+                        + "possible here. Needs Vulkan 1.2 and the acceleration-structure "
+                        + "extension; the diagnostics report says what happened. Takes effect on "
+                        + "the next start.");
         vulkanDevice = config.getInt("vulkanDevice", CATEGORY_ADVANCED, DEF_VULKAN_DEVICE, -1, 7,
                 "Which GPU Vulkan renders on, by the number the log gives it. -1 chooses "
                         + "automatically, and automatic means the card OpenGL is already running "
@@ -859,6 +883,7 @@ public final class VulkanConfig {
         setVulkanParticles(DEF_VULKAN_PARTICLES);
         setVulkanWeather(DEF_VULKAN_WEATHER);
         setVulkanDevice(DEF_VULKAN_DEVICE);
+        setRayTracing(DEF_RAY_TRACING);
         setExtremeRenderDistance(DEF_EXTREME_RENDER_DISTANCE);
         setDirectionalLight(DEF_DIRECTIONAL_LIGHT);
         setHeightFog(DEF_HEIGHT_FOG);
@@ -1024,6 +1049,16 @@ public final class VulkanConfig {
     public static void setVulkanParticles(boolean value) {
         vulkanParticles = value;
         store(CATEGORY_OPTIMIZATION, "vulkanParticles", value);
+    }
+
+    public static boolean isRayTracing() {
+        return rayTracing;
+    }
+
+    public static void setRayTracing(boolean value) {
+        rayTracing = value;
+        store(CATEGORY_ADVANCED, "rayTracing", value);
+        applySystemProperties();
     }
 
     public static int getVulkanDevice() {
@@ -1416,6 +1451,7 @@ public final class VulkanConfig {
         publish("vulkanmod112.geometryBudget", Integer.toString(geometryBudgetMiB));
         publish("vulkanmod112.framesInFlight", Integer.toString(framesInFlight));
         publish("vulkanmod112.vulkanDevice", Integer.toString(vulkanDevice));
+        publish("vulkanmod112.rayTracing", Boolean.toString(rayTracing));
         publish("vulkanmod112.directionalLight", Integer.toString(directionalLight));
         publish("vulkanmod112.heightFog", Integer.toString(heightFog));
         publish("vulkanmod112.heightFogDepth", Integer.toString(heightFogDepth));

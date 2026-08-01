@@ -456,8 +456,21 @@ final class VkChunkMirror {
         this.frameStamp = stamp;
     }
 
+    /**
+     * What the geometry buffer needs on top of being a vertex buffer before an
+     * acceleration structure can be built from it.
+     */
+    private static final int RAY_TRACING_BUFFER_USAGE =
+            org.lwjgl.vulkan.VK12.VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
+                    | org.lwjgl.vulkan.KHRAccelerationStructure
+                            .VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
+
+    /** Fixed for the life of the device: the flags are creation-time only. */
+    private final boolean rayTracing;
+
     VkChunkMirror(VulkanContextImpl ctx) {
         this.ctx = ctx;
+        this.rayTracing = ctx.isRayTracingEnabled();
     }
 
     private VkDevice device() {
@@ -1187,7 +1200,14 @@ final class VkChunkMirror {
             VkBufferCreateInfo info = VkBufferCreateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO)
                     .size(capacity)
-                    .usage(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT)
+                    // An acceleration structure is built from a device address,
+                    // not from a bound buffer, and both of those flags have to
+                    // be asked for when the buffer is created — there is no
+                    // adding them to a buffer that already exists. Asked for
+                    // only when ray tracing came up, so a session without it
+                    // allocates exactly what it always did.
+                    .usage(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT
+                            | (rayTracing ? RAY_TRACING_BUFFER_USAGE : 0))
                     .sharingMode(VK_SHARING_MODE_EXCLUSIVE);
             LongBuffer pBuffer = stack.mallocLong(1);
             check(vkCreateBuffer(device(), info, null, pBuffer), "vkCreateBuffer(chunk geometry)");
@@ -1198,6 +1218,12 @@ final class VkChunkMirror {
                     .sType(VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO)
                     .allocationSize(req.size())
                     .memoryTypeIndex(findMemoryType(stack, req.memoryTypeBits(), VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT));
+            if (rayTracing) {
+                alloc.pNext(org.lwjgl.vulkan.VkMemoryAllocateFlagsInfo.calloc(stack)
+                        .sType(org.lwjgl.vulkan.VK11.VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO)
+                        .flags(org.lwjgl.vulkan.VK12.VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT)
+                        .address());
+            }
             LongBuffer pMemory = stack.mallocLong(1);
             check(vkAllocateMemory(device(), alloc, null, pMemory), "vkAllocateMemory(chunk geometry)");
             geometryMemory = pMemory.get(0);

@@ -83,13 +83,12 @@ public final class VramEstimate {
         // loaded, its own framebuffer, and what the driver keeps for holding an
         // OpenGL and a Vulkan context open in one process at once.
         //
-        // A measured figure, not a derived one. Checked against the driver's
-        // own report of the whole process on one machine: 1546 MiB in total,
-        // against 1024 of geometry buffer, 96 of staging and 91 of targets,
-        // leaving about three hundred that belong to the game and the driver.
-        // It will not be exactly three hundred anywhere else, and a wrong
-        // constant here is a better answer than leaving out a third of the
-        // total, which is what the first version of this did.
+        // A measured figure, not a derived one: what the driver reports for the
+        // whole process, minus everything above that this class can account
+        // for. It will not be exactly this anywhere else, and a wrong constant
+        // is a better answer than leaving out a third of the total, which is
+        // what the first version of this did. The measurement is in the
+        // roadmap, with how to repeat it.
         out.fixedMiB = 300;
 
         VulkanBridge bridge = VulkanLoader.bridgeIfReady();
@@ -105,9 +104,9 @@ public final class VramEstimate {
         // its own method.
         long geometry = measured;
 
-        // Without the drop, the game holds the same world in its own buffers, on
-        // the same card. Measured at 900 MiB of 2350 on one world — not a
-        // rounding error but the largest single line in the whole estimate.
+        // Without the drop, the game holds the same world in its own buffers,
+        // on the same card — not a rounding error but the largest single line
+        // in the whole estimate.
         if (!VulkanConfig.isDropVanillaBuffers()) {
             geometry *= 2;
         }

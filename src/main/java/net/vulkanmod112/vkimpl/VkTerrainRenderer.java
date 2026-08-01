@@ -1258,6 +1258,11 @@ final class VkTerrainRenderer {
             ensureDrawBatchCapacity(Math.max(chunkCount, peakDrawsNeeded));
             peakDrawsNeeded = chunkCount;
             beginFrame(mvp, mirror);
+            // The opaque list is the whole of the terrain this frame, and it
+            // arrives with slots and positions already packed — so the
+            // structures follow what is drawn instead of keeping a second
+            // notion of what is nearby.
+            updateRayTracing(chunks, chunkCount, mirror, viewX, viewY, viewZ);
         } else if (chunkCount > peakDrawsNeeded) {
             peakDrawsNeeded = chunkCount;
         }
@@ -1304,6 +1309,31 @@ final class VkTerrainRenderer {
         gpuSamples = 0;
     }
 
+    /**
+     * Keeps the acceleration structures level with the geometry.
+     *
+     * Guarded rather than checked once, because ray tracing can turn itself off
+     * at any point — a failed build takes the whole subsystem down and leaves
+     * the renderer drawing exactly as before, which is the only behaviour worth
+     * having from something nothing depends on yet.
+     */
+    private void updateRayTracing(int[] chunks, int chunkCount, VkChunkMirror mirror,
+                                  double viewX, double viewY, double viewZ) {
+        if (!ctx.isRayTracingEnabled()) {
+            return;
+        }
+        if (rayTracing == null) {
+            rayTracing = new VkRayTracing(ctx);
+        }
+        // The index buffer can be rebuilt underneath, and its address goes with
+        // it; handing it over every frame costs one query and removes a way for
+        // the structures to be built from an address that no longer exists.
+        rayTracing.setIndexBuffer(quadIndexBuffer);
+        rayTracing.update(chunks, chunkCount, mirror, frameCounter, viewX, viewY, viewZ);
+    }
+
+    private VkRayTracing rayTracing;
+
     /** Everything the ultra log wants to know about this renderer. */
     synchronized void appendDiagnostics(StringBuilder sb) {
         sb.append("  terrain: frame ").append(frameCounter)
@@ -1335,6 +1365,11 @@ final class VkTerrainRenderer {
                         ? String.format(" (1 per %.1f frames)", lightmapFrames / (double) Math.max(1, lightmapUploads))
                         : "")
                 .append("; the game recomputes it once a tick, so ~20/s is expected\n");
+        if (rayTracing != null) {
+            rayTracing.appendDiagnostics(sb);
+        } else {
+            sb.append("  ray tracing: ").append(ctx.rayTracingStatus()).append('\n');
+        }
         sb.append("  sprites: ").append(spritePipeline == 0 ? "pipeline missing" : "in Vulkan")
                 .append(", last frame ").append(spriteFrameBatches).append(" batches, ")
                 .append(spriteFrameVertices).append(" vertices; sheets");
@@ -5755,7 +5790,15 @@ final class VkTerrainRenderer {
             VkBufferCreateInfo bufferInfo = VkBufferCreateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO)
                     .size(byteSize)
-                    .usage(VK_BUFFER_USAGE_INDEX_BUFFER_BIT)
+                    // The same indices an acceleration structure is built from,
+                    // which needs its address rather than the binding — and the
+                    // flag for that can only be asked for at creation.
+                    .usage(VK_BUFFER_USAGE_INDEX_BUFFER_BIT
+                            | (ctx.isRayTracingEnabled()
+                            ? org.lwjgl.vulkan.VK12.VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
+                            | org.lwjgl.vulkan.KHRAccelerationStructure
+                                    .VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR
+                            : 0))
                     .sharingMode(VK_SHARING_MODE_EXCLUSIVE);
             LongBuffer pBuffer = stack.mallocLong(1);
             check(vkCreateBuffer(device(), bufferInfo, null, pBuffer), "vkCreateBuffer(quad index)");
@@ -5768,6 +5811,12 @@ final class VkTerrainRenderer {
                     .allocationSize(req.size())
                     .memoryTypeIndex(findMemoryType(stack, req.memoryTypeBits(),
                             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT));
+            if (ctx.isRayTracingEnabled()) {
+                alloc.pNext(org.lwjgl.vulkan.VkMemoryAllocateFlagsInfo.calloc(stack)
+                        .sType(org.lwjgl.vulkan.VK11.VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO)
+                        .flags(org.lwjgl.vulkan.VK12.VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT)
+                        .address());
+            }
             LongBuffer pMemory = stack.mallocLong(1);
             check(vkAllocateMemory(device(), alloc, null, pMemory), "vkAllocateMemory(quad index)");
             quadIndexMemory = pMemory.get(0);
@@ -6134,6 +6183,10 @@ final class VkTerrainRenderer {
             return;
         }
         vkDeviceWaitIdle(device());
+        if (rayTracing != null) {
+            rayTracing.destroy();
+            rayTracing = null;
+        }
         destroyTargets();
         destroyAtlas();
         destroySprites();

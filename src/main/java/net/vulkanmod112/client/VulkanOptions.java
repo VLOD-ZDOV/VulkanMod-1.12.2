@@ -1327,6 +1327,30 @@ final class VulkanOptions {
                                         VulkanConfig.setFramesInFlight(value);
                                     }
                                 }),
+                        new VSwitchOption("Terrain Acceleration Structures",
+                                "Build the structures a traced ray needs over the terrain this mod "
+                                        + "draws. Nothing uses them yet, and the world looks "
+                                        + "exactly the same with this on. What it produces is a "
+                                        + "measurement: the obstacle to ray tracing in this game "
+                                        + "has always been that the structure has to be rebuilt "
+                                        + "whenever a chunk is, and rebuilding chunks is already "
+                                        + "the largest cost in a moving frame — this turns that "
+                                        + "sentence into a number in the diagnostics report. Needs "
+                                        + "Vulkan 1.2 and the acceleration-structure extension; if "
+                                        + "the card cannot, the report says which part is missing.",
+                                Cost.of(Level.LOW, Level.MEDIUM, Level.HIGH),
+                                "Applies after the game restarts.",
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return VulkanConfig.isRayTracing();
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        VulkanConfig.setRayTracing(value);
+                                    }
+                                }),
                         new VRangeOption("Vulkan GPU",
                                 "Which graphics card Vulkan renders on, by the number the log gives "
                                         + "it — open the diagnostics report to see which card is "

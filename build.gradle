@@ -496,6 +496,13 @@ tasks.matching { it.name in ['runClient', 'runObfClient'] }.configureEach {
     // -PultraLog forces the diagnostics file on whatever the config says. Every
     // measurement run wants it, it is off by default, and a run that produces no
     // file looks the same as a run that failed.
+    // -PrayTracing turns on the acceleration structures over the terrain. The
+    // setting exists in the screen too; this is here so a measurement run needs
+    // no clicking, and because a property given on the command line is pinned
+    // and the settings file cannot move it.
+    if (project.hasProperty('rayTracing')) {
+        jvmArgs '-Dvulkanmod112.rayTracing=true'
+    }
     if (project.hasProperty('ultraLog')) {
         jvmArgs '-Dvulkanmod112.ultraLog=true'
     }

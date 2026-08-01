@@ -18,8 +18,12 @@ import org.lwjgl.vulkan.VkInstance;
 import org.lwjgl.vulkan.VkInstanceCreateInfo;
 import org.lwjgl.vulkan.VkLayerProperties;
 import org.lwjgl.vulkan.VkPhysicalDevice;
+import org.lwjgl.vulkan.VkPhysicalDeviceAccelerationStructureFeaturesKHR;
+import org.lwjgl.vulkan.VkPhysicalDeviceFeatures2;
 import org.lwjgl.vulkan.VkPhysicalDeviceMemoryProperties;
 import org.lwjgl.vulkan.VkPhysicalDeviceProperties;
+import org.lwjgl.vulkan.VkPhysicalDeviceRayQueryFeaturesKHR;
+import org.lwjgl.vulkan.VkPhysicalDeviceVulkan12Features;
 import org.lwjgl.vulkan.VkQueue;
 import org.lwjgl.vulkan.VkQueueFamilyProperties;
 
@@ -148,11 +152,26 @@ public final class VulkanContextImpl implements VulkanBridge {
         LOGGER.info("Vulkan context ready in {} ms", (System.nanoTime() - start) / 1_000_000);
     }
 
-    /** Vulkan 1.1 unlocks core external-memory support needed for GL interop. */
+    /**
+     * The newest core version this loader will admit to, up to 1.2.
+     *
+     * 1.1 is the floor and always has been: external memory, the thing this
+     * whole renderer is built on, is core there. 1.2 is asked for on top
+     * because buffer device addresses are core in it, and an acceleration
+     * structure is built from addresses rather than from bound buffers — so
+     * without 1.2 there is no ray tracing to be had at all. Nothing else
+     * changes for a driver that only has 1.1: the version is clamped to what
+     * the loader reports, and every 1.2 feature is asked for separately and
+     * checked before use.
+     */
     private int pickApiVersion() {
         int supported = VK.getInstanceVersionSupported();
-        if (VK_VERSION_MAJOR(supported) > 1
-                || (VK_VERSION_MAJOR(supported) == 1 && VK_VERSION_MINOR(supported) >= 1)) {
+        int major = VK_VERSION_MAJOR(supported);
+        int minor = VK_VERSION_MINOR(supported);
+        if (major > 1 || (major == 1 && minor >= 2)) {
+            return org.lwjgl.vulkan.VK12.VK_API_VERSION_1_2;
+        }
+        if (major == 1 && minor == 1) {
             return org.lwjgl.vulkan.VK11.VK_API_VERSION_1_1;
         }
         return VK_API_VERSION_1_0;
@@ -535,7 +554,109 @@ public final class VulkanContextImpl implements VulkanBridge {
         if (memoryBudgetSupported) {
             names.add(MEMORY_BUDGET_EXTENSION);
         }
+        if (rayTracingEnabled) {
+            java.util.Collections.addAll(names, ACCELERATION_EXTENSIONS);
+            if (rayQuerySupported) {
+                names.add(RAY_QUERY_EXTENSION);
+            }
+        }
         return names.toArray(new String[0]);
+    }
+
+    /**
+     * Building an acceleration structure needs both: the structure itself, and
+     * the deferred-operation object its API takes even when nothing is
+     * deferred.
+     */
+    private static final String[] ACCELERATION_EXTENSIONS = {
+            org.lwjgl.vulkan.KHRAccelerationStructure.VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
+            org.lwjgl.vulkan.KHRDeferredHostOperations.VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
+    };
+    /** Tracing rays from an ordinary fragment shader, rather than from a ray pipeline. */
+    private static final String RAY_QUERY_EXTENSION =
+            org.lwjgl.vulkan.KHRRayQuery.VK_KHR_RAY_QUERY_EXTENSION_NAME;
+
+    private boolean rayTracingEnabled;
+    private boolean rayQuerySupported;
+    private String rayTracingStatus = "not asked for";
+
+    /** True once the device was created with acceleration structures turned on. */
+    public boolean isRayTracingEnabled() {
+        return rayTracingEnabled;
+    }
+
+    /** Whether a fragment shader on this device may trace a ray. */
+    public boolean isRayQuerySupported() {
+        return rayQuerySupported;
+    }
+
+    /** One line for the diagnostics report and the settings screen. */
+    public String rayTracingStatus() {
+        return rayTracingStatus;
+    }
+
+    /**
+     * Decides whether this device can carry acceleration structures, and says
+     * why not when it cannot.
+     *
+     * Asked before the device is created, because every part of it — the
+     * extensions, the features, and the device addresses the chunk geometry
+     * buffer needs — has to be requested at creation and cannot be added
+     * afterwards. A card that fails any part here simply renders as it always
+     * did; nothing else in the mod depends on the answer.
+     */
+    private void resolveRayTracingSupport(MemoryStack stack) {
+        if (!Boolean.getBoolean("vulkanmod112.rayTracing")) {
+            rayTracingStatus = "off in the settings";
+            return;
+        }
+        VkPhysicalDeviceProperties props = VkPhysicalDeviceProperties.malloc(stack);
+        vkGetPhysicalDeviceProperties(physicalDevice, props);
+        if (props.apiVersion() < org.lwjgl.vulkan.VK12.VK_API_VERSION_1_2) {
+            rayTracingStatus = "needs Vulkan 1.2, this driver reports "
+                    + apiVersionString(props.apiVersion());
+            return;
+        }
+        for (String extension : ACCELERATION_EXTENSIONS) {
+            if (!hasDeviceExtension(stack, extension)) {
+                rayTracingStatus = "driver lacks " + extension;
+                return;
+            }
+        }
+        // The feature bits, not just the extension names. An extension may be
+        // present and its feature off, and the difference is a device that
+        // fails to create rather than a feature that quietly does nothing.
+        VkPhysicalDeviceAccelerationStructureFeaturesKHR asFeatures =
+                VkPhysicalDeviceAccelerationStructureFeaturesKHR.calloc(stack)
+                        .sType(org.lwjgl.vulkan.KHRAccelerationStructure
+                                .VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR);
+        VkPhysicalDeviceRayQueryFeaturesKHR rqFeatures =
+                VkPhysicalDeviceRayQueryFeaturesKHR.calloc(stack)
+                        .sType(org.lwjgl.vulkan.KHRRayQuery
+                                .VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR)
+                        .pNext(asFeatures.address());
+        VkPhysicalDeviceVulkan12Features vk12 = VkPhysicalDeviceVulkan12Features.calloc(stack)
+                .sType(org.lwjgl.vulkan.VK12.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES)
+                .pNext(rqFeatures.address());
+        VkPhysicalDeviceFeatures2 features2 = VkPhysicalDeviceFeatures2.calloc(stack)
+                .sType(org.lwjgl.vulkan.VK11.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2)
+                .pNext(vk12.address());
+        org.lwjgl.vulkan.VK11.vkGetPhysicalDeviceFeatures2(physicalDevice, features2);
+
+        if (!asFeatures.accelerationStructure()) {
+            rayTracingStatus = "driver does not offer the accelerationStructure feature";
+            return;
+        }
+        if (!vk12.bufferDeviceAddress()) {
+            rayTracingStatus = "driver does not offer buffer device addresses";
+            return;
+        }
+        rayQuerySupported = rqFeatures.rayQuery()
+                && hasDeviceExtension(stack, RAY_QUERY_EXTENSION);
+        rayTracingEnabled = true;
+        rayTracingStatus = rayQuerySupported
+                ? "acceleration structures and ray query"
+                : "acceleration structures only, no ray query on this driver";
     }
 
     private boolean hasDeviceExtension(MemoryStack stack, String name) {
@@ -611,6 +732,35 @@ public final class VulkanContextImpl implements VulkanBridge {
             // stall and guessing at one.
             this.memoryBudgetSupported = pickApiVersion() >= org.lwjgl.vulkan.VK11.VK_API_VERSION_1_1
                     && hasDeviceExtension(stack, MEMORY_BUDGET_EXTENSION);
+            resolveRayTracingSupport(stack);
+            LOGGER.info("Ray tracing: {}", rayTracingStatus);
+            if (rayTracingEnabled) {
+                // Chained rather than merged into pEnabledFeatures: the two
+                // cannot both be used, and the core features above are what
+                // every session depends on.
+                VkPhysicalDeviceAccelerationStructureFeaturesKHR asFeatures =
+                        VkPhysicalDeviceAccelerationStructureFeaturesKHR.calloc(stack)
+                                .sType(org.lwjgl.vulkan.KHRAccelerationStructure
+                                        .VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR)
+                                .accelerationStructure(true);
+                VkPhysicalDeviceVulkan12Features vk12 =
+                        VkPhysicalDeviceVulkan12Features.calloc(stack)
+                                .sType(org.lwjgl.vulkan.VK12
+                                        .VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES)
+                                .bufferDeviceAddress(true)
+                                .pNext(asFeatures.address());
+                if (rayQuerySupported) {
+                    VkPhysicalDeviceRayQueryFeaturesKHR rqFeatures =
+                            VkPhysicalDeviceRayQueryFeaturesKHR.calloc(stack)
+                                    .sType(org.lwjgl.vulkan.KHRRayQuery
+                                            .VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR)
+                                    .rayQuery(true)
+                                    .pNext(vk12.address());
+                    deviceInfo.pNext(rqFeatures.address());
+                } else {
+                    deviceInfo.pNext(vk12.address());
+                }
+            }
 
             String[] wanted = deviceExtensionsToEnable();
             if (wanted.length != 0) {
