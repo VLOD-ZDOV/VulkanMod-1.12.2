@@ -305,6 +305,11 @@ public final class Diagnostics {
                 // this one as the truth cost a morning.
                 + ", depth blit asked for " + VulkanConfig.isDepthBlitEnabled()
                 + ", culling " + VulkanConfig.isCullingEnabled());
+        // Only once the screen that causes it has been opened, so an ordinary
+        // session says nothing about it at all.
+        if (ResourcePackIcons.touched()) {
+            out.println("  " + ResourcePackIcons.describe());
+        }
         out.println("  memory: " + used() + " MiB used of " + max() + " MiB");
         out.println();
     }
