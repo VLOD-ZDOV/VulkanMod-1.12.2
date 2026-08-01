@@ -63,6 +63,9 @@ layout(set = 0, binding = 3, std140) uniform Frame {
     // x = how wide a moving light is treated as being, in blocks. A torch is a
     //     flame rather than a point, and a point casts an edge with no width
     //     at all.
+    // y = how much of vanilla's own block light to give up in favour of the
+    //     light traced from the sources below. 0 leaves the game's lighting
+    //     exactly as it was.
     vec4 lightShadow;
 } frame;
 
@@ -823,6 +826,7 @@ void main() {
     float backFace = foliage ? BACK_FACE_LIGHT_FOLIAGE : BACK_FACE_LIGHT;
     int maxTracedLights = int(frame.sunParams.w);
     int tracedLights = 0;
+    float tracedBlock = 0.0;
     for (int i = 0; i < lightCount; ++i) {
         vec4 source = frame.lights[i];
         vec3 toSource = source.xyz - vRelative;
@@ -866,9 +870,18 @@ void main() {
         if (level > 0.0) {
             // The light map is sampled at (level * 16 + 8) / 256, which is the
             // texel centre of that row.
-            blockLight = max(blockLight, (level * 16.0 + 8.0) / 256.0);
+            tracedBlock = max(tracedBlock, (level * 16.0 + 8.0) / 256.0);
         }
     }
+    // What the game says, what the rays say, and how much to prefer the rays.
+    //
+    // Vanilla's block light reaches around corners and is flat; the traced
+    // light has a direction and a shadow and reaches only as far as the sources
+    // this frame knows about. Giving up the first entirely is what makes a room
+    // look lit rather than filled, and it is also what makes a cave lit from
+    // beyond that range go dark — so which of the two wins is the player's to
+    // choose and not ours.
+    blockLight = max(blockLight * (1.0 - frame.lightShadow.y), tracedBlock);
     // The sun's shadow, and it moves the sky light rather than multiplying the
     // result.
     //

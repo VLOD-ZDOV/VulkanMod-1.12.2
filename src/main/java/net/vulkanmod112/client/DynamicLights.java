@@ -149,8 +149,6 @@ public final class DynamicLights {
         // sources happen to come first in the world's list would make lights
         // wink in and out as entities are added and removed. The farthest is
         // dropped instead, so what survives is the nearest.
-        double farthestSq = -1.0;
-        int farthestIndex = -1;
         for (int i = 0; i < size; i++) {
             Entity entity = entities.get(i);
             if (entity == null) {
@@ -167,35 +165,64 @@ public final class DynamicLights {
             if (level <= 0) {
                 continue;
             }
-            int slot;
-            if (count < MAX_LIGHTS) {
-                slot = count++;
-            } else {
-                if (farthestIndex < 0) {
-                    for (int j = 0; j < count; j++) {
-                        double d = distanceSqOf(j);
-                        if (d > farthestSq) {
-                            farthestSq = d;
-                            farthestIndex = j;
-                        }
-                    }
-                }
-                if (distSq >= farthestSq) {
-                    continue;
-                }
-                slot = farthestIndex;
-                farthestIndex = -1;
-                farthestSq = -1.0;
-            }
-            int base = slot * 4;
-            LIGHTS[base] = (float) dx;
             // Entity positions are at the feet; a carried light belongs at
             // roughly eye height, and a dropped one just above the ground.
-            LIGHTS[base + 1] = (float) (dy + (entity instanceof EntityItem ? 0.2 : entity.getEyeHeight() * 0.75));
-            LIGHTS[base + 2] = (float) dz;
-            LIGHTS[base + 3] = level;
+            double lift = entity instanceof EntityItem ? 0.2 : entity.getEyeHeight() * 0.75;
+            offer((float) dx, (float) (dy + lift), (float) dz, level, distSq);
+        }
+        // The blocks that emit light, offered the same way and after the
+        // moving sources — so where the list is full, the nearest survive
+        // whichever kind they are.
+        //
+        // These are the ninety-nine percent of a world's light. Vanilla lights
+        // them already, correctly and completely flatly; what putting them here
+        // buys is that they can be traced, and a room lit by a torch on one
+        // wall stops looking exactly like a room lit by a torch on the other.
+        int blockRadius = VulkanConfig.getTracedBlockLight() > 0
+                ? VulkanConfig.getBlockLightRadius() : 0;
+        BlockLightSources.update(viewX, viewY, viewZ, blockRadius);
+        float[] blocks = BlockLightSources.values();
+        for (int i = 0; i < BlockLightSources.count(); i++) {
+            int base = i * 4;
+            float bx = blocks[base];
+            float by = blocks[base + 1];
+            float bz = blocks[base + 2];
+            offer(bx, by, bz, (int) blocks[base + 3], bx * bx + by * by + bz * bz);
         }
         gathered += count;
+    }
+
+    /**
+     * Puts one source in the list, dropping the farthest when it is full.
+     *
+     * Taking whichever happens to come first would make lights wink in and out
+     * as the world's own lists are reordered; the nearest are what a surface
+     * can actually see.
+     */
+    private static void offer(float dx, float dy, float dz, int level, double distSq) {
+        int slot;
+        if (count < MAX_LIGHTS) {
+            slot = count++;
+        } else {
+            int farthestIndex = -1;
+            double farthestSq = -1.0;
+            for (int j = 0; j < count; j++) {
+                double d = distanceSqOf(j);
+                if (d > farthestSq) {
+                    farthestSq = d;
+                    farthestIndex = j;
+                }
+            }
+            if (distSq >= farthestSq) {
+                return;
+            }
+            slot = farthestIndex;
+        }
+        int base = slot * 4;
+        LIGHTS[base] = dx;
+        LIGHTS[base + 1] = dy;
+        LIGHTS[base + 2] = dz;
+        LIGHTS[base + 3] = level;
     }
 
     /** Squared distance from the camera of a source already in the list. */

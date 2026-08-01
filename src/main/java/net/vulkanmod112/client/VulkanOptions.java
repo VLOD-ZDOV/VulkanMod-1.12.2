@@ -1352,6 +1352,52 @@ final class VulkanOptions {
                                         VulkanConfig.setSunShadows(value);
                                     }
                                 }),
+                        new VRangeOption("Traced Block Light",
+                                "How much of the game's own block light to replace with light "
+                                        + "traced from the blocks that emit it. Vanilla's block "
+                                        + "light is a flood fill through air: it reaches around "
+                                        + "corners correctly and it is completely flat, because it "
+                                        + "is one number per block with no idea where the light "
+                                        + "came from — a torch on one wall lights a room exactly "
+                                        + "as a torch on the other does. Traced light has a "
+                                        + "direction and casts a shadow. What it costs is range: "
+                                        + "only sources near you are found and only the nearest "
+                                        + "thirty-two fit, so turned up fully, a cave lit from "
+                                        + "further off goes dark. Needs Traced Light Shadows above "
+                                        + "zero.",
+                                Cost.of(Level.LOW, Level.HIGH, Level.NONE),
+                                "Needs Terrain Acceleration Structures.",
+                                0, 100, 5, "%", "OFF",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getTracedBlockLight();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setTracedBlockLight(value);
+                                    }
+                                }),
+                        new VRangeOption("Light Shadow Softness",
+                                "How soft the edge of a shadow cast by a torch or a fire is, kept "
+                                        + "apart from the sun's: a small flame a step away and a "
+                                        + "star a long way off are not the same kind of source and "
+                                        + "do not want the same edge. Zero gives the perfectly "
+                                        + "crisp one.",
+                                Cost.FREE, "Needs Traced Light Shadows.",
+                                0, 100, 5, "%", "HARD",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getLightSoftness();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setLightSoftness(value);
+                                    }
+                                }),
                         new VRangeOption("Traced Light Shadows",
                                 "How many moving lights a surface may ask whether anything stands "
                                         + "in the way. A carried torch, a burning creature or a "
@@ -1397,6 +1443,27 @@ final class VulkanOptions {
                                     @Override
                                     public void set(int value) {
                                         VulkanConfig.setShadowSoftness(value);
+                                    }
+                                }),
+                        new VRangeOption("Block Light Search",
+                                "How far around you light-emitting blocks are looked for, in "
+                                        + "blocks. The search runs a few times a second rather "
+                                        + "than every frame — placing a torch lights the room "
+                                        + "within a fraction of a second instead of within a "
+                                        + "frame, which nobody can see and which costs a "
+                                        + "hundredth of what asking every frame would.",
+                                Cost.of(Level.LOW, Level.NONE, Level.NONE),
+                                "Needs Traced Block Light.",
+                                4, 24, 2, " blocks", null,
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getBlockLightRadius();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setBlockLightRadius(value);
                                     }
                                 }),
                         new VRangeOption("Shadow Reach",

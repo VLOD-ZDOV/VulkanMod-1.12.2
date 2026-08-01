@@ -366,6 +366,7 @@ public final class Diagnostics {
         out.println("  " + SessionLog.cameraLine());
         out.println("  " + TerrainHooks.stats());
         out.println("  " + EntityCapture.stats());
+        out.println("  " + BlockLightSources.stats());
         out.println("  " + TerrainHooks.vanillaLayerStats());
         out.println("  " + VanillaFrame.stats());
         out.println("  " + VanillaFrame.walkStats());

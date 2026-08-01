@@ -322,6 +322,26 @@ public final class VulkanConfig {
      */
     static final int DEF_TRACED_LIGHTS = 2;
     /**
+     * How much of vanilla's own block light to give up in favour of traced
+     * light, in percent. 0 changes nothing.
+     *
+     * Vanilla's block light is a flood fill through air: correct around
+     * corners, and completely flat, because it is a number per block with no
+     * idea where the light came from. A torch on one wall lights a room exactly
+     * as a torch on the other does. Replacing it with light traced from the
+     * blocks that emit it turns that number back into a direction and a shadow.
+     *
+     * What it costs is honesty about range: only the sources near the camera
+     * are known, and only the strongest thirty-two of those fit. Turned up
+     * fully, a cave lit from beyond that range goes dark. That is the trade,
+     * and it is why this is a slider and not a switch.
+     */
+    static final int DEF_TRACED_BLOCK_LIGHT = 0;
+    /** How far around the camera light-emitting blocks are looked for. */
+    static final int DEF_BLOCK_LIGHT_RADIUS = 12;
+    /** How soft the edge of a shadow cast by a torch is, apart from the sun's. */
+    static final int DEF_LIGHT_SOFTNESS = 30;
+    /**
      * Let the render-distance slider go past 64, up to 128.
      *
      * Off by default because what it unlocks is not "more of the same". The
@@ -489,6 +509,9 @@ public final class VulkanConfig {
     private static int shadowSoftness = DEF_SHADOW_SOFTNESS;
     private static int rayTracingRadius = DEF_RAY_TRACING_RADIUS;
     private static int tracedLights = DEF_TRACED_LIGHTS;
+    private static int tracedBlockLight = DEF_TRACED_BLOCK_LIGHT;
+    private static int blockLightRadius = DEF_BLOCK_LIGHT_RADIUS;
+    private static int lightSoftness = DEF_LIGHT_SOFTNESS;
     private static boolean frameGraph = DEF_FRAME_GRAPH;
     private static int frameGraphInterval = DEF_FRAME_GRAPH_INTERVAL;
     private static boolean dynamicLights = DEF_DYNAMIC_LIGHTS;
@@ -724,6 +747,23 @@ public final class VulkanConfig {
                         + "at zero the edge follows the pixel grid; higher values spread that same "
                         + "ray over a disc and trade the staircase for a dithered band. Costs "
                         + "nothing either way — the number of rays does not change.");
+        tracedBlockLight = config.getInt("tracedBlockLight", CATEGORY_GENERAL,
+                DEF_TRACED_BLOCK_LIGHT, 0, 100,
+                "How much of the game's own block light to replace with light traced from the "
+                        + "blocks that emit it. Vanilla's is a flood fill: right around corners "
+                        + "and completely flat, with no idea where the light came from. Traced "
+                        + "light has a direction and a shadow. Only sources near you are known "
+                        + "and only the nearest thirty-two fit, so turned up fully a cave lit "
+                        + "from further off goes dark.");
+        blockLightRadius = config.getInt("blockLightRadius", CATEGORY_ADVANCED,
+                DEF_BLOCK_LIGHT_RADIUS, 4, 24,
+                "How far around you light-emitting blocks are looked for, in blocks. The search "
+                        + "runs a few times a second rather than every frame; wider costs more "
+                        + "each time it runs.");
+        lightSoftness = config.getInt("lightSoftness", CATEGORY_GENERAL, DEF_LIGHT_SOFTNESS, 0, 100,
+                "How soft the edge of a shadow cast by a torch or a fire is. Separate from the "
+                        + "sun's, because a small flame close by and a star a long way off are "
+                        + "not the same kind of source. 0 gives the perfectly crisp edge.");
         tracedLights = config.getInt("tracedLights", CATEGORY_GENERAL, DEF_TRACED_LIGHTS, 0, 8,
                 "How many moving lights a surface may ask whether something is in the way. A "
                         + "carried torch or a burning creature is added as a straight line from "
@@ -978,6 +1018,9 @@ public final class VulkanConfig {
         setShadowSoftness(DEF_SHADOW_SOFTNESS);
         setRayTracingRadius(DEF_RAY_TRACING_RADIUS);
         setTracedLights(DEF_TRACED_LIGHTS);
+        setTracedBlockLight(DEF_TRACED_BLOCK_LIGHT);
+        setBlockLightRadius(DEF_BLOCK_LIGHT_RADIUS);
+        setLightSoftness(DEF_LIGHT_SOFTNESS);
         setExtremeRenderDistance(DEF_EXTREME_RENDER_DISTANCE);
         setDirectionalLight(DEF_DIRECTIONAL_LIGHT);
         setHeightFog(DEF_HEIGHT_FOG);
@@ -1152,6 +1195,35 @@ public final class VulkanConfig {
     public static void setShadowSoftness(int value) {
         shadowSoftness = value < 0 ? 0 : (value > 100 ? 100 : value);
         store(CATEGORY_GENERAL, "shadowSoftness", shadowSoftness);
+        applySystemProperties();
+    }
+
+    public static int getTracedBlockLight() {
+        return tracedBlockLight;
+    }
+
+    public static void setTracedBlockLight(int value) {
+        tracedBlockLight = value < 0 ? 0 : (value > 100 ? 100 : value);
+        store(CATEGORY_GENERAL, "tracedBlockLight", tracedBlockLight);
+        applySystemProperties();
+    }
+
+    public static int getBlockLightRadius() {
+        return blockLightRadius;
+    }
+
+    public static void setBlockLightRadius(int value) {
+        blockLightRadius = value < 4 ? 4 : (value > 24 ? 24 : value);
+        store(CATEGORY_ADVANCED, "blockLightRadius", blockLightRadius);
+    }
+
+    public static int getLightSoftness() {
+        return lightSoftness;
+    }
+
+    public static void setLightSoftness(int value) {
+        lightSoftness = value < 0 ? 0 : (value > 100 ? 100 : value);
+        store(CATEGORY_GENERAL, "lightSoftness", lightSoftness);
         applySystemProperties();
     }
 
@@ -1599,6 +1671,8 @@ public final class VulkanConfig {
         publish("vulkanmod112.shadowSoftness", Integer.toString(shadowSoftness));
         publish("vulkanmod112.rayTracingRadius", Integer.toString(rayTracingRadius));
         publish("vulkanmod112.tracedLights", Integer.toString(tracedLights));
+        publish("vulkanmod112.tracedBlockLight", Integer.toString(tracedBlockLight));
+        publish("vulkanmod112.lightSoftness", Integer.toString(lightSoftness));
         publish("vulkanmod112.directionalLight", Integer.toString(directionalLight));
         publish("vulkanmod112.heightFog", Integer.toString(heightFog));
         publish("vulkanmod112.heightFogDepth", Integer.toString(heightFogDepth));

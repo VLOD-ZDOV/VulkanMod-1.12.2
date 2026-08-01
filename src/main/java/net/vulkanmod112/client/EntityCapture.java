@@ -88,8 +88,24 @@ public final class EntityCapture {
     }
 
     /** Only during the game's own entity pass; a model shown in a GUI is not one. */
+    /**
+     * Armed on every other frame, so that the cost is a difference and not a
+     * guess.
+     *
+     * Timing the pass with a clock at each end measures the game's own entity
+     * rendering, of which this is a small part — the first version reported
+     * that number as though it were the overhead, which made a hook doing
+     * almost nothing look like it cost a millisecond. Timing each part instead
+     * would have the clock cost a share of the answer large enough to change
+     * it. So the whole pass is timed both ways, alternately, and what is
+     * reported is what one costs over the other.
+     */
+    private static boolean everyOther;
+
     public static void arm() {
-        armed = VulkanConfig.isEntityCapture();
+        everyOther = !everyOther;
+        armed = VulkanConfig.isEntityCapture() && everyOther;
+        measuring = VulkanConfig.isEntityCapture();
         // Timed around the whole pass rather than around each part. Two clock
         // readings per part is tens of nanoseconds against a few hundred being
         // measured, which is a share of the answer large enough to change it.
@@ -108,21 +124,33 @@ public final class EntityCapture {
      * session were going through it.
      */
     public static void disarm() {
-        if (!armed) {
+        if (!measuring) {
             return;
+        }
+        measuring = false;
+        long elapsed = System.nanoTime() - passStartedNanos;
+        if (armed) {
+            armedNanos += elapsed;
+            armedFrames++;
+            if (frameParts > 0) {
+                lastParts = frameParts;
+                lastQuads = frameQuads;
+            }
+        } else {
+            bareNanos += elapsed;
+            bareFrames++;
         }
         armed = false;
         depth = 0;
-        frameNanos = System.nanoTime() - passStartedNanos;
-        if (frameParts > 0) {
-            lastParts = frameParts;
-            lastQuads = frameQuads;
-            lastNanos = frameNanos;
-        }
         frameParts = 0;
         frameQuads = 0;
-        frameNanos = 0;
     }
+
+    private static boolean measuring;
+    private static long armedNanos;
+    private static long armedFrames;
+    private static long bareNanos;
+    private static long bareFrames;
 
     /**
      * The creature's own frame, read from the driver once for the whole model.
@@ -376,10 +404,15 @@ public final class EntityCapture {
         if (!VulkanConfig.isEntityCapture()) {
             return "entity capture: off";
         }
-        return "entity capture: " + lastParts + " parts, " + lastQuads + " quads last frame, "
-                + String.format("%.3f", lastNanos / 1e6) + " ms ("
-                + (lastParts == 0 ? "n/a" : String.format("%.0f ns a part", lastNanos / (double) lastParts))
-                + "); " + matrixReads + " driver matrix reads over " + partsSeen + " parts; "
+        double withCapture = armedFrames == 0 ? 0.0 : armedNanos / (double) armedFrames;
+        double without = bareFrames == 0 ? 0.0 : bareNanos / (double) bareFrames;
+        double overhead = withCapture - without;
+        return "entity capture: " + lastParts + " parts, " + lastQuads + " quads a frame; "
+                + "entity pass " + String.format("%.3f", withCapture / 1e6) + " ms with, "
+                + String.format("%.3f", without / 1e6) + " ms without, so "
+                + String.format("%.3f", overhead / 1e6) + " ms"
+                + (lastParts == 0 ? "" : String.format(" (%.0f ns a part)", overhead / lastParts))
+                + " is ours; " + matrixReads + " driver reads over " + partsSeen + " parts; "
                 + "placement checked " + checks + " times, " + disagreements + " disagreed, worst "
                 + String.format("%.4f", worstError) + " blocks; "
                 + shapesCached + " model shapes cached";

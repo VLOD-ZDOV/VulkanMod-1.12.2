@@ -4268,7 +4268,11 @@ final class VkTerrainRenderer {
         // wants one edge soft wants the other soft too, and two sliders for one
         // preference is one slider too many.
         MemoryUtil.memPutFloat(base + 976,
-                clampPercent(intProperty("vulkanmod112.shadowSoftness", 35)) * MAX_LIGHT_RADIUS);
+                clampPercent(intProperty("vulkanmod112.lightSoftness", 30)) * MAX_LIGHT_RADIUS);
+        // How much of the game's own block light to give up. Only where there
+        // is something to give it up for.
+        MemoryUtil.memPutFloat(base + 980, tracingWanted() && tracedLights() > 0
+                ? clampPercent(intProperty("vulkanmod112.tracedBlockLight", 0)) : 0.0f);
     }
 
     /**
