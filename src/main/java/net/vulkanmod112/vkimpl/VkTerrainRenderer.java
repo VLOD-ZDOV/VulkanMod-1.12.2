@@ -156,6 +156,26 @@ final class VkTerrainRenderer {
     private long vkWaitSemaphore;
     private int glWaitSemaphore;
     private int glSignalSemaphore;
+    /**
+     * Running counters for the two semaphore pairs above, used only when they
+     * are exported as D3D12 fence handles (see {@link Interop#D3D12_FENCE_SEMAPHORES}).
+     *
+     * A binary Vulkan semaphore exported this way is a monotonically increasing
+     * value underneath, starting at 0 and advancing by one on every signal —
+     * Vulkan tracks that itself on its side of a submit, so nothing changes
+     * there. GL has no such implicit tracking: EXT_semaphore_win32 requires the
+     * target value to be set explicitly with glSemaphoreParameterui64EXT before
+     * every wait or signal on a fence-backed semaphore. Each field here counts
+     * how many times its own side has signalled its half of the pair, which is
+     * exactly the value the other side's next wait must be told to expect —
+     * signalFenceValue is bumped where vkSignalSemaphore is signalled
+     * (submitFrame) and read where its GL twin waits (composite); waitFenceValue
+     * is bumped where glSignalSemaphore is signalled (composite) and is what
+     * vkWaitSemaphore's next Vulkan-side wait (submitFrame, next frame)
+     * implicitly expects to have reached.
+     */
+    private long signalFenceValue;
+    private long waitFenceValue;
 
     /**
      * A second hand-off, for the translucent pass, and it has to be its own.
@@ -172,6 +192,9 @@ final class VkTerrainRenderer {
     private long vkTranslucentWaitSemaphore;
     private int glTranslucentWaitSemaphore;
     private int glTranslucentSignalSemaphore;
+    /** Same bookkeeping as {@link #signalFenceValue}/{@link #waitFenceValue}, for the pair above. */
+    private long translucentSignalFenceValue;
+    private long translucentWaitFenceValue;
     private VkCommandBuffer[] translucentCommandBuffers;
     private long[] translucentFences;
     private int translucentCompositeProgram;
@@ -1495,6 +1518,10 @@ final class VkTerrainRenderer {
                     .pCommandBuffers(stack.pointers(commandBuffer));
             if (SHARED_SEMAPHORES) {
                 submit.pSignalSemaphores(stack.longs(vkSignalSemaphore));
+                // Vulkan tracks a D3D12-fence-backed binary semaphore's value
+                // itself; this mirror is only so the GL side of the pair knows
+                // what to wait for, see setFenceValue.
+                signalFenceValue++;
             }
             if (!firstFrame && SHARED_SEMAPHORES) {
                 submit.waitSemaphoreCount(1)
@@ -1611,6 +1638,7 @@ final class VkTerrainRenderer {
                     .pWaitSemaphores(stack.longs(vkTranslucentWaitSemaphore))
                     .pWaitDstStageMask(stack.ints(VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT))
                     .pSignalSemaphores(stack.longs(vkTranslucentSignalSemaphore));
+            translucentSignalFenceValue++;
             check(vkQueueSubmit(ctx.getGraphicsQueue(), submit, translucentFences[slot]),
                     "vkQueueSubmit(translucent)");
         }
@@ -1644,6 +1672,8 @@ final class VkTerrainRenderer {
             IntBuffer noBuffers = stack.mallocInt(0);
             IntBuffer textures = stack.ints(glDepthTexture);
             IntBuffer layouts = stack.ints(EXTSemaphore.GL_LAYOUT_DEPTH_STENCIL_ATTACHMENT_EXT);
+            translucentWaitFenceValue++;
+            setFenceValue(glTranslucentSignalSemaphore, translucentWaitFenceValue);
             EXTSemaphore.glSignalSemaphoreEXT(glTranslucentSignalSemaphore, noBuffers, textures, layouts);
         }
         // Without this the signal can sit in the GL command stream while the
@@ -1657,6 +1687,7 @@ final class VkTerrainRenderer {
             IntBuffer noBuffers = stack.mallocInt(0);
             IntBuffer textures = stack.ints(glTranslucentTexture);
             IntBuffer layouts = stack.ints(EXTSemaphore.GL_LAYOUT_SHADER_READ_ONLY_EXT);
+            setFenceValue(glTranslucentWaitSemaphore, translucentSignalFenceValue);
             EXTSemaphore.glWaitSemaphoreEXT(glTranslucentWaitSemaphore, noBuffers, textures, layouts);
 
             int prevProgram = GL11C.glGetInteger(GL20C.GL_CURRENT_PROGRAM);
@@ -1710,6 +1741,7 @@ final class VkTerrainRenderer {
             // never signals it stalls here until the operating system decides
             // the card is gone. That looks exactly like the log simply ending.
             if (SHARED_SEMAPHORES) {
+                setFenceValue(glWaitSemaphore, signalFenceValue);
                 firstFrameStage("waiting on the Vulkan semaphore from OpenGL");
                 EXTSemaphore.glWaitSemaphoreEXT(glWaitSemaphore, noBuffers, textures, layouts);
                 firstFrameStage("semaphore taken, compositing");
@@ -1827,6 +1859,8 @@ final class VkTerrainRenderer {
 
             firstFrameStage("terrain drawn into the game's frame");
             if (SHARED_SEMAPHORES) {
+                waitFenceValue++;
+                setFenceValue(glSignalSemaphore, waitFenceValue);
                 EXTSemaphore.glSignalSemaphoreEXT(glSignalSemaphore, noBuffers, textures, layouts);
                 GL11C.glFlush();
             } else {
@@ -4458,6 +4492,20 @@ final class VkTerrainRenderer {
 
     private int importSemaphore(MemoryStack stack, long vkSemaphore) {
         return Interop.importSemaphoreToGL(stack, device(), vkSemaphore);
+    }
+
+    /**
+     * Tells GL which fence value the next wait or signal on {@code glSem}
+     * targets. Required before every {@code glWaitSemaphoreEXT}/
+     * {@code glSignalSemaphoreEXT} call when the semaphore was imported as a
+     * D3D12 fence handle; a no-op on the opaque Win32 path and on Linux, where
+     * GL derives the value itself from the binary semaphore's own state.
+     */
+    private static void setFenceValue(int glSem, long value) {
+        if (Interop.D3D12_FENCE_SEMAPHORES) {
+            EXTSemaphore.glSemaphoreParameterui64EXT(glSem,
+                    org.lwjgl.opengl.EXTSemaphoreWin32.GL_D3D12_FENCE_VALUE_EXT, value);
+        }
     }
 
     private void ensureQuadIndexCapacity(int quads) {

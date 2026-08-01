@@ -22,8 +22,10 @@ import org.lwjgl.vulkan.KHRExternalSemaphoreFd;
 import org.lwjgl.vulkan.KHRExternalSemaphoreWin32;
 import org.lwjgl.vulkan.VK11;
 import org.lwjgl.vulkan.VkDevice;
+import org.lwjgl.vulkan.VkExternalSemaphoreProperties;
 import org.lwjgl.vulkan.VkMemoryGetFdInfoKHR;
 import org.lwjgl.vulkan.VkPhysicalDevice;
+import org.lwjgl.vulkan.VkPhysicalDeviceExternalSemaphoreInfo;
 import org.lwjgl.vulkan.VkPhysicalDeviceIDProperties;
 import org.lwjgl.vulkan.VkPhysicalDeviceProperties2;
 import org.lwjgl.vulkan.VkMemoryGetWin32HandleInfoKHR;
@@ -56,15 +58,39 @@ final class Interop {
     static final boolean WINDOWS =
             System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
 
+    /**
+     * Whether an exported Windows semaphore is carried as a D3D12 fence handle
+     * instead of an "opaque" Win32 handle.
+     *
+     * Both are legal per VK_KHR_external_semaphore_win32 and GL_EXT_semaphore_win32,
+     * and until now this renderer used the opaque one everywhere. Opaque Win32
+     * semaphore handles exist almost solely for Vulkan-to-Vulkan sharing across
+     * processes; next to nothing exercises a graphics driver's GL-side consumer
+     * of one. D3D12 fence handles are the interop primitive every DXGI-based
+     * cross-API path actually uses (ANGLE, DXVK, wined3d, hybrid engines), so a
+     * driver's fence-handle path gets tested by far more software than its
+     * opaque one does. On a driver that accepts the opaque import, reports no
+     * error, and then never signals the GPU-side wait — which is what this
+     * looked like on the one machine it failed on — the fence path is the one
+     * card left to try before assuming the extension itself is unusable there.
+     *
+     * -Dvulkanmod112.d3d12FenceSemaphores=false restores the opaque path for
+     * comparison.
+     */
+    static final boolean D3D12_FENCE_SEMAPHORES = WINDOWS
+            && !"false".equals(System.getProperty("vulkanmod112.d3d12FenceSemaphores"));
+
     /** Vulkan handle type the renderers must request when exporting memory. */
     static final int MEMORY_HANDLE_TYPE = WINDOWS
             ? VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT
             : VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
 
     /** Vulkan handle type the renderers must request when exporting semaphores. */
-    static final int SEMAPHORE_HANDLE_TYPE = WINDOWS
-            ? VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_BIT
-            : VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT;
+    static final int SEMAPHORE_HANDLE_TYPE = !WINDOWS
+            ? VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT
+            : (D3D12_FENCE_SEMAPHORES
+                    ? VK11.VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_D3D12_FENCE_BIT
+                    : VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_BIT);
 
     /** Both GL_DEVICE_UUID_EXT and VkPhysicalDeviceIDProperties::deviceUUID are 16 bytes. */
     private static final int UUID_BYTES = 16;
@@ -212,6 +238,51 @@ final class Interop {
     }
 
     /**
+     * Logs whether this Vulkan driver actually admits an exported semaphore of
+     * {@link #SEMAPHORE_HANDLE_TYPE} can leave the process and come back in
+     * ({@code EXPORTABLE}/{@code IMPORTABLE}), instead of assuming it because
+     * the device extension is present and every call along the chain returns
+     * {@code VK_SUCCESS}.
+     *
+     * Nothing here has ever failed this query, on any driver — a Win32
+     * semaphore handle that a driver cannot actually export or that a
+     * different API cannot import back is exactly the situation this project
+     * hit on one machine and could not explain from error codes alone,
+     * because none of the calls involved are required to fail when the
+     * combination is unsupported. This is the one place the driver is asked
+     * outright, before the first frame ever depends on the answer.
+     */
+    static void logExternalSemaphoreSupport(VkPhysicalDevice physicalDevice) {
+        if (!WINDOWS) {
+            return;
+        }
+        try (MemoryStack stack = stackPush()) {
+            int[] handleTypes = {
+                    VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_BIT,
+                    VK11.VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_D3D12_FENCE_BIT
+            };
+            String[] names = {"OPAQUE_WIN32", "D3D12_FENCE"};
+            for (int i = 0; i < handleTypes.length; i++) {
+                VkPhysicalDeviceExternalSemaphoreInfo info =
+                        VkPhysicalDeviceExternalSemaphoreInfo.calloc(stack)
+                                .sType(VK11.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_SEMAPHORE_INFO)
+                                .handleType(handleTypes[i]);
+                VkExternalSemaphoreProperties props = VkExternalSemaphoreProperties.calloc(stack)
+                        .sType(VK11.VK_STRUCTURE_TYPE_EXTERNAL_SEMAPHORE_PROPERTIES);
+                VK11.vkGetPhysicalDeviceExternalSemaphoreProperties(physicalDevice, info, props);
+                int features = props.externalSemaphoreFeatures();
+                boolean exportable = (features & VK11.VK_EXTERNAL_SEMAPHORE_FEATURE_EXPORTABLE_BIT) != 0;
+                boolean importable = (features & VK11.VK_EXTERNAL_SEMAPHORE_FEATURE_IMPORTABLE_BIT) != 0;
+                LOGGER.info("External semaphore support for {}: exportable={}, importable={}, "
+                                + "compatibleHandleTypes=0x{}, exportFromImportedHandleTypes=0x{}",
+                        names[i], exportable, importable,
+                        Integer.toHexString(props.compatibleHandleTypes()),
+                        Integer.toHexString(props.exportFromImportedHandleTypes()));
+            }
+        }
+    }
+
+    /**
      * True when one of OpenGL's device UUIDs is the Vulkan one. Appends every
      * UUID the driver actually returned to {@code seen}, so an empty {@code seen}
      * on a false result means the query gave nothing rather than gave a mismatch.
@@ -340,8 +411,10 @@ final class Interop {
             PointerBuffer pHandle = stack.mallocPointer(1);
             check(KHRExternalSemaphoreWin32.vkGetSemaphoreWin32HandleKHR(device, info, pHandle),
                     "vkGetSemaphoreWin32HandleKHR");
-            EXTSemaphoreWin32.glImportSemaphoreWin32HandleEXT(glSem,
-                    EXTSemaphoreWin32.GL_HANDLE_TYPE_OPAQUE_WIN32_EXT, pHandle.get(0));
+            int glHandleType = D3D12_FENCE_SEMAPHORES
+                    ? EXTSemaphoreWin32.GL_HANDLE_TYPE_D3D12_FENCE_EXT
+                    : EXTSemaphoreWin32.GL_HANDLE_TYPE_OPAQUE_WIN32_EXT;
+            EXTSemaphoreWin32.glImportSemaphoreWin32HandleEXT(glSem, glHandleType, pHandle.get(0));
             // Checked here and nowhere else, because a refused import has no
             // other symptom: the semaphore object exists, the wait on it is
             // accepted, and it simply never returns. Better to fail loudly at
