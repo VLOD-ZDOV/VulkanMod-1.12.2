@@ -365,6 +365,7 @@ public final class Diagnostics {
         // and this is the only line that says which scene.
         out.println("  " + SessionLog.cameraLine());
         out.println("  " + TerrainHooks.stats());
+        out.println("  " + EntityCapture.stats());
         out.println("  " + TerrainHooks.vanillaLayerStats());
         out.println("  " + VanillaFrame.stats());
         out.println("  " + VanillaFrame.walkStats());

@@ -1327,6 +1327,27 @@ final class VulkanOptions {
                                         VulkanConfig.setFramesInFlight(value);
                                     }
                                 }),
+                        new VSwitchOption("Entity Capture",
+                                "Read what the game draws for every creature and draw none of it. "
+                                        + "The first step of moving entities into Vulkan, and it "
+                                        + "takes nothing over: entities are the part of the game "
+                                        + "other mods hook hardest, so before anything is replaced "
+                                        + "this measures how much of a real scene comes through "
+                                        + "the ordinary model path, and what asking OpenGL where "
+                                        + "each part is costs. Nothing on screen changes; the "
+                                        + "answer is a line in the diagnostics report.",
+                                Cost.of(Level.LOW, Level.NONE, Level.NONE), null,
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return VulkanConfig.isEntityCapture();
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        VulkanConfig.setEntityCapture(value);
+                                    }
+                                }),
                         new VSwitchOption("Terrain Acceleration Structures",
                                 "Build the structures a traced ray needs over the terrain this mod "
                                         + "draws. Nothing uses them yet, and the world looks "

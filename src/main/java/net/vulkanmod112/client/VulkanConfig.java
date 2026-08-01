@@ -267,6 +267,17 @@ public final class VulkanConfig {
      */
     static final boolean DEF_RAY_TRACING = false;
     /**
+     * Read the geometry and pose of every entity part the game draws, without
+     * drawing any of it.
+     *
+     * The first step of taking entities into Vulkan, and it takes nothing:
+     * entities are the part of the game other mods hook hardest, so what
+     * matters before anything is replaced is how much of a real scene arrives
+     * through the ordinary model path at all, and what asking OpenGL for a
+     * pose per part costs. Both are numbers nothing in the source can supply.
+     */
+    static final boolean DEF_ENTITY_CAPTURE = false;
+    /**
      * Let the render-distance slider go past 64, up to 128.
      *
      * Off by default because what it unlocks is not "more of the same". The
@@ -429,6 +440,7 @@ public final class VulkanConfig {
     private static boolean vulkanWeather = DEF_VULKAN_WEATHER;
     private static int vulkanDevice = DEF_VULKAN_DEVICE;
     private static boolean rayTracing = DEF_RAY_TRACING;
+    private static boolean entityCapture = DEF_ENTITY_CAPTURE;
     private static boolean frameGraph = DEF_FRAME_GRAPH;
     private static int frameGraphInterval = DEF_FRAME_GRAPH_INTERVAL;
     private static boolean dynamicLights = DEF_DYNAMIC_LIGHTS;
@@ -652,6 +664,11 @@ public final class VulkanConfig {
                 DEF_VULKAN_WEATHER,
                 "The same for rain and snow. A separate switch from the one above so that either "
                         + "can be ruled out on its own.");
+        entityCapture = config.getBoolean("entityCapture", CATEGORY_ADVANCED, DEF_ENTITY_CAPTURE,
+                "Read what the game draws for every creature, and draw none of it. The first step "
+                        + "of moving entities to Vulkan: it measures how much of a scene comes "
+                        + "through the ordinary model path and what reading a pose per part "
+                        + "costs. Nothing on screen changes.");
         rayTracing = config.getBoolean("rayTracing", CATEGORY_ADVANCED, DEF_RAY_TRACING,
                 "Build acceleration structures over the terrain. Nothing draws with them yet — "
                         + "this stage measures whether keeping them up to date is affordable at "
@@ -884,6 +901,7 @@ public final class VulkanConfig {
         setVulkanWeather(DEF_VULKAN_WEATHER);
         setVulkanDevice(DEF_VULKAN_DEVICE);
         setRayTracing(DEF_RAY_TRACING);
+        setEntityCapture(DEF_ENTITY_CAPTURE);
         setExtremeRenderDistance(DEF_EXTREME_RENDER_DISTANCE);
         setDirectionalLight(DEF_DIRECTIONAL_LIGHT);
         setHeightFog(DEF_HEIGHT_FOG);
@@ -1049,6 +1067,15 @@ public final class VulkanConfig {
     public static void setVulkanParticles(boolean value) {
         vulkanParticles = value;
         store(CATEGORY_OPTIMIZATION, "vulkanParticles", value);
+    }
+
+    public static boolean isEntityCapture() {
+        return entityCapture;
+    }
+
+    public static void setEntityCapture(boolean value) {
+        entityCapture = value;
+        store(CATEGORY_ADVANCED, "entityCapture", value);
     }
 
     public static boolean isRayTracing() {
