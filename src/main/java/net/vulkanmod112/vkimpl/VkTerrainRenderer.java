@@ -732,6 +732,59 @@ final class VkTerrainRenderer {
     private final float[] reprojectMatrix = new float[16];
     private final java.nio.FloatBuffer reprojectBuffer =
             org.lwjgl.BufferUtils.createFloatBuffer(16);
+
+    /**
+     * The frame averaged into the ones before it, which is how a shadow traced
+     * with one ray per pixel stops looking like sand.
+     *
+     * <h2>Why one ray and an average rather than more rays</h2>
+     *
+     * A soft shadow edge is an average over the source's width, and a fragment
+     * shader can only take that average by tracing more rays — which multiplies
+     * the cost of the one thing in this renderer that is already the expensive
+     * part. Spreading the samples over time instead costs one extra fullscreen
+     * pass, total, however many frames are averaged.
+     *
+     * <h2>The two halves, and that neither works alone</h2>
+     *
+     * The terrain shader turns its dither pattern by a different amount each
+     * frame, so successive frames trace *different* rays; this pass finds where
+     * each pixel was last frame and mixes what was there into what is here. Put
+     * one in without the other and it is strictly worse than doing nothing: a
+     * turning pattern with no averaging is a crawling shadow edge, and averaging
+     * a pattern that does not turn averages a hundred copies of one answer.
+     *
+     * <h2>What keeps it from smearing the world</h2>
+     *
+     * Three things, in order of how much they matter. The history is clamped
+     * into the range of the nine pixels around this one, so a pixel that has
+     * genuinely changed cannot keep showing what used to be there — this is what
+     * makes it safe without a depth test. Reprojection off the edge of the
+     * screen, or onto sky, takes no history at all. And the weight falls away
+     * with how fast the pixel is moving across the screen, because history
+     * resampled through a bilinear filter every frame is history slowly turning
+     * to blur, and standing still — where a moving camera is not hiding the
+     * grain anyway — is exactly the case worth the most.
+     */
+    private final int[] accumTexture = new int[2];
+    private final int[] accumFbo = new int[2];
+    private int accumWidth;
+    private int accumHeight;
+    private int accumIndex;
+    private boolean accumHasHistory;
+    private boolean accumFailed;
+    private int accumProgram;
+    private int accumInvSizeUniform = -1;
+    private int accumBlendUniform = -1;
+    private int accumShowUniform = -1;
+    /** 0 = off; how much of the history a still pixel keeps. */
+    private float accumStrength;
+    /** Diagnostic: paint the weight the history was given instead of the world. */
+    private boolean showAccumulation;
+    /** Set by the pass, read by the composite and by the bloom mask. */
+    private boolean accumApplied;
+    /** Turned each frame while accumulating, so the shader traces a new ray. */
+    private float ditherTurn;
     /**
      * How far apart the blur's taps stand when it is smoothing occlusion rather
      * than a glow.
@@ -742,6 +795,7 @@ final class VkTerrainRenderer {
     private final int[] compositeAoOnlyUniforms = {-1, -1};
     private final int[] compositeMotionUniforms = {-1, -1};
     private final int[] compositeMotionGhostUniforms = {-1, -1};
+    private final int[] compositeAccumUniforms = {-1, -1};
     /** Diagnostic: show the motion over a ghost of the world instead of black. */
     private boolean motionOverWorld;
     private final int[] compositeInvSizeUniforms = {-1, -1};
@@ -1418,6 +1472,20 @@ final class VkTerrainRenderer {
         } else {
             sb.append("  ray tracing: ").append(ctx.rayTracingStatus()).append('\n');
         }
+        // Whether the pass ran, and not only whether it was asked for: it turns
+        // itself off when nothing is traced, and "on but doing nothing" and "on
+        // and working" look identical in the settings screen.
+        sb.append("  frame accumulation: ");
+        if (accumFailed) {
+            sb.append("off for this session (see the main log)");
+        } else if (accumStrength <= 0.0f) {
+            sb.append("off");
+        } else {
+            sb.append(String.format("%.0f%% history", accumStrength * 100.0f))
+                    .append(accumApplied ? ", running" : ", idle (nothing traced or no motion)")
+                    .append(", dither turn ").append(String.format("%.2f", ditherTurn));
+        }
+        sb.append('\n');
         sb.append("  sprites: ").append(spritePipeline == 0 ? "pipeline missing" : "in Vulkan")
                 .append(", last frame ").append(spriteFrameBatches).append(" batches, ")
                 .append(spriteFrameVertices).append(" vertices; sheets");
@@ -2466,6 +2534,20 @@ final class VkTerrainRenderer {
                 }
             }
 
+            // Between the two: it needs what the motion pass produced, and the
+            // occlusion is computed from depth alone and has no grain to lose.
+            accumApplied = false;
+            if (!accumFailed) {
+                int frameFbo = GL11C.glGetInteger(GL30C.GL_FRAMEBUFFER_BINDING);
+                try {
+                    accumApplied = accumPass(motion);
+                } catch (Throwable t) {
+                    LOGGER.error("Frame accumulation failed; off for this session", t);
+                    accumFailed = true;
+                    GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, frameFbo);
+                }
+            }
+
             boolean ao = false;
             if (aoStrength > 0.0f && !aoFailed) {
                 int frameFbo = GL11C.glGetInteger(GL30C.GL_FRAMEBUFFER_BINDING);
@@ -2486,6 +2568,12 @@ final class VkTerrainRenderer {
                     motion && showMotion ? 1.0f : 0.0f);
             GL20C.glUniform1f(compositeMotionGhostUniforms[depthBlit ? 1 : 0],
                     motionOverWorld ? 1.0f : 0.0f);
+            GL20C.glUniform1f(compositeAccumUniforms[depthBlit ? 1 : 0],
+                    accumApplied ? 1.0f : 0.0f);
+            if (accumApplied) {
+                GL13C.glActiveTexture(GL13C.GL_TEXTURE4);
+                GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, accumTexture[accumIndex]);
+            }
             if (motion) {
                 GL13C.glActiveTexture(GL13C.GL_TEXTURE3);
                 GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, motionTexture);
@@ -3010,6 +3098,180 @@ final class VkTerrainRenderer {
         return true;
     }
 
+    /**
+     * Mixes this frame's terrain colour into the ones before it.
+     *
+     * Runs after the motion pass, whose answer it needs, and before the
+     * composite, which is what draws the result. Full resolution deliberately:
+     * the grain being removed is one pixel wide, and a half-size pass would take
+     * the detail with it.
+     *
+     * @return false when the frame is to be composited as it came out of Vulkan
+     */
+    private boolean accumPass(boolean motionReady) {
+        if (!motionReady || accumStrength <= 0.0f || accumFailed || !tracingWanted()) {
+            // Nothing is noisy, or nothing can be reprojected. Either way the
+            // history stops being about this world, so it is not carried over.
+            accumHasHistory = false;
+            return false;
+        }
+        if (!ensureAccumTargets()) {
+            return false;
+        }
+        int target = accumIndex ^ 1;
+        int prevFbo = GL11C.glGetInteger(GL30C.GL_FRAMEBUFFER_BINDING);
+        org.lwjgl.opengl.GL11.glPushAttrib(org.lwjgl.opengl.GL11.GL_VIEWPORT_BIT);
+        try {
+            GL11C.glDisable(GL11C.GL_DEPTH_TEST);
+            GL11C.glDepthMask(false);
+            GL11C.glDisable(GL11C.GL_BLEND);
+            GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, accumFbo[target]);
+            GL11C.glViewport(0, 0, accumWidth, accumHeight);
+            GL20C.glUseProgram(accumProgram);
+            GL20C.glUniform2f(accumInvSizeUniform, 1.0f / accumWidth, 1.0f / accumHeight);
+            // The first frame after this target was made, after a resize, or
+            // after the effect was switched on has nothing behind it, and the
+            // texture it would read holds whatever was last drawn there.
+            GL20C.glUniform1f(accumBlendUniform, accumHasHistory ? accumStrength : 0.0f);
+            GL20C.glUniform1f(accumShowUniform, showAccumulation ? 1.0f : 0.0f);
+            GL13C.glActiveTexture(GL13C.GL_TEXTURE0);
+            GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, glColorTexture);
+            GL13C.glActiveTexture(GL13C.GL_TEXTURE1);
+            GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, motionTexture);
+            GL13C.glActiveTexture(GL13C.GL_TEXTURE2);
+            GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, accumTexture[accumIndex]);
+            fullscreenQuad();
+        } finally {
+            GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo);
+            org.lwjgl.opengl.GL11.glPopAttrib();
+        }
+        accumIndex = target;
+        accumHasHistory = true;
+        return true;
+    }
+
+    private boolean ensureAccumTargets() {
+        if (accumFbo[0] != 0 && accumWidth == width && accumHeight == height) {
+            return true;
+        }
+        destroyAccumTargets();
+        accumWidth = width;
+        accumHeight = height;
+        int prevFbo = GL11C.glGetInteger(GL30C.GL_FRAMEBUFFER_BINDING);
+        int prevTexture = GL11C.glGetInteger(GL11C.GL_TEXTURE_BINDING_2D);
+        boolean ok = true;
+        for (int i = 0; i < 2; i++) {
+            accumTexture[i] = GL11C.glGenTextures();
+            allocateBloomTexture(accumTexture[i], accumWidth, accumHeight);
+            accumFbo[i] = GL30C.glGenFramebuffers();
+            GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, accumFbo[i]);
+            GL30C.glFramebufferTexture2D(GL30C.GL_FRAMEBUFFER, GL30C.GL_COLOR_ATTACHMENT0,
+                    GL11C.GL_TEXTURE_2D, accumTexture[i], 0);
+            ok &= GL30C.glCheckFramebufferStatus(GL30C.GL_FRAMEBUFFER)
+                    == GL30C.GL_FRAMEBUFFER_COMPLETE;
+        }
+        GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo);
+        GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, prevTexture);
+        if (!ok) {
+            LOGGER.error("Frame accumulation targets incomplete; off for this session");
+            destroyAccumTargets();
+            accumFailed = true;
+            return false;
+        }
+        try {
+            buildAccumProgram();
+        } catch (RuntimeException e) {
+            LOGGER.error("Frame accumulation program failed to build; off for this session", e);
+            destroyAccumTargets();
+            accumFailed = true;
+            return false;
+        }
+        accumHasHistory = false;
+        return true;
+    }
+
+    private void buildAccumProgram() {
+        if (accumProgram != 0) {
+            return;
+        }
+        accumProgram = buildQuadProgram(
+                "uniform sampler2D uColor;\n"
+                        + "uniform sampler2D uMotion;\n"
+                        + "uniform sampler2D uHistory;\n"
+                        + "uniform vec2 uInvSize;\n"
+                        + "uniform float uBlend;\n"
+                        + "uniform float uShow;\n"
+                        + "void main() {\n"
+                        + "    vec2 uv = gl_FragCoord.xy * uInvSize;\n"
+                        + "    vec4 here = texture2D(uColor, uv);\n"
+                        // The nine pixels around this one, as a range. What a
+                        // pixel is allowed to remember is bounded by what its
+                        // own surroundings look like now — so a wall that has
+                        // just moved in front of something, a light that has
+                        // just gone out and a block that has just been broken
+                        // all correct themselves in a single frame, without any
+                        // of them having to be detected.
+                        + "    vec3 lo = here.rgb;\n"
+                        + "    vec3 hi = here.rgb;\n"
+                        + "    for (int y = -1; y <= 1; y++) {\n"
+                        + "        for (int x = -1; x <= 1; x++) {\n"
+                        + "            vec3 n = texture2D(uColor,\n"
+                        + "                     uv + vec2(float(x), float(y)) * uInvSize).rgb;\n"
+                        + "            lo = min(lo, n);\n"
+                        + "            hi = max(hi, n);\n"
+                        + "        }\n"
+                        + "    }\n"
+                        + "    vec4 m = texture2D(uMotion, uv);\n"
+                        + "    vec2 prevUv = uv + m.rg;\n"
+                        + "    float weight = uBlend;\n"
+                        // Sky, or a pixel the reprojection could not answer for.
+                        + "    if (m.a < 0.5) { weight = 0.0; }\n"
+                        // Off the edge of last frame's picture. There is no
+                        // history there to take, and clamping to the border
+                        // would smear the edge of the screen inwards.
+                        + "    if (prevUv.x < 0.0 || prevUv.x > 1.0\n"
+                        + "        || prevUv.y < 0.0 || prevUv.y > 1.0) { weight = 0.0; }\n"
+                        // Falling away with speed across the screen. Resampling
+                        // history through a bilinear filter every frame is
+                        // history slowly turning into blur, and the grain this
+                        // removes is least visible exactly when the view is
+                        // moving fastest.
+                        + "    weight *= 1.0 - clamp(length(m.rg) * 60.0, 0.0, 1.0);\n"
+                        + "    vec3 history = clamp(texture2D(uHistory, prevUv).rgb, lo, hi);\n"
+                        + "    vec3 mixed = mix(here.rgb, history, weight);\n"
+                        // The alpha is not ours to average: the terrain shader
+                        // writes which pixels are lights into it, and the bloom
+                        // that reads it wants this frame's answer.
+                        + "    gl_FragColor = vec4(mix(mixed, vec3(weight), uShow), here.a);\n"
+                        + "}\n");
+        accumInvSizeUniform = GL20C.glGetUniformLocation(accumProgram, "uInvSize");
+        accumBlendUniform = GL20C.glGetUniformLocation(accumProgram, "uBlend");
+        accumShowUniform = GL20C.glGetUniformLocation(accumProgram, "uShow");
+        int prev = GL11C.glGetInteger(GL20C.GL_CURRENT_PROGRAM);
+        GL20C.glUseProgram(accumProgram);
+        GL20C.glUniform1i(GL20C.glGetUniformLocation(accumProgram, "uColor"), 0);
+        GL20C.glUniform1i(GL20C.glGetUniformLocation(accumProgram, "uMotion"), 1);
+        GL20C.glUniform1i(GL20C.glGetUniformLocation(accumProgram, "uHistory"), 2);
+        GL20C.glUseProgram(prev);
+    }
+
+    private void destroyAccumTargets() {
+        for (int i = 0; i < 2; i++) {
+            if (accumFbo[i] != 0) {
+                GL30C.glDeleteFramebuffers(accumFbo[i]);
+                accumFbo[i] = 0;
+            }
+            if (accumTexture[i] != 0) {
+                GL11C.glDeleteTextures(accumTexture[i]);
+                accumTexture[i] = 0;
+            }
+        }
+        accumWidth = 0;
+        accumHeight = 0;
+        accumIndex = 0;
+        accumHasHistory = false;
+    }
+
     /** Keeps this frame's matrix and camera for the next one to ask about. */
     private void rememberFrame() {
         System.arraycopy(currentMvp, 0, previousMvp, 0, 16);
@@ -3190,8 +3452,13 @@ final class VkTerrainRenderer {
         GL20C.glUniform1f(bloomMaskAoUniform, aoStrength > 0.0f && !aoFailed ? 1.0f : 0.0f);
         GL13C.glActiveTexture(GL13C.GL_TEXTURE1);
         GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, aoTexture);
+        // The same picture the composite drew, or the comparison that decides
+        // whether a light is covered fails everywhere and the glow disappears.
+        // That is the occlusion above and the frame averaging here, and it is
+        // the second time this exact trap has been walked into.
         GL13C.glActiveTexture(GL13C.GL_TEXTURE0);
-        GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, glColorTexture);
+        GL11C.glBindTexture(GL11C.GL_TEXTURE_2D,
+                accumApplied ? accumTexture[accumIndex] : glColorTexture);
         fullscreenQuad();
 
         GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo);
@@ -4273,6 +4540,37 @@ final class VkTerrainRenderer {
         // is something to give it up for.
         MemoryUtil.memPutFloat(base + 980, tracingWanted() && tracedLights() > 0
                 ? clampPercent(intProperty("vulkanmod112.tracedBlockLight", 0)) : 0.0f);
+        // How far the dither pattern is turned this frame. Zero unless frames
+        // are being averaged — a pattern that moves under an eye with nothing
+        // averaging it is a shadow edge that crawls, which is worse than the
+        // grain the turning was for. See ditherValue in terrain.frag.
+        MemoryUtil.memPutFloat(base + 984, ditherTurn);
+    }
+
+    /**
+     * The most of its history a pixel is allowed to keep.
+     *
+     * Not one. At a weight of one a pixel takes nothing new ever, so the world
+     * freezes into whatever it looked like when the effect came on; at 0.95 it
+     * takes a twentieth of each frame, which settles in about a third of a
+     * second and still answers a change in about the same time. The slider maps
+     * onto this rather than onto the whole range, so the top of it is the most
+     * smoothing that still leaves a working picture.
+     */
+    private static final float MAX_HISTORY_WEIGHT = 0.95f;
+
+    /**
+     * Advances the dither, or holds it still.
+     *
+     * The step is the golden ratio's fractional part. Successive multiples of
+     * it are as evenly spread over the circle as any sequence can be, which is
+     * what makes the first handful of frames already look like an average
+     * rather than like two alternating pictures.
+     */
+    private void advanceDither() {
+        ditherTurn = accumStrength > 0.0f && !accumFailed && tracingWanted()
+                ? (float) ((frameCounter * 0.6180339887498949) % 1.0)
+                : 0.0f;
     }
 
     /**
@@ -4376,6 +4674,12 @@ final class VkTerrainRenderer {
         showMotion = "true".equals(System.getProperty("vulkanmod112.showMotion"));
         motionOverWorld = "true".equals(System.getProperty("vulkanmod112.motionOverWorld"));
         showReflections = "true".equals(System.getProperty("vulkanmod112.showReflections"));
+        showAccumulation = "true".equals(System.getProperty("vulkanmod112.showAccumulation"));
+        // The setting names how much of the history a still pixel keeps, and
+        // the top of the slider is not 1.0: a pixel that keeps all of its
+        // history never takes anything new, so the world would stop updating.
+        accumStrength = clampPercent(intProperty("vulkanmod112.temporalAccumulation", 60))
+                * MAX_HISTORY_WEIGHT;
         waterReflection = clampPercent(intProperty("vulkanmod112.waterReflection", 0));
         waterWaves = clampPercent(intProperty("vulkanmod112.waterWaves", 0));
         foliageSway = clampPercent(intProperty("vulkanmod112.foliageSway", 0));
@@ -4391,6 +4695,7 @@ final class VkTerrainRenderer {
             reflectionBindingsDirty = true;
         }
         screenReflections = wantedReflections;
+        advanceDither();
     }
 
     private static float clampPercent(int value) {
@@ -5278,15 +5583,22 @@ final class VkTerrainRenderer {
                 + "uniform sampler2D uDepth;\n"
                 + "uniform sampler2D uAo;\n"
                 + "uniform sampler2D uMotion;\n"
+                + "uniform sampler2D uAccum;\n"
                 + "uniform float uAo_on;\n"
                 + "uniform float uAo_only;\n"
                 + "uniform float uMotion_show;\n"
                 + "uniform float uMotion_ghost;\n"
+                + "uniform float uAccum_on;\n"
                 + "uniform vec2 uInvSize;\n"
                 + "void main() {\n"
                 + "    vec2 uv = gl_FragCoord.xy * uInvSize;\n"
                 + "    vec4 c = texture2D(uColor, uv);\n"
                 + "    if (c.a < 0.004) discard;\n"
+                // This frame's colour averaged with the ones before it, where
+                // that pass ran. Only the colour: whether there is terrain here
+                // at all, and whether it glows, are this frame's business and
+                // are read above from the image Vulkan wrote.
+                + "    c.rgb = mix(c.rgb, texture2D(uAccum, uv).rgb, uAccum_on);\n"
                 // How much of its surroundings this point can see. The game
                 // shades a face by which way it points and by nothing else, so
                 // without this an inside corner is lit exactly like open wall.
@@ -5343,6 +5655,9 @@ final class VkTerrainRenderer {
         GL20C.glUniform1i(GL20C.glGetUniformLocation(program, "uDepth"), 1);
         GL20C.glUniform1i(GL20C.glGetUniformLocation(program, "uAo"), 2);
         GL20C.glUniform1i(GL20C.glGetUniformLocation(program, "uMotion"), 3);
+        GL20C.glUniform1i(GL20C.glGetUniformLocation(program, "uAccum"), 4);
+        compositeAccumUniforms[writeDepth ? 0 : 1] =
+                GL20C.glGetUniformLocation(program, "uAccum_on");
         compositeAoUniforms[writeDepth ? 0 : 1] = GL20C.glGetUniformLocation(program, "uAo_on");
         compositeMotionUniforms[writeDepth ? 0 : 1] =
                 GL20C.glGetUniformLocation(program, "uMotion_show");
@@ -6344,6 +6659,7 @@ final class VkTerrainRenderer {
             // Sized from this target, so they go with it.
             destroyBloomTargets();
             destroyAoTargets();
+            destroyAccumTargets();
             GL11C.glDeleteTextures(glColorTexture);
             GL11C.glDeleteTextures(glDepthTexture);
             EXTMemoryObject.glDeleteMemoryObjectsEXT(glColorMemoryObject);

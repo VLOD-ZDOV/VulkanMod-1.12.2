@@ -1445,16 +1445,42 @@ final class VulkanOptions {
                                         VulkanConfig.setShadowSoftness(value);
                                     }
                                 }),
+                        new VRangeOption("Frame Accumulation",
+                                "How much of what a pixel looked like last frame it keeps. A "
+                                        + "traced shadow is worked out from one ray per pixel, "
+                                        + "and one ray is grain; the rays are aimed differently "
+                                        + "each frame and averaged here, which is what turns them "
+                                        + "into a soft edge. History is thrown away wherever it "
+                                        + "would smear instead of smooth — off the edge of the "
+                                        + "screen, on anything that has just changed, and more "
+                                        + "the faster you are turning. Costs one fullscreen pass "
+                                        + "and does nothing at all unless something is traced.",
+                                Cost.of(Level.NONE, Level.LOW, Level.LOW),
+                                "Needs a traced effect to be on.",
+                                0, 100, 5, "%", "Off",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getTemporalAccumulation();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setTemporalAccumulation(value);
+                                    }
+                                }),
                         new VRangeOption("Block Light Search",
                                 "How far around you light-emitting blocks are looked for, in "
                                         + "blocks. The search runs a few times a second rather "
-                                        + "than every frame — placing a torch lights the room "
-                                        + "within a fraction of a second instead of within a "
-                                        + "frame, which nobody can see and which costs a "
-                                        + "hundredth of what asking every frame would.",
+                                        + "than every frame, and is spread across frames — "
+                                        + "placing a torch lights the room within a fraction of "
+                                        + "a second instead of within a frame, which nobody can "
+                                        + "see. Whole sixteen-block sections holding no block "
+                                        + "light are dismissed without being read, so widening "
+                                        + "this costs far less than the volume suggests.",
                                 Cost.of(Level.LOW, Level.NONE, Level.NONE),
                                 "Needs Traced Block Light.",
-                                4, 24, 2, " blocks", null,
+                                4, 50, 2, " blocks", null,
                                 new VRangeOption.Access() {
                                     @Override
                                     public int get() {
@@ -1685,6 +1711,28 @@ final class VulkanOptions {
                                     @Override
                                     public void set(boolean value) {
                                         VulkanConfig.setShowOcclusion(value);
+                                    }
+                                }),
+                        new VSwitchOption("Show Accumulation",
+                                "Paint each pixel by how much of its history it kept instead of "
+                                        + "by the world. White is a pixel that has been averaging "
+                                        + "for a while, black is one starting over. The edges of "
+                                        + "the screen, the far side of anything you walk past, and "
+                                        + "everything at all while you turn quickly are supposed "
+                                        + "to be black — that is the history being thrown away "
+                                        + "where it would smear rather than smooth. Solid white "
+                                        + "while you move is this being wrong.",
+                                Cost.of(Level.NONE, Level.NONE, Level.NONE),
+                                "Needs Frame Accumulation and a traced effect.",
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return VulkanConfig.isShowAccumulation();
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        VulkanConfig.setShowAccumulation(value);
                                     }
                                 }),
                         new VSwitchOption("Show Motion Vectors",

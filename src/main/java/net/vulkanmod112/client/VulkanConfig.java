@@ -338,9 +338,19 @@ public final class VulkanConfig {
      */
     static final int DEF_TRACED_BLOCK_LIGHT = 0;
     /** How far around the camera light-emitting blocks are looked for. */
-    static final int DEF_BLOCK_LIGHT_RADIUS = 12;
+    static final int DEF_BLOCK_LIGHT_RADIUS = 24;
     /** How soft the edge of a shadow cast by a torch is, apart from the sun's. */
     static final int DEF_LIGHT_SOFTNESS = 30;
+    /**
+     * How much of a pixel's history it keeps between frames.
+     *
+     * On by default, and it costs nothing where nothing is traced: the pass is
+     * skipped entirely unless a ray is being cast, because there is no grain to
+     * average away and averaging a clean picture only risks smearing it.
+     */
+    static final int DEF_TEMPORAL_ACCUMULATION = 60;
+    /** Diagnostic: paint how much history each pixel is keeping. */
+    static final boolean DEF_SHOW_ACCUMULATION = false;
     /**
      * Let the render-distance slider go past 64, up to 128.
      *
@@ -511,6 +521,8 @@ public final class VulkanConfig {
     private static int tracedLights = DEF_TRACED_LIGHTS;
     private static int tracedBlockLight = DEF_TRACED_BLOCK_LIGHT;
     private static int blockLightRadius = DEF_BLOCK_LIGHT_RADIUS;
+    private static int temporalAccumulation = DEF_TEMPORAL_ACCUMULATION;
+    private static boolean showAccumulation = DEF_SHOW_ACCUMULATION;
     private static int lightSoftness = DEF_LIGHT_SOFTNESS;
     private static boolean frameGraph = DEF_FRAME_GRAPH;
     private static int frameGraphInterval = DEF_FRAME_GRAPH_INTERVAL;
@@ -756,10 +768,24 @@ public final class VulkanConfig {
                         + "and only the nearest thirty-two fit, so turned up fully a cave lit "
                         + "from further off goes dark.");
         blockLightRadius = config.getInt("blockLightRadius", CATEGORY_ADVANCED,
-                DEF_BLOCK_LIGHT_RADIUS, 4, 24,
+                DEF_BLOCK_LIGHT_RADIUS, 4, 50,
                 "How far around you light-emitting blocks are looked for, in blocks. The search "
-                        + "runs a few times a second rather than every frame; wider costs more "
-                        + "each time it runs.");
+                        + "runs a few times a second rather than every frame, is spread over "
+                        + "several frames, and skips whole sixteen-block sections that hold no "
+                        + "block light at all — so what widening it costs is far less than the "
+                        + "volume suggests.");
+        temporalAccumulation = config.getInt("temporalAccumulation", CATEGORY_GENERAL,
+                DEF_TEMPORAL_ACCUMULATION, 0, 100,
+                "How much of what a pixel looked like last frame it keeps. A traced shadow is "
+                        + "worked out from one ray per pixel, which is grain; the rays are aimed "
+                        + "differently each frame and averaged here, which is a soft edge. Costs "
+                        + "one fullscreen pass and does nothing at all unless something is being "
+                        + "traced.");
+        showAccumulation = config.getBoolean("showAccumulation", CATEGORY_ADVANCED,
+                DEF_SHOW_ACCUMULATION,
+                "Diagnostic: paint each pixel by how much of its history it kept instead of by "
+                        + "the world. White is fully averaged, black is starting over — which is "
+                        + "what the edges of the screen and everything moving quickly should be.");
         lightSoftness = config.getInt("lightSoftness", CATEGORY_GENERAL, DEF_LIGHT_SOFTNESS, 0, 100,
                 "How soft the edge of a shadow cast by a torch or a fire is. Separate from the "
                         + "sun's, because a small flame close by and a star a long way off are "
@@ -1021,6 +1047,8 @@ public final class VulkanConfig {
         setTracedBlockLight(DEF_TRACED_BLOCK_LIGHT);
         setBlockLightRadius(DEF_BLOCK_LIGHT_RADIUS);
         setLightSoftness(DEF_LIGHT_SOFTNESS);
+        setTemporalAccumulation(DEF_TEMPORAL_ACCUMULATION);
+        setShowAccumulation(DEF_SHOW_ACCUMULATION);
         setExtremeRenderDistance(DEF_EXTREME_RENDER_DISTANCE);
         setDirectionalLight(DEF_DIRECTIONAL_LIGHT);
         setHeightFog(DEF_HEIGHT_FOG);
@@ -1208,12 +1236,32 @@ public final class VulkanConfig {
         applySystemProperties();
     }
 
+    public static int getTemporalAccumulation() {
+        return temporalAccumulation;
+    }
+
+    public static void setTemporalAccumulation(int value) {
+        temporalAccumulation = value < 0 ? 0 : (value > 100 ? 100 : value);
+        store(CATEGORY_GENERAL, "temporalAccumulation", temporalAccumulation);
+        applySystemProperties();
+    }
+
+    public static boolean isShowAccumulation() {
+        return showAccumulation;
+    }
+
+    public static void setShowAccumulation(boolean value) {
+        showAccumulation = value;
+        store(CATEGORY_ADVANCED, "showAccumulation", value);
+        applySystemProperties();
+    }
+
     public static int getBlockLightRadius() {
         return blockLightRadius;
     }
 
     public static void setBlockLightRadius(int value) {
-        blockLightRadius = value < 4 ? 4 : (value > 24 ? 24 : value);
+        blockLightRadius = value < 4 ? 4 : (value > 50 ? 50 : value);
         store(CATEGORY_ADVANCED, "blockLightRadius", blockLightRadius);
     }
 
@@ -1688,6 +1736,8 @@ public final class VulkanConfig {
         publish("vulkanmod112.showMotion", Boolean.toString(showMotion));
         publish("vulkanmod112.motionOverWorld", Boolean.toString(motionOverWorld));
         publish("vulkanmod112.showReflections", Boolean.toString(showReflections));
+        publish("vulkanmod112.temporalAccumulation", Integer.toString(temporalAccumulation));
+        publish("vulkanmod112.showAccumulation", Boolean.toString(showAccumulation));
     }
 
     private static void store(String category, String key, int value) {

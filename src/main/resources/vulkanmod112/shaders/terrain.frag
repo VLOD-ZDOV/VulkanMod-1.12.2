@@ -66,6 +66,9 @@ layout(set = 0, binding = 3, std140) uniform Frame {
     // y = how much of vanilla's own block light to give up in favour of the
     //     light traced from the sources below. 0 leaves the game's lighting
     //     exactly as it was.
+    // z = how far to turn the dither pattern this frame, 0..1. Zero holds it
+    //     still, which is what anything without frame averaging wants; see
+    //     ditherValue.
     vec4 lightShadow;
 } frame;
 
@@ -187,16 +190,28 @@ float fogFactor(int mode) {
 }
 
 /**
- * A different number for every pixel, the same every frame.
+ * A different number for every pixel, and — when something is averaging frames
+ * — a different one each frame as well.
  *
  * Interleaved gradient noise: the pattern it makes is fine and even rather
  * than clumped, which is what lets a single sample per pixel read as a soft
- * edge instead of as speckle. Fixed per pixel and not per frame on purpose —
- * this renderer has nothing that averages frames together, so a pattern that
- * moved would be seen moving.
+ * edge instead of as speckle.
+ *
+ * Whether it holds still is not a matter of taste. A pattern that moves while
+ * nothing averages it is seen moving — the shadow edge crawls, which is worse
+ * than the grain it was meant to hide. A pattern that holds still while frames
+ * *are* being averaged is worse again in the opposite way: every frame draws
+ * exactly the same grain, so averaging a hundred of them gives back the one
+ * they all agree on and removes nothing at all. So the turn per frame arrives
+ * as a number, and it is zero exactly when nothing is accumulating.
+ *
+ * The turn itself is the golden ratio's fractional part, which is the step that
+ * spreads any number of successive samples most evenly over the circle instead
+ * of letting them fall into a short repeating cycle.
  */
 float ditherValue(vec2 pixel) {
-    return fract(52.9829189 * fract(dot(pixel, vec2(0.06711056, 0.00583715))));
+    return fract(52.9829189 * fract(dot(pixel, vec2(0.06711056, 0.00583715)))
+                 + frame.lightShadow.z);
 }
 
 // True only in the build that can trace, and a compile-time constant in both —
