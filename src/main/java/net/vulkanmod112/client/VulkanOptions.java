@@ -1352,6 +1352,32 @@ final class VulkanOptions {
                                         VulkanConfig.setSunShadows(value);
                                     }
                                 }),
+                        new VRangeOption("Traced Light Shadows",
+                                "How many moving lights a surface may ask whether anything stands "
+                                        + "in the way. A carried torch, a burning creature or a "
+                                        + "dropped glowing block is added to the world as a "
+                                        + "straight line from the source with a falloff — nothing "
+                                        + "in this game's lighting knows what is between two "
+                                        + "points, which is why a torch lights the far side of a "
+                                        + "wall and the room around a corner. Tracing that line is "
+                                        + "what stops it, and it is one ray per light per surface, "
+                                        + "which is what this number is buying. Most surfaces have "
+                                        + "one such light near them or none. Needs Terrain "
+                                        + "Acceleration Structures.",
+                                Cost.of(Level.NONE, Level.MEDIUM, Level.NONE),
+                                "Needs Terrain Acceleration Structures.",
+                                0, 8, 1, " lights", "OFF",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getTracedLights();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setTracedLights(value);
+                                    }
+                                }),
                         new VRangeOption("Shadow Softness",
                                 "How soft the edge of a traced shadow is. One ray gives one answer "
                                         + "per pixel, so at zero the edge follows the pixel grid "

@@ -1638,7 +1638,7 @@ final class VkTerrainRenderer {
         // The tracing build only when there is something to trace against and
         // a reason to: no structure, no sun, or the setting at zero, and the
         // ordinary pipeline draws exactly what it always did.
-        boolean traced = sunShadowsActive() && tracingPipelines[variant] != 0
+        boolean traced = tracingWanted() && tracingPipelines[variant] != 0
                 && structureWritten[activeFrameSlot] == rayTracing.topLevel(activeFrameSlot);
         try (MemoryStack stack = stackPush()) {
             vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -4246,7 +4246,10 @@ final class VkTerrainRenderer {
         MemoryUtil.memPutFloat(base + 944, sunDirection[0]);
         MemoryUtil.memPutFloat(base + 948, sunDirection[1]);
         MemoryUtil.memPutFloat(base + 952, sunDirection[2]);
-        MemoryUtil.memPutFloat(base + 956, sunShadowsActive() ? sunShadowStrength() : 0.0f);
+        // The raw strength: whether the sun is up is decided in the shader,
+        // where the fade with its height already lives. Two places deciding
+        // the same thing is how one of them ends up disagreeing.
+        MemoryUtil.memPutFloat(base + 956, tracingWanted() ? sunShadowStrength() : 0.0f);
         // vec4 sunParams at 960: how far a shadow ray may go, and how much sky
         // light a fully shadowed surface keeps.
         MemoryUtil.memPutFloat(base + 960, VkRayTracing.radiusBlocks());
@@ -4257,6 +4260,9 @@ final class VkTerrainRenderer {
         // trade for dither.
         MemoryUtil.memPutFloat(base + 968,
                 clampPercent(intProperty("vulkanmod112.shadowSoftness", 35)) * MAX_SUN_SPREAD);
+        // How many moving lights a fragment may ask about. Nothing at all when
+        // there is no structure to ask.
+        MemoryUtil.memPutFloat(base + 972, tracingWanted() ? tracedLights() : 0.0f);
     }
 
     /**
@@ -4293,22 +4299,29 @@ final class VkTerrainRenderer {
     }
 
     private static float sunShadowStrength() {
-        return clampPercent(intProperty("vulkanmod112.sunShadows", 0)) ;
+        return clampPercent(intProperty("vulkanmod112.sunShadows", 0));
+    }
+
+    private static int tracedLights() {
+        return Math.max(0, Math.min(8, intProperty("vulkanmod112.tracedLights", 2)));
     }
 
     /**
-     * Whether this frame may trace shadows at all.
+     * Whether this frame may trace anything at all.
      *
      * Every term is a thing that can be absent on a real machine: the card may
-     * not trace, the structures may not have been built yet, the sun may be
-     * down. A missing one costs the shadow and nothing else.
+     * not trace, the structures may not have been built yet, both settings may
+     * be at zero. A missing one costs the effect and nothing else.
+     *
+     * Deliberately not gated on the sun being up. A torch casts its shadow at
+     * midnight in a cave, which is where it matters most, and tying the whole
+     * tracing path to daylight would have taken that with it.
      */
-    private boolean sunShadowsActive() {
+    private boolean tracingWanted() {
         return rayTracing != null
                 && ctx.isRayQuerySupported()
                 && rayTracing.topLevel(activeFrameSlot) != 0
-                && sunShadowStrength() > 0.0f
-                && sunDirection[1] > 0.05f;
+                && (sunShadowStrength() > 0.0f || tracedLights() > 0);
     }
 
     /** The wave lattice from terrain.frag, which this side has to agree with. */

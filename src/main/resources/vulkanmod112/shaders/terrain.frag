@@ -57,6 +57,8 @@ layout(set = 0, binding = 3, std140) uniform Frame {
     // y = how much of its sky light a fully shadowed surface keeps.
     // z = how wide the sun is made, in radians of half-angle. 0 is a point
     //     source and a hard edge; larger spreads the ray and softens it.
+    // w = how many of the moving lights may be traced per fragment. 0 leaves
+    //     them shining through walls, which is what they always did.
     vec4 sunParams;
 } frame;
 
@@ -278,6 +280,47 @@ float sunShadow(vec3 normal) {
     bool blocked = rayQueryGetIntersectionTypeEXT(query, true)
             != gl_RayQueryCommittedIntersectionNoneEXT;
     return blocked ? frame.sun.w * fade : 0.0;
+#else
+    return 0.0;
+#endif
+}
+
+/**
+ * Whether something stands between this surface and a light that is moving.
+ *
+ * The lights added here are the ones vanilla has not baked into the world: a
+ * torch being carried, a creature on fire, a glowing block that was dropped a
+ * second ago. They are added as a straight line from the source with a falloff
+ * — which is all they could ever be, because nothing in this game's lighting
+ * knows what is in the way — and the result is a torch that lights the far
+ * side of a wall and the room around a corner. It is the most obviously wrong
+ * thing this renderer does with light, and no arrangement of the falloff can
+ * fix it: the missing information is the geometry between the two points, and
+ * until there were structures to trace, that information did not exist here.
+ *
+ * A surface turned away from the light returns unblocked rather than blocked.
+ * It receives nothing from that light either way, and answering "blocked"
+ * would be this function deciding something it was not asked.
+ *
+ * The ray stops short of the source, because a torch is a piece of geometry
+ * standing in front of the light it emits, and a ray that reaches it finds it
+ * and reports the torch as shadowing itself.
+ */
+float lightBlocked(vec3 normal, vec3 toSource, float distance) {
+#ifdef RAY_QUERY
+    vec3 direction = toSource / distance;
+    float facing = dot(normal, direction);
+    if (facing <= 0.0) {
+        return 0.0;
+    }
+    vec3 from = vRelative + normal * (0.02 + 0.14 * (1.0 - facing));
+    rayQueryEXT query;
+    rayQueryInitializeEXT(query, terrainStructure,
+            gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT,
+            0xFFu, from, 0.02, direction, max(distance - 0.6, 0.05));
+    rayQueryProceedEXT(query);
+    return rayQueryGetIntersectionTypeEXT(query, true)
+            != gl_RayQueryCommittedIntersectionNoneEXT ? 1.0 : 0.0;
 #else
     return 0.0;
 #endif
@@ -695,7 +738,8 @@ void main() {
     // same for every fragment of the draw, which is what makes the derivatives
     // inside it legal. The translucent pipeline always needs the normal: water
     // is in it, and water is asked which way it faces even in the dark.
-    vec3 normal = (BLEND || (lightCount > 0 && directional > 0.0) || SUN_SHADOWS_WANTED)
+    vec3 normal = (BLEND || (lightCount > 0 && directional > 0.0) || SUN_SHADOWS_WANTED
+            || (lightCount > 0 && frame.sunParams.w > 0.0))
             ? faceNormal() : vec3(0.0, 1.0, 0.0);
     // After the derivatives and outside their branch: this is arithmetic on the
     // answer, not another question about the neighbourhood.
@@ -742,6 +786,8 @@ void main() {
         waveShade = 1.0 + WAVE_SHADE * frame.water.x * dot(g, vec2(-0.82, -0.57));
     }
     float backFace = foliage ? BACK_FACE_LIGHT_FOLIAGE : BACK_FACE_LIGHT;
+    int maxTracedLights = int(frame.sunParams.w);
+    int tracedLights = 0;
     for (int i = 0; i < lightCount; ++i) {
         vec4 source = frame.lights[i];
         vec3 toSource = source.xyz - vRelative;
@@ -757,6 +803,14 @@ void main() {
             // sits on exactly as brightly as the top. The strength is how far
             // to go from vanilla's answer towards this one.
             level *= mix(1.0, directionalTerm(normal, toSource, distance, backFace), directional);
+        }
+        if (level > 0.0 && tracedLights < maxTracedLights) {
+            // Counted rather than bounded by the loop: a fragment usually has
+            // one light close enough to matter and sometimes none, so the limit
+            // is a ceiling on the unlucky fragment and not a cost every one
+            // pays.
+            tracedLights += 1;
+            level *= 1.0 - lightBlocked(normal, toSource, distance);
         }
         if (level > 0.0) {
             // The light map is sampled at (level * 16 + 8) / 256, which is the

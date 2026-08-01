@@ -311,6 +311,17 @@ public final class VulkanConfig {
      */
     static final int DEF_RAY_TRACING_RADIUS = 96;
     /**
+     * How many moving lights a surface may ask whether anything is in the way.
+     *
+     * The lights this mod adds — a carried torch, a burning creature, a dropped
+     * glowing block — are a straight line from the source with a falloff,
+     * because nothing in this game's lighting knows what stands between two
+     * points. That is why a torch lights the far side of a wall. With
+     * structures to trace against, the question can finally be asked; this is
+     * how many times per surface it may be, because it is one ray each.
+     */
+    static final int DEF_TRACED_LIGHTS = 2;
+    /**
      * Let the render-distance slider go past 64, up to 128.
      *
      * Off by default because what it unlocks is not "more of the same". The
@@ -477,6 +488,7 @@ public final class VulkanConfig {
     private static int sunShadows = DEF_SUN_SHADOWS;
     private static int shadowSoftness = DEF_SHADOW_SOFTNESS;
     private static int rayTracingRadius = DEF_RAY_TRACING_RADIUS;
+    private static int tracedLights = DEF_TRACED_LIGHTS;
     private static boolean frameGraph = DEF_FRAME_GRAPH;
     private static int frameGraphInterval = DEF_FRAME_GRAPH_INTERVAL;
     private static boolean dynamicLights = DEF_DYNAMIC_LIGHTS;
@@ -712,6 +724,12 @@ public final class VulkanConfig {
                         + "at zero the edge follows the pixel grid; higher values spread that same "
                         + "ray over a disc and trade the staircase for a dithered band. Costs "
                         + "nothing either way — the number of rays does not change.");
+        tracedLights = config.getInt("tracedLights", CATEGORY_GENERAL, DEF_TRACED_LIGHTS, 0, 8,
+                "How many moving lights a surface may ask whether something is in the way. A "
+                        + "carried torch or a burning creature is added as a straight line from "
+                        + "the source, which is why it lights the far side of a wall; tracing the "
+                        + "line is what stops it. One ray per light per surface, so this is the "
+                        + "cost. Needs Terrain Acceleration Structures.");
         rayTracingRadius = config.getInt("rayTracingRadius", CATEGORY_ADVANCED,
                 DEF_RAY_TRACING_RADIUS, 32, 256,
                 "How far from you the terrain carries the structures a ray can hit, in blocks. "
@@ -959,6 +977,7 @@ public final class VulkanConfig {
         setSunShadows(DEF_SUN_SHADOWS);
         setShadowSoftness(DEF_SHADOW_SOFTNESS);
         setRayTracingRadius(DEF_RAY_TRACING_RADIUS);
+        setTracedLights(DEF_TRACED_LIGHTS);
         setExtremeRenderDistance(DEF_EXTREME_RENDER_DISTANCE);
         setDirectionalLight(DEF_DIRECTIONAL_LIGHT);
         setHeightFog(DEF_HEIGHT_FOG);
@@ -1133,6 +1152,16 @@ public final class VulkanConfig {
     public static void setShadowSoftness(int value) {
         shadowSoftness = value < 0 ? 0 : (value > 100 ? 100 : value);
         store(CATEGORY_GENERAL, "shadowSoftness", shadowSoftness);
+        applySystemProperties();
+    }
+
+    public static int getTracedLights() {
+        return tracedLights;
+    }
+
+    public static void setTracedLights(int value) {
+        tracedLights = value < 0 ? 0 : (value > 8 ? 8 : value);
+        store(CATEGORY_GENERAL, "tracedLights", tracedLights);
         applySystemProperties();
     }
 
@@ -1569,6 +1598,7 @@ public final class VulkanConfig {
         publish("vulkanmod112.sunShadows", Integer.toString(sunShadows));
         publish("vulkanmod112.shadowSoftness", Integer.toString(shadowSoftness));
         publish("vulkanmod112.rayTracingRadius", Integer.toString(rayTracingRadius));
+        publish("vulkanmod112.tracedLights", Integer.toString(tracedLights));
         publish("vulkanmod112.directionalLight", Integer.toString(directionalLight));
         publish("vulkanmod112.heightFog", Integer.toString(heightFog));
         publish("vulkanmod112.heightFogDepth", Integer.toString(heightFogDepth));
