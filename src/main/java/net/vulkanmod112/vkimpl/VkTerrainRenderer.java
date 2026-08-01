@@ -659,6 +659,24 @@ final class VkTerrainRenderer {
 
     private boolean baseReady;
     private boolean firstFrame = true;
+
+    /**
+     * Cleared once a whole frame has been through the composite, so this costs
+     * one frame's worth of log lines and nothing afterwards.
+     *
+     * It exists because the machines that die here die between two log lines
+     * that are eleven method calls apart, taking the process with them — no
+     * exception, no crash report, nothing after "Quad index buffer sized". A
+     * log that stops is not evidence of where it stopped, and on a driver that
+     * is killed by the operating system there is no second chance to ask.
+     */
+    private boolean tracingFirstFrame = true;
+
+    private void firstFrameStage(String stage) {
+        if (tracingFirstFrame) {
+            LOGGER.info("First terrain frame: {}", stage);
+        }
+    }
     private boolean frameOpen;
 
     /**
@@ -997,7 +1015,9 @@ final class VkTerrainRenderer {
             return taken;
         }
         if (layerOrdinal == 0) {
+            firstFrameStage("creating the shared colour and depth targets");
             ensureTargets(fbWidth, fbHeight);
+            firstFrameStage("targets shared with OpenGL");
             // Sized from the previous frame's largest layer as well, so a growth
             // step is not spent on SOLID only to be undone by CUTOUT.
             ensureDrawBatchCapacity(Math.max(chunkCount, peakDrawsNeeded));
@@ -1173,6 +1193,7 @@ final class VkTerrainRenderer {
             mirror.setFrameStamp(frameCounter);
             mirror.flushRetired(frameCounter - framesInFlight);
             ensureQuadIndexCapacity(mirror.maxEntrySize() / BLOCK_VERTEX_STRIDE / 4);
+            firstFrameStage("recording draw commands");
             frameChunks = 0;
             frameVertices = 0;
             frameSkipped = 0;
@@ -1393,7 +1414,9 @@ final class VkTerrainRenderer {
                         .pWaitDstStageMask(stack.ints(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT));
             }
             firstFrame = false;
+            firstFrameStage("submitting the opaque frame");
             check(vkQueueSubmit(ctx.getGraphicsQueue(), submit, fence), "vkQueueSubmit(terrain)");
+            firstFrameStage("submitted");
             frameOpen = false;
         }
     }
@@ -1578,7 +1601,13 @@ final class VkTerrainRenderer {
             IntBuffer textures = stack.ints(glColorTexture, glDepthTexture);
             IntBuffer layouts = stack.ints(EXTSemaphore.GL_LAYOUT_SHADER_READ_ONLY_EXT,
                     EXTSemaphore.GL_LAYOUT_SHADER_READ_ONLY_EXT);
+            // The imported semaphore is the first thing on this path that the
+            // graphics driver has to honour across two APIs, and a driver that
+            // never signals it stalls here until the operating system decides
+            // the card is gone. That looks exactly like the log simply ending.
+            firstFrameStage("waiting on the Vulkan semaphore from OpenGL");
             EXTSemaphore.glWaitSemaphoreEXT(glWaitSemaphore, noBuffers, textures, layouts);
+            firstFrameStage("semaphore taken, compositing");
 
             int prevProgram = GL11C.glGetInteger(GL20C.GL_CURRENT_PROGRAM);
             int prevActive = GL11C.glGetInteger(GL13C.GL_ACTIVE_TEXTURE);
@@ -1688,8 +1717,13 @@ final class VkTerrainRenderer {
             GL20C.glUseProgram(prevProgram);
             GL13C.glActiveTexture(prevActive);
 
+            firstFrameStage("terrain drawn into the game's frame");
             EXTSemaphore.glSignalSemaphoreEXT(glSignalSemaphore, noBuffers, textures, layouts);
             GL11C.glFlush();
+            if (tracingFirstFrame) {
+                tracingFirstFrame = false;
+                LOGGER.info("First terrain frame: complete");
+            }
 
             if (!glErrorLogged) {
                 int error = GL11C.glGetError();
