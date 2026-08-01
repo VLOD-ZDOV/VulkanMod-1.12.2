@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Performance
+
+- **The resource pack screen no longer decodes every icon it can see, on every frame.** Vanilla reads `pack.png` out of the pack and decodes it again for each visible row of the list, sixty times a second, for textures it has already uploaded — and packs without an icon of their own cost more the more packs are enabled, which is why the list only becomes unusable for people with a lot of them. Two hundred packs and a short scroll: two hundred decodes instead of forty-two thousand.
+
 ### Fixed
 
 - **Mobs and particles showed through blocks on AMD cards.** The world is drawn into a buffer shared with OpenGL, and its depth has to be handed back so the game can hide what is behind the terrain. On hardware that offers no sampleable 24-bit depth — every AMD card, on Windows and on Linux alike — that hand-back goes through the shader instead of a hardware copy, and it was being thrown away before it landed. The picture looked correct, because the colour arrived either way; only occlusion was missing, so anything the game drew after the world floated in front of it.
