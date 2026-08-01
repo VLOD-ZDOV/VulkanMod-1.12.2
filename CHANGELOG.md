@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- **Mobs and particles showed through blocks on AMD cards.** The world is drawn into a buffer shared with OpenGL, and its depth has to be handed back so the game can hide what is behind the terrain. On hardware that offers no sampleable 24-bit depth — every AMD card, on Windows and on Linux alike — that hand-back goes through the shader instead of a hardware copy, and it was being thrown away before it landed. The picture looked correct, because the colour arrived either way; only occlusion was missing, so anything the game drew after the world floated in front of it.
+- **Water and glass could disappear entirely.** With the setting that stops the game filling its own chunk buffers, the transparent layer was left to a renderer that declines it on those same cards, and to buffers that were no longer being filled — so nothing drew it at all, and an ocean became a hole in the world. That setting now checks whether the transparent layer really goes through Vulkan before it drops anything.
+- **Settings given on the command line were overwritten by the settings file** before the renderer could read them, so a `-D` switch appeared to work and changed nothing. The log now names every setting the command line has pinned.
+- The diagnostics snapshot reported the depth copy as enabled by the setting on one line and disabled by the driver twenty lines below. The first line now says it is a request, not the result.
+
 ## [0.7.1]
 
 ### Fixed
