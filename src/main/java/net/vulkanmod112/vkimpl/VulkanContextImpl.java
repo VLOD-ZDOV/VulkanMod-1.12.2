@@ -110,6 +110,8 @@ public final class VulkanContextImpl implements VulkanBridge {
     private boolean initialized;
 
     private String gpuSummary = "Vulkan not initialized";
+    /** Every GPU seen at startup, one per line, for the diagnostics report. */
+    private StringBuilder gpuList = new StringBuilder();
     /** Total device-local memory, filled in when the GPU is selected. */
     private int vramMegabytes;
     /** Whether the driver can report per-heap usage and budget (VK_EXT_memory_budget). */
@@ -333,30 +335,71 @@ public final class VulkanContextImpl implements VulkanBridge {
             PointerBuffer handles = stack.mallocPointer(deviceCount);
             check(vkEnumeratePhysicalDevices(instance, count, handles), "vkEnumeratePhysicalDevices");
 
+            // Which cards the game's OpenGL context can name. Asked once, up
+            // front, because it changes what "best" means: the fastest GPU in
+            // the machine is worth nothing here if it is not the one OpenGL is
+            // already on — sharing memory across two devices is refused later
+            // anyway, and the refusal is total.
+            java.util.List<byte[]> glDevices = glDeviceUuidsQuietly();
+            int requested = requestedDeviceIndex();
+
             VkPhysicalDevice best = null;
             int bestScore = -1;
+            int bestIndex = -1;
+            this.gpuList = new StringBuilder();
             for (int i = 0; i < deviceCount; i++) {
                 VkPhysicalDevice candidate = new VkPhysicalDevice(handles.get(i), instance);
                 VkPhysicalDeviceProperties props = VkPhysicalDeviceProperties.malloc(stack);
                 vkGetPhysicalDeviceProperties(candidate, props);
 
                 int score = score(candidate, props, stack);
+                boolean matchesGl = score >= 0 && matchesAnyGlDevice(stack, candidate, glDevices);
+                if (matchesGl) {
+                    // Larger than any gap the device type can produce, because
+                    // this is not a preference between two usable choices. The
+                    // other card cannot be used at all.
+                    score += 5000;
+                }
+                if (requested >= 0) {
+                    // An explicit choice overrides both, and is still refused a
+                    // device with no graphics queue.
+                    score = score < 0 ? -1 : (i == requested ? 100000 : 0);
+                }
                 // The extension count is here because it is what sizes the
                 // scratch stack this very startup nearly ran out of, and a log
                 // that reports it turns the next such report into one line
                 // instead of a guess. See Lwjgl3Natives.DEFAULT_STACK_SIZE_KB.
                 IntBuffer extensions = stack.mallocInt(1);
                 vkEnumerateDeviceExtensionProperties(candidate, (String) null, extensions, null);
-                LOGGER.info("GPU {}: {} ({}, Vulkan {}, {} extensions, score {})",
+                LOGGER.info("GPU {}: {} ({}, Vulkan {}, {} extensions, score {}{})",
                         i, props.deviceNameString(), deviceTypeName(props.deviceType()),
-                        apiVersionString(props.apiVersion()), extensions.get(0), score);
+                        apiVersionString(props.apiVersion()), extensions.get(0), score,
+                        matchesGl ? ", the one OpenGL is on" : "");
+                gpuList.append(i).append(": ").append(props.deviceNameString())
+                        .append(" (").append(deviceTypeName(props.deviceType()))
+                        .append(matchesGl ? ", OpenGL is here" : "")
+                        .append(score < 0 ? ", no graphics queue" : "")
+                        .append(")\n");
                 if (score > bestScore) {
                     bestScore = score;
                     best = candidate;
+                    bestIndex = i;
                 }
             }
             if (bestScore < 0) {
                 throw new IllegalStateException("No GPU with a graphics queue found");
+            }
+            if (requested >= 0 && requested != bestIndex) {
+                LOGGER.warn("GPU {} was asked for and is not usable; falling back to GPU {}",
+                        requested, bestIndex);
+            }
+            if (!glDevices.isEmpty() && bestScore < 5000 && requested < 0) {
+                // Said here rather than left to the import failure, because at
+                // this point it is still a sentence about which card to launch
+                // the game on, and forty lines later it is a crash.
+                LOGGER.warn("No Vulkan GPU matches the one OpenGL is running on. Terrain will stay "
+                        + "on OpenGL. On a hybrid machine, launch the game with the same card "
+                        + "selected for OpenGL, or pick another GPU in the mod's settings.");
             }
 
             this.physicalDevice = best;
@@ -368,6 +411,65 @@ public final class VulkanContextImpl implements VulkanBridge {
             LOGGER.info("Selected GPU: {} (graphics queue family {})", props.deviceNameString(), graphicsQueueFamily);
             logMemoryHeaps(stack);
         }
+    }
+
+    /**
+     * Which GPU the settings screen asked for, or -1 for automatic.
+     *
+     * Read once at startup because that is the only moment it can matter: the
+     * device is chosen before anything else exists, and changing it later would
+     * mean tearing down every resource in this class.
+     */
+    private static int requestedDeviceIndex() {
+        try {
+            return Integer.parseInt(System.getProperty("vulkanmod112.vulkanDevice", "-1"));
+        } catch (NumberFormatException ignored) {
+            return -1;
+        }
+    }
+
+    /**
+     * The GL side's device list, or an empty one when it cannot be had.
+     *
+     * Quiet about failure on purpose. This runs before the mod knows whether
+     * interop is possible at all, so a driver without the extension is an
+     * ordinary case and not worth a warning — it only means the choice falls
+     * back to scoring by device type, which is what it always did.
+     */
+    private java.util.List<byte[]> glDeviceUuidsQuietly() {
+        try {
+            ensureGlFunctionTable();
+            try (MemoryStack stack = stackPush()) {
+                java.util.List<byte[]> found = Interop.glDeviceUuids(stack, false);
+                LOGGER.info("OpenGL names {} device(s) before the Vulkan device is chosen", found.size());
+                return found;
+            }
+        } catch (Throwable t) {
+            // Said out loud rather than swallowed. A silent empty answer here
+            // looks exactly like "no match exists", and the difference between
+            // those two decides whether a hybrid laptop renders or refuses —
+            // this mod has lost five settings to checks that failed quietly.
+            LOGGER.info("Could not ask OpenGL which GPUs it has before choosing one ({}); "
+                    + "falling back to choosing by device type", t.toString());
+            return java.util.Collections.emptyList();
+        }
+    }
+
+    private static boolean matchesAnyGlDevice(MemoryStack stack, VkPhysicalDevice candidate,
+                                              java.util.List<byte[]> glDevices) {
+        if (glDevices.isEmpty()) {
+            return false;
+        }
+        byte[] uuid = Interop.deviceUuid(stack, candidate);
+        if (uuid == null) {
+            return false;
+        }
+        for (byte[] gl : glDevices) {
+            if (java.util.Arrays.equals(uuid, gl)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private int score(VkPhysicalDevice device, VkPhysicalDeviceProperties props, MemoryStack stack) {
@@ -638,7 +740,17 @@ public final class VulkanContextImpl implements VulkanBridge {
     @Override
     public synchronized String diagnosticsReport() {
         StringBuilder sb = new StringBuilder();
-        sb.append("  gpu: ").append(gpuSummary).append('\n');
+        sb.append("  gpu: ").append(gpuSummary)
+                .append(", chosen ").append(requestedDeviceIndex() < 0
+                        ? "automatically" : "by the setting (" + requestedDeviceIndex() + ")")
+                .append('\n');
+        // Which card is which, so that choosing one by number in the settings
+        // is a decision rather than a guess.
+        for (String line : gpuList.toString().split("\n")) {
+            if (!line.isEmpty()) {
+                sb.append("    gpu ").append(line).append('\n');
+            }
+        }
         try (MemoryStack stack = stackPush()) {
             VkPhysicalDeviceProperties props = VkPhysicalDeviceProperties.malloc(stack);
             vkGetPhysicalDeviceProperties(physicalDevice, props);
@@ -724,13 +836,34 @@ public final class VulkanContextImpl implements VulkanBridge {
         if (glCapsReady) {
             return;
         }
+        ensureGlFunctionTable();
+        Interop.requireSameDevice(physicalDevice, physicalDeviceCount);
+        Interop.logExternalSemaphoreSupport(physicalDevice);
+        glCapsReady = true;
+    }
+
+    private boolean glTableReady;
+
+    /**
+     * The GL function table alone, without the checks that need a chosen
+     * device.
+     *
+     * Split out because the device is chosen partly from what OpenGL says, and
+     * the full check asks whether the chosen device matches — a question with
+     * no answer yet at the point the choice is being made. Asking it anyway
+     * threw a null pointer that the caller swallowed, and the whole feature
+     * silently did nothing: the mod picked by device type as it always had, and
+     * the log line saying so was the only sign.
+     */
+    private synchronized void ensureGlFunctionTable() {
+        if (glTableReady) {
+            return;
+        }
         GLCapabilities caps = GL.createCapabilities();
         if (!Interop.supportedByGL(caps)) {
             throw new IllegalStateException("OpenGL driver lacks " + Interop.glExtensionNames());
         }
-        Interop.requireSameDevice(physicalDevice, physicalDeviceCount);
-        Interop.logExternalSemaphoreSupport(physicalDevice);
-        glCapsReady = true;
+        glTableReady = true;
     }
 
     private VkTerrainRenderer terrainRenderer() {

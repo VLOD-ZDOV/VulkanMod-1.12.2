@@ -327,6 +327,29 @@ final class Interop {
      * on a false result means the query gave nothing rather than gave a mismatch.
      */
     private static boolean matchesGlDevice(MemoryStack stack, byte[] vulkanUuid, StringBuilder seen) {
+        for (byte[] glBytes : glDeviceUuids(stack, true)) {
+            if (java.util.Arrays.equals(vulkanUuid, glBytes)) {
+                return true;
+            }
+            seen.append(seen.length() == 0 ? "" : ", ").append(hex(glBytes));
+        }
+        return false;
+    }
+
+    /**
+     * Every GPU the game's OpenGL context can name, by UUID.
+     *
+     * The one question worth asking before a device is chosen rather than
+     * after. Which card the game runs on was decided by the driver long before
+     * this mod loaded, and zero-copy sharing only works on that same card — so
+     * picking the fastest GPU in the machine and then discovering it is not the
+     * one OpenGL is on is a refusal where a match was available.
+     *
+     * @param verbose whether to write the version banner; wanted once per
+     *                session, not once per candidate device
+     */
+    static java.util.List<byte[]> glDeviceUuids(MemoryStack stack, boolean verbose) {
+        java.util.List<byte[]> found = new java.util.ArrayList<byte[]>();
         // Drain, not pop: GL keeps a queue of errors and returns one at a
         // time, so another mod leaving two behind would read as our failure.
         int drained = 0;
@@ -337,16 +360,18 @@ final class Interop {
         GL11C.glGetIntegerv(EXTMemoryObject.GL_NUM_DEVICE_UUIDS_EXT, countBuf);
         int countError = GL11C.glGetError();
         int glDeviceCount = countBuf.get(0);
-        LOGGER.info("Interop check on LWJGL {} / GL {} ({}): {} GL device(s), glGetError 0x{}, {} stale error(s)",
-                org.lwjgl.Version.getVersion(), GL11C.glGetString(GL11C.GL_VERSION),
-                GL11C.glGetString(GL11C.GL_RENDERER), glDeviceCount,
-                Integer.toHexString(countError), drained);
+        if (verbose) {
+            LOGGER.info("Interop check on LWJGL {} / GL {} ({}): {} GL device(s), glGetError 0x{}, {} stale error(s)",
+                    org.lwjgl.Version.getVersion(), GL11C.glGetString(GL11C.GL_VERSION),
+                    GL11C.glGetString(GL11C.GL_RENDERER), glDeviceCount,
+                    Integer.toHexString(countError), drained);
+        }
 
         // Zeroed before each query so "the driver wrote nothing" is
         // distinguishable from "the driver wrote a different UUID".
         ByteBuffer glUuid = stack.calloc(UUID_BYTES);
-        byte[] glBytes = new byte[UUID_BYTES];
         for (int i = 0; i < glDeviceCount; i++) {
+            byte[] glBytes = new byte[UUID_BYTES];
             glUuid.clear();
             MemoryUtil.memSet(glUuid, 0);
             GL11C.glGetError();
@@ -354,16 +379,35 @@ final class Interop {
             int glError = GL11C.glGetError();
             glUuid.get(glBytes);
             if (glError != GL11C.GL_NO_ERROR || isAllZero(glBytes)) {
-                LOGGER.info("GL device {} of {}: query unusable (glGetError 0x{})",
-                        i, glDeviceCount, Integer.toHexString(glError));
+                if (verbose) {
+                    LOGGER.info("GL device {} of {}: query unusable (glGetError 0x{})",
+                            i, glDeviceCount, Integer.toHexString(glError));
+                }
                 continue;
             }
-            if (java.util.Arrays.equals(vulkanUuid, glBytes)) {
-                return true;
-            }
-            seen.append(seen.length() == 0 ? "" : ", ").append(hex(glBytes));
+            found.add(glBytes);
         }
-        return false;
+        return found;
+    }
+
+    /** The 16-byte identity a Vulkan device shares with OpenGL, or null. */
+    static byte[] deviceUuid(MemoryStack stack, VkPhysicalDevice device) {
+        try {
+            VkPhysicalDeviceIDProperties idProps = VkPhysicalDeviceIDProperties.calloc(stack)
+                    .sType(VK11.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES);
+            VkPhysicalDeviceProperties2 props = VkPhysicalDeviceProperties2.calloc(stack)
+                    .sType(VK11.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2)
+                    .pNext(idProps.address());
+            VK11.vkGetPhysicalDeviceProperties2(device, props);
+            byte[] uuid = new byte[UUID_BYTES];
+            idProps.deviceUUID().get(uuid);
+            return isAllZero(uuid) ? null : uuid;
+        } catch (Throwable t) {
+            // A driver without Vulkan 1.1 has no identity to compare, which is
+            // not an error here — it only means the choice falls back to
+            // scoring, exactly as it did before this existed.
+            return null;
+        }
     }
 
     /** The driver UUID, or null when that query is unusable as well. */

@@ -93,6 +93,7 @@ public final class SessionLog {
         public void onClientTick(net.minecraftforge.fml.common.gameevent.TickEvent.ClientTickEvent event) {
             if (event.phase == net.minecraftforge.fml.common.gameevent.TickEvent.Phase.END) {
                 RenderNotice.flushToChat();
+                LangDump.onceIfAsked();
             }
         }
 
