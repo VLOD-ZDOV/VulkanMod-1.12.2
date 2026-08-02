@@ -137,6 +137,15 @@ public final class Diagnostics {
         if (failed || !enabled()) {
             return;
         }
+        // Ultra logging is usually switched on in the middle of a session,
+        // after something has gone wrong — and startCapture() only runs at
+        // startup, so it found the setting off and never attached. The file
+        // then filled with snapshots and not one line of the mod's own log:
+        // no startup lines, no settings changes, no warnings. A tester's
+        // report arrived exactly like that, and the missing half was the half
+        // that says what they did. Cheap to repeat; it returns at once once
+        // the appender is attached.
+        startCapture();
         long now = System.nanoTime();
         long intervalNanos = VulkanConfig.getUltraLogSeconds() * 1_000_000_000L;
         if (headerWritten && now - lastSnapshotNanos < intervalNanos) {

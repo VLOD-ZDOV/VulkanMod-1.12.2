@@ -1646,6 +1646,7 @@ public final class VulkanConfig {
     public static void setDynamicLights(boolean value) {
         dynamicLights = value;
         store(CATEGORY_GENERAL, "dynamicLights", value);
+        applySystemProperties();
     }
 
     /** How far a light source may be and still be drawn, in blocks. */
@@ -1656,6 +1657,7 @@ public final class VulkanConfig {
     public static void setDynamicLightDistance(int value) {
         dynamicLightDistance = value;
         store(CATEGORY_GENERAL, "dynamicLightDistance", value);
+        applySystemProperties();
     }
 
     public static boolean isFastFrustumTest() {
@@ -2054,6 +2056,19 @@ public final class VulkanConfig {
 
     /** Writes the file if anything has changed. Cheap when nothing has. */
     public static void flush() {
+        if (!movedFrom.isEmpty()) {
+            // Every setter is supposed to do this itself, and two of them did
+            // not — so the report printed dynamicLights=false for a session
+            // where the light was demonstrably working. A published value that
+            // disagrees with the field is worse than no value at all: it is a
+            // number in a log that reads as a measurement.
+            //
+            // Cheap, because it only runs on the tick something moved. This is
+            // a safety net and not the mechanism: a setting the renderer reads
+            // every frame still needs its setter to publish immediately, and a
+            // tick of lag would be visible.
+            applySystemProperties();
+        }
         // Before the early return: this is called every client tick, and what
         // moved should be written down whether or not the file needs saving.
         logChanges();

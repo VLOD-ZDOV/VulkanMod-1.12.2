@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.8.1]
+
+### Fixed
+
+- **A torch in your hand now lights itself.** It lit the ground and the walls and stayed dark in your fist, which is the one place the light is most obviously expected to be. The hook meant to fix that was never attached: it was aimed at the class that declares the method rather than the class the game calls it on, and the mixin library is allowed to skip a hook it cannot place without saying so. Every hook in the mod is now required to find its target, so the next one of these stops the game instead of shipping.
+
+- **A setting that cannot do anything now says so.** Every effect in this mod lives inside the Vulkan renderer, so with it switched off they all do nothing — including dynamic lights, whose sources are collected during the Vulkan draw and nowhere else. Nothing said this anywhere: the switch read as on and the log said Vulkan had started, which is true and means something else. The game now names what is switched on and inert, and why, at startup, in the log when it changes, and in the diagnostics report.
+
+### Changed
+
+- **The diagnostics report records every setting**, not the five it used to. A report saying an effect looks wrong could not be told from a report by someone who never turned it on.
+
+- **Settings changes are written to the log as they happen**, so a report can be read as a sequence of events rather than reconstructed by comparing snapshots.
+
+- **Turning on Ultra Logging mid-session now captures the log too.** It only attached at startup, so a file started after something went wrong contained snapshots and not one line of the mod's own log — which is the half that says what happened.
+
 ## [0.8.0]
 
 ### Added
