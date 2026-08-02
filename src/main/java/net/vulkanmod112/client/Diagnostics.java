@@ -415,6 +415,7 @@ public final class Diagnostics {
                 // this one as the truth cost a morning.
                 + ", depth blit asked for " + VulkanConfig.isDepthBlitEnabled()
                 + ", culling " + VulkanConfig.isCullingEnabled());
+        writeModSettings(out);
         // Only once the screen that causes it has been opened, so an ordinary
         // session says nothing about it at all.
         if (ResourcePackIcons.touched()) {
@@ -422,6 +423,42 @@ public final class Diagnostics {
         }
         out.println("  memory: " + used() + " MiB used of " + max() + " MiB");
         out.println();
+    }
+
+    /**
+     * Everything the renderer was configured with, in one block.
+     *
+     * Wrapped by hand rather than left to run off the side: this is a file a
+     * tester opens in whatever editor they have, and forty settings on one
+     * line is a line nobody reads. Sorted, so the same setting is in the same
+     * place in every report and two of them can be compared by eye.
+     */
+    private static void writeModSettings(PrintWriter out) {
+        java.util.List<String> settings = VulkanConfig.describePublished();
+        out.println("  renderer settings (" + settings.size() + ", all of them, "
+                + "0 or false means the effect is not running):");
+        StringBuilder line = new StringBuilder();
+        for (int i = 0; i < settings.size(); i++) {
+            String entry = settings.get(i);
+            if (line.length() > 0 && line.length() + entry.length() > 88) {
+                out.println("    " + line);
+                line.setLength(0);
+            }
+            if (line.length() > 0) {
+                line.append(", ");
+            }
+            line.append(entry);
+        }
+        if (line.length() > 0) {
+            out.println("    " + line);
+        }
+        // Directly under the values, because this is the question the values
+        // are read to answer and reading them without it is how a session was
+        // spent concluding that an effect was broken when it was switched off.
+        String inert = SettingsHealth.describeInert();
+        if (inert != null) {
+            out.println("    on but doing nothing: " + inert);
+        }
     }
 
     private static long used() {

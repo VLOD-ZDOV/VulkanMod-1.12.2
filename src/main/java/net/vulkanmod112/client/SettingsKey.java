@@ -50,6 +50,10 @@ public final class SettingsKey {
             // Settings changed while a screen was open are written here, once,
             // rather than on every step of a slider being dragged.
             VulkanConfig.flush();
+            // Deliberately before the screen check below. A setting is turned
+            // on with a screen open, and this is the moment it becomes worth
+            // saying that it will not do anything.
+            SettingsHealth.check();
             if (mc.currentScreen != null || mc.world == null) {
                 return;
             }

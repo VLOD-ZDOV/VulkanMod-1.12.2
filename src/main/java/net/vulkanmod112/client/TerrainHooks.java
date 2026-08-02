@@ -168,22 +168,46 @@ public final class TerrainHooks {
         SpriteHooks.forgetSheets();
     }
 
-    public static String stats() {
-        if (!terrainEnabled()) {
-            return "terrain: off";
+    /**
+     * Why the world is not being drawn by Vulkan, or null when it is.
+     *
+     * Every effect in this mod is code inside this renderer, so this one
+     * question decides whether any of them can do anything at all — and it was
+     * being answered in three places that could disagree, none of which a
+     * player ever sees. A tester watched a switched-on setting do nothing for
+     * ninety seconds and reported the setting as broken; the setting was fine
+     * and this was the answer nobody had asked for.
+     *
+     * A sentence rather than a flag, because the four reasons need four
+     * different things done about them and "false" says none of that.
+     */
+    public static String whyNotDrawing() {
+        if (!TERRAIN_ALLOWED_BY_PROPERTY) {
+            return "the command line switched the Vulkan renderer off for this session";
+        }
+        if (!VulkanConfig.isTerrainEnabled()) {
+            return "Vulkan terrain rendering is off in the settings";
         }
         if (broken) {
-            return "terrain: FAILED, vanilla fallback";
+            return "the Vulkan renderer failed and the game fell back to OpenGL";
         }
         if (incompatibleRenderer) {
-            return "terrain: disabled for incompatible renderer";
+            return "another mod is drawing the world, so the Vulkan renderer stood aside";
         }
         // Said "Vulkan" on a machine where Vulkan never started, two lines above
         // the same report saying it was not initialized. The settings allow the
         // terrain path and nothing has failed since — because nothing has run.
         VulkanBridge bridge = liveBridge();
         if (bridge == null || !bridge.isInitialized()) {
-            return "terrain: vanilla, Vulkan renderer never started";
+            return "Vulkan never started on this machine";
+        }
+        return null;
+    }
+
+    public static String stats() {
+        String why = whyNotDrawing();
+        if (why != null) {
+            return "terrain: not drawn — " + why;
         }
         // Both numbers, because one of them alone has now cost two rounds of
         // asking a tester for a screenshot. The list is vanilla's: whatever it

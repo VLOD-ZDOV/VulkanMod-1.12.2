@@ -82,8 +82,28 @@ public final class DynamicLights {
      */
     private static long heldMethodCalls;
 
+    /** Said once per session, and only when it is certainly true. */
+    private static boolean heldHookWarned;
+
     public static void recordHeldItemLightmapCall() {
         heldMethodCalls++;
+        // Ten seconds of the method running every frame while the thing inside
+        // it never runs at all is not a slow start — it is an injection that
+        // did not attach, and Mixin is allowed to skip one in silence. That
+        // silence shipped a dark torch in a release.
+        //
+        // Both counters are reset together by the report below, so they climb
+        // together whenever the hook works: this can only be true when it does
+        // not.
+        if (!heldHookWarned && heldMethodCalls > 600 && heldRaised + heldUnchanged == 0
+                && count > 0 && VulkanConfig.isDynamicLights()) {
+            heldHookWarned = true;
+            net.vulkanmod112.VulkanMod112.LOGGER.warn(
+                    "The held-item light hook is not attached: ItemRenderer.setLightmap has run "
+                            + "{} times and the value inside it was never touched. A torch in the "
+                            + "hand will light the world and stay dark itself; nothing else is "
+                            + "affected.", heldMethodCalls);
+        }
     }
 
     public static void recordHeldItemLight(int before, int after) {
@@ -358,6 +378,16 @@ public final class DynamicLights {
             return "dynamic lights: off";
         }
         if (frames == 0) {
+            // "No frames yet" was the whole of what this said for ninety
+            // seconds of a tester's session, and it reads as "wait a moment".
+            // What it actually meant was that the sources are gathered inside
+            // the Vulkan draw and there was no Vulkan draw, so this would have
+            // said the same thing forever.
+            String why = TerrainHooks.whyNotDrawing();
+            if (why != null) {
+                return "dynamic lights: on and gathering nothing — the sources are collected "
+                        + "inside the Vulkan terrain draw, and " + why;
+            }
             return "dynamic lights: on, no frames yet";
         }
         // The level at the camera itself is what a carried torch produces, and

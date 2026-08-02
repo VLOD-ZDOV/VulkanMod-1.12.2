@@ -2,13 +2,11 @@ package net.vulkanmod112.mixin;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.ItemRenderer;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.World;
 import net.vulkanmod112.client.DynamicLights;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.Redirect;
+import org.spongepowered.asm.mixin.injection.ModifyVariable;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
@@ -21,10 +19,32 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * directly at the player's eye:
  *
  * <pre>
- * int i = this.mc.world.getCombinedLight(new BlockPos(player.posX, player.posY + eyeHeight, player.posZ), 0);
+ * AbstractClientPlayer p = this.mc.player;
+ * int i = this.mc.world.getCombinedLight(new BlockPos(p.posX, p.posY + p.getEyeHeight(), p.posZ), 0);
+ * float f = (float)(i &amp; 65535);
+ * float f1 = (float)(i &gt;&gt; 16);
  * </pre>
  *
- * So the call itself is redirected rather than its caller patched.
+ * <h2>Why the value and not the call</h2>
+ *
+ * This was a {@code @Redirect} on {@code getCombinedLight} for a whole release,
+ * and it never ran once. Not "ran and changed nothing" — never. The counter
+ * below is what proved it: the method was entered every frame while the
+ * redirect reported zero, which are two different faults needing opposite
+ * fixes.
+ *
+ * The cause is one line of Java that reads as though it says otherwise.
+ * {@code getCombinedLight} is declared on {@code World}, but the receiver is
+ * {@code Minecraft.world}, whose declared type is {@code WorldClient} — so the
+ * compiler writes the call against {@code WorldClient} and a redirect aimed at
+ * {@code World} matches nothing in the method. Mixin then skipped it in
+ * silence, because an injector without {@code require} is allowed to find no
+ * target.
+ *
+ * Aiming at {@code WorldClient} would work and would break again the moment
+ * anything changes the declared type of a field this mixin does not mention.
+ * The local variable does not care who was asked: it is the first {@code int}
+ * the method stores, and there is exactly one.
  */
 @Mixin(ItemRenderer.class)
 public abstract class HeldItemLightMixin {
@@ -35,11 +55,8 @@ public abstract class HeldItemLightMixin {
         DynamicLights.recordHeldItemLightmapCall();
     }
 
-    @Redirect(method = "setLightmap",
-            at = @At(value = "INVOKE",
-                    target = "Lnet/minecraft/world/World;getCombinedLight(Lnet/minecraft/util/math/BlockPos;I)I"))
-    private int vulkanmod112$lightHeldItem(World world, BlockPos pos, int minimum) {
-        int packed = world.getCombinedLight(pos, minimum);
+    @ModifyVariable(method = "setLightmap", at = @At("STORE"), ordinal = 0)
+    private int vulkanmod112$lightHeldItem(int packed) {
         Minecraft mc = Minecraft.getMinecraft();
         if (mc.player == null) {
             return packed;

@@ -1907,20 +1907,130 @@ public final class VulkanConfig {
         publish("vulkanmod112.showReflections", Boolean.toString(showReflections));
         publish("vulkanmod112.temporalAccumulation", Integer.toString(temporalAccumulation));
         publish("vulkanmod112.showAccumulation", Boolean.toString(showAccumulation));
+        // Nothing behind the bridge reads these two — they are published so
+        // that they appear in the one list that says what a session was
+        // configured with, and so that the command line can pin them like any
+        // other setting.
+        publish("vulkanmod112.dynamicLights", Boolean.toString(dynamicLights));
+        publish("vulkanmod112.dynamicLightDistance", Integer.toString(dynamicLightDistance));
+    }
+
+    /**
+     * Every setting the renderer reads, read back from where it reads it.
+     *
+     * The diagnostics file recorded five settings and not one effect, so a
+     * report reading "the grass does not sway" could not be told apart from a
+     * report reading "I never switched it on" — and which of the two it is
+     * happens to be the entire answer. A whole tester session was spent
+     * finding that out by inference.
+     *
+     * Taken from the system properties rather than from the fields on purpose.
+     * The properties are what the renderer actually sees, and the two differ
+     * exactly when the command line has pinned one — which is the case where
+     * reading the field would print a number that nothing in the frame is
+     * using.
+     *
+     * Built from {@link #published}, which {@link #publish} fills, so a setting
+     * added later appears here without anyone remembering to add it.
+     */
+    public static java.util.List<String> describePublished() {
+        java.util.List<String> keys = new java.util.ArrayList<String>(published);
+        java.util.Collections.sort(keys);
+        java.util.List<String> out = new java.util.ArrayList<String>(keys.size());
+        for (int i = 0; i < keys.size(); i++) {
+            String key = keys.get(i);
+            String value = System.getProperty(key);
+            out.add(key.substring(key.lastIndexOf('.') + 1)
+                    + "=" + (value == null ? "?" : value)
+                    + (PINNED.contains(key) ? " (pinned)" : ""));
+        }
+        return out;
     }
 
     private static void store(String category, String key, int value) {
         if (config != null) {
-            config.get(category, key, value).set(value);
+            net.minecraftforge.common.config.Property property = config.get(category, key, value);
+            int was = property.getInt();
+            if (was != value) {
+                noteChange(key, Integer.toString(was), Integer.toString(value));
+            }
+            property.set(value);
             save();
         }
     }
 
     private static void store(String category, String key, boolean value) {
         if (config != null) {
-            config.get(category, key, value).set(value);
+            net.minecraftforge.common.config.Property property = config.get(category, key, value);
+            boolean was = property.getBoolean();
+            if (was != value) {
+                noteChange(key, Boolean.toString(was), Boolean.toString(value));
+            }
+            property.set(value);
             save();
         }
+    }
+
+    /**
+     * Which settings have moved since the last line was written, and where from.
+     *
+     * <h2>Why this exists</h2>
+     *
+     * A tester's log is a list of ten-second snapshots and nothing between
+     * them, so working out what they did means diffing forty of them by eye and
+     * hoping the moment fell inside one. The session that prompted this had the
+     * renderer switched on somewhere in a ten-second gap, and which side of that
+     * gap a complaint came from was the whole answer.
+     *
+     * <h2>Why it is not written where it happens</h2>
+     *
+     * A slider is dragged, not clicked. Writing a line per changed value would
+     * put three hundred of them in the log for one movement of the mouse — the
+     * same reason the file itself is not saved there. So the first value a
+     * setting left is kept, the last one it arrived at is read when the line is
+     * written, and a drag becomes one move rather than three hundred.
+     */
+    private static final java.util.LinkedHashMap<String, String[]> movedFrom =
+            new java.util.LinkedHashMap<String, String[]>();
+
+    private static void noteChange(String key, String was, String now) {
+        String[] move = movedFrom.get(key);
+        if (move == null) {
+            movedFrom.put(key, new String[]{was, now});
+        } else {
+            // The first value it left and the last it arrived at. A slider
+            // dragged from 0 to 60 reads as one move and not as sixty.
+            move[1] = now;
+        }
+    }
+
+    /** Writes the one line, if anything moved. Cheap when nothing did. */
+    private static void logChanges() {
+        if (movedFrom.isEmpty()) {
+            return;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (java.util.Map.Entry<String, String[]> entry : movedFrom.entrySet()) {
+            String was = entry.getValue()[0];
+            String now = entry.getValue()[1];
+            // A slider dragged out and back again ends where it started. There
+            // is nothing to report and "40 -> 40" reads as a bug in this line.
+            if (was.equals(now)) {
+                continue;
+            }
+            if (sb.length() > 0) {
+                sb.append(", ");
+            }
+            sb.append(entry.getKey()).append(' ').append(was).append(" -> ").append(now);
+        }
+        movedFrom.clear();
+        if (sb.length() == 0) {
+            return;
+        }
+        net.vulkanmod112.VulkanMod112.LOGGER.info("Settings changed: {}", sb);
+        // A setting that just moved is exactly when it is worth saying whether
+        // it can do anything, and this is the moment the new value is known.
+        SettingsHealth.check();
     }
 
     /**
@@ -1944,6 +2054,9 @@ public final class VulkanConfig {
 
     /** Writes the file if anything has changed. Cheap when nothing has. */
     public static void flush() {
+        // Before the early return: this is called every client tick, and what
+        // moved should be written down whether or not the file needs saving.
+        logChanges();
         if (!saveWanted) {
             return;
         }

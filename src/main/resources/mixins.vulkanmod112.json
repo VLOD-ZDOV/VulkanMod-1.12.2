@@ -5,6 +5,7 @@
   "target": "@env(DEFAULT)",
   "minVersion": "0.8.5",
   "compatibilityLevel": "JAVA_8",
+  "injectors": { "defaultRequire": 1 },
   "mixins": [],
   "server": [],
   "client": [

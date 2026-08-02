@@ -62,6 +62,26 @@ public class VulkanMod112 {
             VulkanBridge vulkan = VulkanLoader.bridge();
             vulkan.init();
             LOGGER.info("Vulkan renderer foundation active on: {}", vulkan.gpuSummary());
+            // Immediately after it, because that line above has now been read
+            // twice as "Vulkan is drawing the world". It is not: it says a
+            // Vulkan device came up. Whether the world goes through it is a
+            // separate switch, and every effect in this mod is on the far side
+            // of it — so the two facts belong next to each other, in the log a
+            // report arrives with, and not only in a diagnostics file.
+            //
+            // Only what is settled at this point is claimed. Whether another
+            // mod is drawing the world is decided at the first frame and not
+            // here, so this says what the setting says and leaves the rest to
+            // SettingsHealth, which watches it for the whole session.
+            if (net.vulkanmod112.client.VulkanConfig.isTerrainEnabled()) {
+                LOGGER.info("Vulkan terrain rendering is on in the settings — "
+                        + "this mod's effects can act once the world is drawn");
+            } else {
+                LOGGER.info("Vulkan terrain rendering is OFF in the settings, so the world will "
+                        + "be drawn by OpenGL as usual. Every effect in this mod lives inside "
+                        + "the Vulkan renderer and will do nothing until it is switched on "
+                        + "(Options -> Video Settings -> VulkanMod112 Settings, or F6)");
+            }
             net.minecraftforge.common.MinecraftForge.EVENT_BUS.register(
                     new net.vulkanmod112.client.VulkanDemoOverlay(vulkan));
             // The geometry mirror hooks VertexBuffer uploads, which only exist with VBOs on
