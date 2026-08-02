@@ -616,7 +616,7 @@ const float REFLECT_REACH = 34.0;
  * it. A ray that found the far bank reflects it fully; a ray that found
  * nothing gets this much and the water keeps being water.
  */
-const float FLAT_SKY_LIMIT = 0.42;
+const float FLAT_SKY_LIMIT = 0.30;
 
 // How far behind a surface a ray may be and still be counted as having hit it,
 // in blocks. Without this the reflection finds things standing in front of the
@@ -1035,7 +1035,16 @@ void main() {
                 // there is one pixel of answer being asked to cover a hundred.
                 // A ray that leaves steeply has room underneath it and comes
                 // back with a picture. Believed in proportion to which it is.
-                float rise = clamp(dot(ray, mirrorNormal) * 4.0, 0.0, 1.0);
+                // Loosened from a quarter of a right angle to nearer a half.
+                // The steepness test was set when the ray reached eighteen
+                // blocks and nothing averaged frames: a shallow ray had one
+                // pixel of answer to spread over a hundred, so it was faded
+                // out — and with it went every reflection at any distance,
+                // because distance *is* a shallow angle. The reach is now
+                // thirty-four blocks and successive frames are averaged, so a
+                // shallow ray has both more to find and less to lose by
+                // finding it roughly.
+                float rise = clamp(dot(ray, mirrorNormal) * 2.2, 0.0, 1.0);
                 vec4 found = outward > 0.0 && rise > 0.0
                         ? traceReflection(vRelative, ray) : vec4(0.0);
                 found.a *= rise;
