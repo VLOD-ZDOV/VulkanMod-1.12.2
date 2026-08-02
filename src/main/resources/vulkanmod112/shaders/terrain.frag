@@ -342,7 +342,10 @@ float sunShadow(vec3 normal) {
  */
 float lightBlocked(vec3 normal, vec3 toSource, float distance) {
 #ifdef RAY_QUERY
-    vec3 direction = toSource / distance;
+    // Guarded the way the directional term beside it already is: a source that
+    // lands exactly on the fragment divides by nothing, and one NaN in a
+    // direction poisons everything computed from it.
+    vec3 direction = toSource / max(distance, 0.0001);
     float facing = dot(normal, direction);
     // Somewhere on the flame, not at its centre.
     //
@@ -988,7 +991,19 @@ void main() {
                 // fewer pixels the further off it is, and without this a lake
                 // shears at the horizon while a puddle at your feet barely
                 // moves.
-                vec2 tilt = (mirrorNormal.xz - normal.xz)
+                // The wave's own tilt, and nothing else. By this point `normal`
+                // is already the wavy one and its horizontal part *is* the
+                // tilt, because the face it stands on points straight up.
+                //
+                // This read `mirrorNormal - normal` first, and that was
+                // backwards. `mirrorNormal` is the deliberately calmed normal
+                // the reflection uses, and how far it is calmed depends on how
+                // squarely you are facing the water — so the difference went to
+                // zero looking straight down, which is exactly where ripples
+                // are plainest, and grew towards grazing, where the bed is
+                // barely visible at all. Refraction was strongest where it
+                // could not be seen and absent where it could.
+                vec2 tilt = normal.xz
                             * frame.lightShadow.w * REFRACT_REACH / max(1.0, clip.w);
                 vec2 shifted = clamp(uv + tilt, vec2(0.0), vec2(1.0));
                 // Only if what is there is really behind the water. A sample in
