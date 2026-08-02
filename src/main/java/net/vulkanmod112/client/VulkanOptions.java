@@ -1713,8 +1713,16 @@ final class VulkanOptions {
                                         VulkanConfig.setShowOcclusion(value);
                                     }
                                 }),
-                        new VSwitchOption("Vulkan Entities",
-                                "Draw creatures through Vulkan instead of letting the game draw "
+                        new VSwitchOption("Vulkan Entities (broken)",
+                                "KNOWN BROKEN, and left here only so the work can be continued: "
+                                        + "creatures come out see-through, water covers them even "
+                                        + "when they are above it, and nothing flashes red when "
+                                        + "hurt. The cause is not any of those separately — the "
+                                        + "pass they are drawn in is the one built for particles, "
+                                        + "which writes no depth because the water shader reads "
+                                        + "that same image. Until creatures have a pass with a "
+                                        + "depth buffer of their own this cannot be made right. "
+                                        + "Draw creatures through Vulkan instead of letting the game draw "
                                         + "them. Experimental, and the first thing here that "
                                         + "replaces vanilla's own drawing rather than adding to "
                                         + "it — a mod that builds its models some other way is "
