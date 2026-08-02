@@ -5677,11 +5677,20 @@ final class VkTerrainRenderer {
                 "vkCreateGraphicsPipelines(sprite)");
         spritePipeline = pPipeline.get(0);
 
-        // A creature is not a particle. Depth is written so the near side of a
-        // model hides its far side, and blending is off so an opaque skin is
-        // opaque — the cutoff in the fragment shader still discards where the
-        // texture is transparent, which is what a cutout wants.
-        depthState.depthWriteEnable(true);
+        // A creature is not a particle: an opaque skin has to be opaque, and the
+        // cutoff already in the fragment shader still discards where the texture
+        // is transparent, which is what a cutout wants.
+        //
+        // Depth is NOT written, and asking for it here would have been a
+        // specification violation rather than a setting. This subpass declares
+        // its depth attachment DEPTH_STENCIL_READ_ONLY_OPTIMAL (see the
+        // translucent render pass), because the water shader samples that same
+        // image for its reflections — an image cannot be both written as an
+        // attachment and read as a texture in one pass. So no pipeline in here
+        // may write depth, and the near side of a model cannot hide its far
+        // side until creatures are drawn somewhere with a depth buffer of their
+        // own. Turning the flag on would have written nothing and reported an
+        // error; leaving it off is the honest half of the fix.
         blendAttachment.get(0).blendEnable(false);
         check(vkCreateGraphicsPipelines(device(), pipelineCacheHandle, pipelineInfo, null, pPipeline),
                 "vkCreateGraphicsPipelines(sprite opaque)");
