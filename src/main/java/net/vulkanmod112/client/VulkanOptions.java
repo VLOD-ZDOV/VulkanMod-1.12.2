@@ -1713,6 +1713,62 @@ final class VulkanOptions {
                                         VulkanConfig.setShowOcclusion(value);
                                     }
                                 }),
+                        new VSwitchOption("Round Sun",
+                                "Draw the sun as a round, warm disc instead of vanilla's square "
+                                        + "one. The picture is built by this mod rather than "
+                                        + "shipped as a file, which is what makes its size and "
+                                        + "warmth sliders. Nothing else about the sky changes — "
+                                        + "the quad, where it is, how it blends and the moon are "
+                                        + "all still the game's, and a mod that draws its own sky "
+                                        + "never reaches this at all.",
+                                Cost.FREE, null,
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return VulkanConfig.isRoundSun();
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        VulkanConfig.setRoundSun(value);
+                                    }
+                                }),
+                        new VRangeOption("Sun Size",
+                                "How large the disc is drawn. The quad the game gives the sun "
+                                        + "cannot be resized from here, but how much of it the "
+                                        + "disc fills can, which comes to the same thing. The "
+                                        + "middle of the range is close to where vanilla put it.",
+                                Cost.FREE, "Needs Round Sun.",
+                                0, 100, 5, "%", null,
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getSunSize();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setSunSize(value);
+                                    }
+                                }),
+                        new VRangeOption("Sun Warmth",
+                                "How far towards orange the rim of the sun goes. 0 leaves it "
+                                        + "white. The centre stays bright either way: a sun that "
+                                        + "is one flat colour looks painted on, and the game's "
+                                        + "own is not flat either.",
+                                Cost.FREE, "Needs Round Sun.",
+                                0, 100, 5, "%", "White",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getSunWarmth();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setSunWarmth(value);
+                                    }
+                                }),
                         new VSwitchOption("Vulkan Entities (broken)",
                                 "KNOWN BROKEN, and left here only so the work can be continued: "
                                         + "creatures come out see-through, water covers them even "

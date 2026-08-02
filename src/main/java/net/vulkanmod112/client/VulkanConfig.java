@@ -359,6 +359,12 @@ public final class VulkanConfig {
      * replaces vanilla's drawing rather than adding to it.
      */
     static final boolean DEF_VULKAN_ENTITIES = false;
+    /** A round, warm sun instead of vanilla's square one. */
+    static final boolean DEF_ROUND_SUN = false;
+    /** How much of its square the disc fills, as a percentage of the range. */
+    static final int DEF_SUN_SIZE = 50;
+    /** How warm the rim goes, 0 = white. */
+    static final int DEF_SUN_WARMTH = 60;
     /**
      * Let the render-distance slider go past 64, up to 128.
      *
@@ -532,6 +538,9 @@ public final class VulkanConfig {
     private static int temporalAccumulation = DEF_TEMPORAL_ACCUMULATION;
     private static boolean showAccumulation = DEF_SHOW_ACCUMULATION;
     private static boolean vulkanEntities = DEF_VULKAN_ENTITIES;
+    private static boolean roundSun = DEF_ROUND_SUN;
+    private static int sunSize = DEF_SUN_SIZE;
+    private static int sunWarmth = DEF_SUN_WARMTH;
     private static int lightSoftness = DEF_LIGHT_SOFTNESS;
     private static boolean frameGraph = DEF_FRAME_GRAPH;
     private static int frameGraphInterval = DEF_FRAME_GRAPH_INTERVAL;
@@ -790,6 +799,19 @@ public final class VulkanConfig {
                         + "differently each frame and averaged here, which is a soft edge. Costs "
                         + "one fullscreen pass and does nothing at all unless something is being "
                         + "traced.");
+        roundSun = config.getBoolean("roundSun", CATEGORY_GENERAL, DEF_ROUND_SUN,
+                "Draw the sun as a round, warm disc instead of vanilla's square. The picture is "
+                        + "built here rather than shipped, which is what makes its size and its "
+                        + "warmth sliders instead of a file. Nothing else about the sky changes: "
+                        + "the quad, its place, its blend and the moon are all still the game's.");
+        sunSize = config.getInt("sunSize", CATEGORY_GENERAL, DEF_SUN_SIZE, 0, 100,
+                "How large the disc is drawn. The quad the game gives the sun cannot be resized "
+                        + "from here, but how much of it the disc fills can, which comes to the "
+                        + "same thing. The middle of the range is close to where vanilla put it.");
+        sunWarmth = config.getInt("sunWarmth", CATEGORY_GENERAL, DEF_SUN_WARMTH, 0, 100,
+                "How far towards orange the rim of the sun goes. 0 leaves it white. The centre "
+                        + "stays bright either way — a sun that is one flat colour looks painted "
+                        + "on, and the game's own is not flat either.");
         vulkanEntities = config.getBoolean("vulkanEntities", CATEGORY_ADVANCED,
                 DEF_VULKAN_ENTITIES,
                 "Draw creatures through Vulkan instead of letting the game draw them. "
@@ -1068,6 +1090,9 @@ public final class VulkanConfig {
         setTemporalAccumulation(DEF_TEMPORAL_ACCUMULATION);
         setShowAccumulation(DEF_SHOW_ACCUMULATION);
         setVulkanEntities(DEF_VULKAN_ENTITIES);
+        setRoundSun(DEF_ROUND_SUN);
+        setSunSize(DEF_SUN_SIZE);
+        setSunWarmth(DEF_SUN_WARMTH);
         setExtremeRenderDistance(DEF_EXTREME_RENDER_DISTANCE);
         setDirectionalLight(DEF_DIRECTIONAL_LIGHT);
         setHeightFog(DEF_HEIGHT_FOG);
@@ -1263,6 +1288,33 @@ public final class VulkanConfig {
         temporalAccumulation = value < 0 ? 0 : (value > 100 ? 100 : value);
         store(CATEGORY_GENERAL, "temporalAccumulation", temporalAccumulation);
         applySystemProperties();
+    }
+
+    public static boolean isRoundSun() {
+        return roundSun;
+    }
+
+    public static void setRoundSun(boolean value) {
+        roundSun = value;
+        store(CATEGORY_GENERAL, "roundSun", value);
+    }
+
+    public static int getSunSize() {
+        return sunSize;
+    }
+
+    public static void setSunSize(int value) {
+        sunSize = value < 0 ? 0 : (value > 100 ? 100 : value);
+        store(CATEGORY_GENERAL, "sunSize", sunSize);
+    }
+
+    public static int getSunWarmth() {
+        return sunWarmth;
+    }
+
+    public static void setSunWarmth(int value) {
+        sunWarmth = value < 0 ? 0 : (value > 100 ? 100 : value);
+        store(CATEGORY_GENERAL, "sunWarmth", sunWarmth);
     }
 
     public static boolean isVulkanEntities() {

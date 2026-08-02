@@ -197,6 +197,9 @@ final class VkRayTracing {
         try {
             ensureResources();
             waitForPreviousBuild();
+            // Safe here and nowhere earlier: the submission that named these
+            // has just been waited on.
+            releaseRetiredScratch();
             releaseRetired(frameIndex);
             buildFrame(chunks, chunkCount, mirror, frameIndex, viewX, viewY, viewZ);
         } catch (Throwable t) {
@@ -644,12 +647,49 @@ final class VkRayTracing {
         out[2] = buffer[1];
     }
 
+    /**
+     * Scratch buffers replaced while a command buffer was still being recorded.
+     *
+     * This is what took the device down, three times, over two days. Builds are
+     * recorded one after another into one command buffer, and each names the
+     * scratch address it will write to. A later chunk in the same batch can be
+     * bigger than an earlier one — which is ordinary while chunks are flooding
+     * in — and growing the buffer used to free the old one on the spot. The
+     * commands already recorded went on naming it, and a build writes to
+     * scratch: a write to freed memory, which is exactly what the fault said.
+     *
+     * Intermittent for the same reason it was hard to see: it needs a bigger
+     * chunk to arrive later in a batch than an earlier one, so it happens while
+     * the world is filling in and never while standing still.
+     *
+     * The buffer is kept until the submission that names it has finished, which
+     * is the wait at the top of the next update. Nothing is freed early and
+     * nothing leaks.
+     */
+    private final java.util.List<long[]> retiredScratch = new java.util.ArrayList<long[]>();
+
+    private void releaseRetiredScratch() {
+        for (int i = 0; i < retiredScratch.size(); i++) {
+            long[] pair = retiredScratch.get(i);
+            vkDestroyBuffer(device(), pair[0], null);
+            vkFreeMemory(device(), pair[1], null);
+        }
+        retiredScratch.clear();
+    }
+
     private void ensureScratch(long size) {
         long want = size + scratchAlignment;
         if (scratchBuffer != 0 && scratchCapacity >= want) {
             return;
         }
-        destroyScratch();
+        if (scratchBuffer != 0) {
+            // Not destroyed: commands already recorded in this batch write here.
+            retiredScratch.add(new long[]{scratchBuffer, scratchMemory});
+            scratchBuffer = 0;
+            scratchMemory = 0;
+            scratchCapacity = 0;
+            scratchAddress = 0;
+        }
         try (MemoryStack stack = stackPush()) {
             long[] buffer = new long[2];
             createBuffer(stack, want,
@@ -940,6 +980,7 @@ final class VkRayTracing {
         retired.clear();
         live.clear();
         destroyTopLevel();
+        releaseRetiredScratch();
         destroyScratch();
         destroyInstances();
         vkDestroyFence(device(), fence, null);

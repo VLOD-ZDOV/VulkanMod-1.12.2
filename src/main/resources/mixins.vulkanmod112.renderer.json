@@ -32,6 +32,7 @@
     "ModelPartMixin",
     "ModelBaseMixin",
     "GlMatrixMixin",
+    "SkySunMixin",
     "RenderGlobalAccessor",
     "RenderChunkAccessor",
     "LightmapCoordMixin",
