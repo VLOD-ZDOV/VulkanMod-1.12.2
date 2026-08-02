@@ -32,6 +32,8 @@
     "ModelPartMixin",
     "ModelBaseMixin",
     "GlMatrixMixin",
+    "RenderGlobalAccessor",
+    "RenderChunkAccessor",
     "LightmapCoordMixin",
     "EntityPassMixin",
     "WeatherRenderMixin",

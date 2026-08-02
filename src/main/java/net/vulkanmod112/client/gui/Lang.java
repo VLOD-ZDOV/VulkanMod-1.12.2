@@ -122,6 +122,7 @@ public final class Lang {
             "key.categories.vulkanmod112", "VulkanMod112",
             "key.vulkanmod112.zoom", "Zoom",
             "key.vulkanmod112.settings", "VulkanMod112 Settings",
+            "key.vulkanmod112.probe", "VulkanMod112 Chunk Probe",
     };
 
     /** Chrome that belongs to no option. */

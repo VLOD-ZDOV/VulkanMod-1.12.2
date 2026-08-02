@@ -39,6 +39,12 @@ public class VulkanMod112 {
         net.vulkanmod112.client.SettingsKey.register();
         net.minecraftforge.common.MinecraftForge.EVENT_BUS.register(
                 new net.vulkanmod112.client.SettingsKey.Handler());
+        // Unbound by default: it answers one question, three complaints have
+        // been waiting on it for weeks, and it costs a keypress. Binding it to
+        // something would claim a third key for a tool most people never need.
+        net.vulkanmod112.client.ChunkProbe.register();
+        net.minecraftforge.common.MinecraftForge.EVENT_BUS.register(
+                new net.vulkanmod112.client.ChunkProbe.Handler());
         // Also independent of Vulkan: a frame-time graph is wanted most in the
         // case where the renderer did not come up.
         net.minecraftforge.common.MinecraftForge.EVENT_BUS.register(

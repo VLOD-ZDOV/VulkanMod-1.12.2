@@ -1534,6 +1534,11 @@ final class VkTerrainRenderer {
     private long worstGapFence;
     private long worstGapRecord;
     private long worstGapSubmit;
+    /** How long the render thread waits for the mirror's monitor. */
+    private long mirrorLookupNanos;
+    private long mirrorLookups;
+    private long worstMirrorLookupNanos;
+
     /** Frames the background cap held back; they are sleeps, not stalls. */
     private boolean frameThrottled;
     private long throttledFrames;
@@ -1618,6 +1623,16 @@ final class VkTerrainRenderer {
         long ours = worstGapFence + worstGapRecord + worstGapSubmit;
         sb.append(String.format("    of that worst frame, %.0f%% was this renderer\n",
                 100.0 * ours / Math.max(1, worstGapNanos)));
+        sb.append(String.format(
+                "    mirror lookup %.3f ms average over %d layer draws, worst %.1f ms%s\n",
+                mirrorLookupNanos / Math.max(1.0, mirrorLookups) / 1e6, mirrorLookups,
+                worstMirrorLookupNanos / 1e6,
+                worstMirrorLookupNanos > 5_000_000L
+                        ? " — this is the stall, and it is the monitor a building thread holds"
+                        : ""));
+        mirrorLookupNanos = 0;
+        mirrorLookups = 0;
+        worstMirrorLookupNanos = 0;
         if (throttledFrames > 0) {
             sb.append("    ").append(throttledFrames)
                     .append(" further frames held back by the background cap, not counted here\n");
@@ -2055,7 +2070,26 @@ final class VkTerrainRenderer {
                 lookupScratch = new VkChunkMirror.Entry[Integer.highestOneBit(chunkCount) * 2];
             }
             // One monitor acquisition for the whole layer, not one per chunk.
+            // Timed on its own, because the frame that cost forty-three
+            // milliseconds spent thirty-eight of them somewhere inside this
+            // method and there are only two candidates. This one takes the
+            // mirror's monitor for the whole layer, and a chunk-building thread
+            // can be holding it while it uploads. The other candidate — growing
+            // the index buffer or the draw batch, both of which stop the device
+            // — happens before the clock that measured those thirty-eight
+            // milliseconds even starts, so it is already ruled out.
+            //
+            // One of these two numbers will grow. Putting the counter in before
+            // the fix rather than after is the rule this project keeps
+            // relearning.
+            long lookupStart = System.nanoTime();
             mirror.findAll(chunks, chunkCount, lookupScratch);
+            long lookupNanos = System.nanoTime() - lookupStart;
+            mirrorLookupNanos += lookupNanos;
+            mirrorLookups++;
+            if (lookupNanos > worstMirrorLookupNanos) {
+                worstMirrorLookupNanos = lookupNanos;
+            }
             for (int c = 0; c < chunkCount; c++) {
                 VkChunkMirror.Entry entry = lookupScratch[c];
                 if (entry == null || entry.size < BLOCK_VERTEX_STRIDE
