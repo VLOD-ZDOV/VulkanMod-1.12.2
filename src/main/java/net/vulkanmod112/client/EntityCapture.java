@@ -71,6 +71,32 @@ public final class EntityCapture {
     private static final float[] LOCAL = new float[16];
     private static final float[] COMPOSED = new float[16];
 
+    /**
+     * Which skins the scene needs, and what copying them all would cost.
+     *
+     * This is the number the whole entity plan turns on. Terrain has one atlas;
+     * creatures have a picture each, plus one per armour piece and one per held
+     * item, and they are the game's own textures living in OpenGL. Every one
+     * has to be copied into Vulkan before anything can be drawn with it, and
+     * "how many, and how big" decides whether that is a cache with eviction or
+     * simply a list.
+     *
+     * Guessing was possible and useless: a lone player in a field and a mob
+     * farm are different questions, and only a real world answers either.
+     *
+     * Looked up once per creature rather than once per bone — the skin does not
+     * change between the parts of one model, so comparing against the last one
+     * seen skips the map for all but the first bone of each.
+     */
+    private static final java.util.HashMap<Integer, int[]> TEXTURE_SIZES =
+            new java.util.HashMap<Integer, int[]>();
+    private static int lastTextureSeen = -1;
+    private static long texturePixels;
+    private static int frameTextures;
+    private static int lastFrameTextures;
+    private static final java.util.HashSet<Integer> FRAME_TEXTURES =
+            new java.util.HashSet<Integer>();
+
     private static int frameParts;
     private static int frameQuads;
     private static long frameNanos;
@@ -135,6 +161,7 @@ public final class EntityCapture {
             if (frameParts > 0) {
                 lastParts = frameParts;
                 lastQuads = frameQuads;
+                lastFrameTextures = frameTextures;
             }
         } else {
             bareNanos += elapsed;
@@ -144,6 +171,9 @@ public final class EntityCapture {
         depth = 0;
         frameParts = 0;
         frameQuads = 0;
+        frameTextures = 0;
+        lastTextureSeen = -1;
+        FRAME_TEXTURES.clear();
     }
 
     private static boolean measuring;
@@ -228,10 +258,45 @@ public final class EntityCapture {
             if (shape.length != 0) {
                 frameParts++;
                 frameQuads += shape.length / (FLOATS_PER_VERTEX * 4);
+                noteTexture();
             }
         } catch (Throwable ignored) {
             // As above.
         }
+    }
+
+    /**
+     * Records which skin this part is about to be drawn with.
+     *
+     * Its size is asked of the driver exactly once per texture per session —
+     * a couple of hundred calls in a long session against a couple of hundred
+     * thousand parts, so the cost is nowhere near the hot path.
+     */
+    private static void noteTexture() {
+        int texture = GlTextureMirror.boundOnDefaultUnit();
+        if (texture <= 0 || texture == lastTextureSeen) {
+            return;
+        }
+        lastTextureSeen = texture;
+        if (FRAME_TEXTURES.add(texture)) {
+            frameTextures++;
+        }
+        if (TEXTURE_SIZES.containsKey(texture)) {
+            return;
+        }
+        int previous = GL11.glGetInteger(GL11.GL_TEXTURE_BINDING_2D);
+        GL11.glBindTexture(GL11.GL_TEXTURE_2D, texture);
+        int w = GL11.glGetTexLevelParameteri(GL11.GL_TEXTURE_2D, 0, GL11.GL_TEXTURE_WIDTH);
+        int h = GL11.glGetTexLevelParameteri(GL11.GL_TEXTURE_2D, 0, GL11.GL_TEXTURE_HEIGHT);
+        GL11.glBindTexture(GL11.GL_TEXTURE_2D, previous);
+        if (w <= 0 || h <= 0) {
+            // Not a two-dimensional texture we can copy; recorded as known so
+            // it is not asked about again.
+            TEXTURE_SIZES.put(texture, new int[]{0, 0});
+            return;
+        }
+        TEXTURE_SIZES.put(texture, new int[]{w, h});
+        texturePixels += (long) w * h;
     }
 
     /** Leaves the part's frame, so its siblings are placed beside it and not inside it. */
@@ -415,6 +480,15 @@ public final class EntityCapture {
                 + " is ours; " + matrixReads + " driver reads over " + partsSeen + " parts; "
                 + "placement checked " + checks + " times, " + disagreements + " disagreed, worst "
                 + String.format("%.4f", worstError) + " blocks; "
-                + shapesCached + " model shapes cached";
+                + shapesCached + " model shapes cached"
+                // What drawing these would cost before a single triangle: the
+                // skins have to be copied into Vulkan, and this says how many
+                // and how much. A frame's worth is what a cache has to hold at
+                // once; the session's total is what it has to hold if nothing
+                // is ever evicted.
+                + String.format("; skins %d distinct (%.1f MiB as RGBA), %d in the busiest frame; "
+                        + "geometry %.0f KiB a frame",
+                        TEXTURE_SIZES.size(), texturePixels * 4.0 / (1024.0 * 1024.0),
+                        lastFrameTextures, lastQuads * 4.0 * 28.0 / 1024.0);
     }
 }

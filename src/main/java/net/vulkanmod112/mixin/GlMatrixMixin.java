@@ -2,6 +2,7 @@ package net.vulkanmod112.mixin;
 
 import net.minecraft.client.renderer.GlStateManager;
 import net.vulkanmod112.client.GlMatrixMirror;
+import net.vulkanmod112.client.GlTextureMirror;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -23,6 +24,23 @@ import java.nio.FloatBuffer;
  */
 @Mixin(GlStateManager.class)
 public abstract class GlMatrixMixin {
+
+    /**
+     * Which picture is about to be stretched over the next model.
+     *
+     * Here rather than in a mixin of its own because it is the same class, the
+     * same shape of hook and the same reason: these are the busiest methods in
+     * the client, and the alternative is asking the driver.
+     */
+    @Inject(method = "setActiveTexture", at = @At("HEAD"))
+    private static void vulkanmod112$activeTexture(int texture, CallbackInfo ci) {
+        GlTextureMirror.setActiveTexture(texture);
+    }
+
+    @Inject(method = "bindTexture", at = @At("HEAD"))
+    private static void vulkanmod112$bindTexture(int texture, CallbackInfo ci) {
+        GlTextureMirror.bindTexture(texture);
+    }
 
     @Inject(method = "matrixMode", at = @At("HEAD"))
     private static void vulkanmod112$matrixMode(int mode, CallbackInfo ci) {
