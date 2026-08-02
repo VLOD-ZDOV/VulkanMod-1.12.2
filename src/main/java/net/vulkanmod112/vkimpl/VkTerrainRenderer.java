@@ -251,6 +251,23 @@ final class VkTerrainRenderer {
     private static final int MAX_SPRITE_VERTICES = 1 << 20;
 
     private long spritePipeline;
+    /**
+     * The same shaders with the state a solid model needs.
+     *
+     * Particles and weather are what the sprite pass was built for, and they
+     * want the opposite of what a creature wants: blended, writing no depth,
+     * both faces drawn. Handing a creature to that state gives exactly what was
+     * reported — a mob you can see through, its far side drawn over its near
+     * one, and skins that look half transparent. Nothing about the geometry or
+     * the shaders is wrong; it is the state around them.
+     *
+     * Face culling is deliberately still off. The winding of a model quad after
+     * our matrix is not yet established, and this renderer already draws with
+     * front faces clockwise because of the Y flip — turning culling on with the
+     * wrong sense would remove precisely the faces that are currently visible,
+     * which is a worse bug than drawing a few extra.
+     */
+    private long spriteOpaquePipeline;
     private long spritePipelineLayout;
     private long spriteSetLayout;
     private long spriteDescriptorPool;
@@ -2398,7 +2415,7 @@ final class VkTerrainRenderer {
     /** Records this frame's sprite batches into the translucent pass. */
     private void drawSprites(MemoryStack stack, VkCommandBuffer cmd) {
         int slot = activeFrameSlot;
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, spritePipeline);
+        long boundPipeline = 0;
         vkCmdBindVertexBuffers(cmd, 0, stack.longs(spriteVertexBuffers[slot]), stack.longs(0L));
         // The translucent set of this frame, for the light map and the frame
         // constants. Set 1 is the one that changes between batches.
@@ -2421,6 +2438,15 @@ final class VkTerrainRenderer {
             // fatal — so the check is on the image, not on the set.
             if (set == 0 || (sheet != 0 && spriteImages[sheet] == 0)) {
                 continue; // sheet never arrived, or went away; dropped, not drawn wrong
+            }
+            // Which state this batch wants is decided by which slot it is in:
+            // the game's own sheets are particles and weather, everything past
+            // them is a creature skin.
+            long wanted = sheet >= FIRST_SKIN_SLOT && spriteOpaquePipeline != 0
+                    ? spriteOpaquePipeline : spritePipeline;
+            if (wanted != boundPipeline) {
+                boundPipeline = wanted;
+                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, wanted);
             }
             push.putFloat(0, spriteCutoffs[b]);
             vkCmdPushConstants(cmd, spritePipelineLayout,
@@ -5651,6 +5677,16 @@ final class VkTerrainRenderer {
                 "vkCreateGraphicsPipelines(sprite)");
         spritePipeline = pPipeline.get(0);
 
+        // A creature is not a particle. Depth is written so the near side of a
+        // model hides its far side, and blending is off so an opaque skin is
+        // opaque — the cutoff in the fragment shader still discards where the
+        // texture is transparent, which is what a cutout wants.
+        depthState.depthWriteEnable(true);
+        blendAttachment.get(0).blendEnable(false);
+        check(vkCreateGraphicsPipelines(device(), pipelineCacheHandle, pipelineInfo, null, pPipeline),
+                "vkCreateGraphicsPipelines(sprite opaque)");
+        spriteOpaquePipeline = pPipeline.get(0);
+
         vkDestroyShaderModule(device(), vertModule, null);
         vkDestroyShaderModule(device(), fragModule, null);
     }
@@ -6987,6 +7023,10 @@ final class VkTerrainRenderer {
         if (spritePipeline != 0) {
             vkDestroyPipeline(device(), spritePipeline, null);
             spritePipeline = 0;
+        }
+        if (spriteOpaquePipeline != 0) {
+            vkDestroyPipeline(device(), spriteOpaquePipeline, null);
+            spriteOpaquePipeline = 0;
         }
         if (spritePipelineLayout != 0) {
             vkDestroyPipelineLayout(device(), spritePipelineLayout, null);
