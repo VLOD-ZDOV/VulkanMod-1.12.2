@@ -16,10 +16,30 @@ public final class BackgroundThrottle {
     private BackgroundThrottle() {
     }
 
+    /**
+     * Whether frames are being held back, told to the renderer.
+     *
+     * Without this the pacing report calls the cap a stall: at ten frames a
+     * second every frame is a hundred milliseconds, so the worst frame, the
+     * one percent low and the count of frames over three times the median all
+     * describe a sleep this code asked for. That is the same trap as the drop
+     * to five frames a second that cost a whole investigation once — a setting
+     * working exactly as told, read as a fault.
+     *
+     * Published on the change rather than every frame: a property write per
+     * frame to say nothing changed is a cost with no reader.
+     */
+    private static boolean published;
+
     /** Called at the end of every rendered frame. */
     public static void afterFrame() {
         int limit = VulkanConfig.getBackgroundFpsLimit();
-        if (limit <= 0 || Display.isActive()) {
+        boolean throttling = limit > 0 && !Display.isActive();
+        if (throttling != published) {
+            published = throttling;
+            System.setProperty("vulkanmod112.frameThrottled", Boolean.toString(throttling));
+        }
+        if (!throttling) {
             return;
         }
         // Display.sync sleeps with far better accuracy than Thread.sleep and is

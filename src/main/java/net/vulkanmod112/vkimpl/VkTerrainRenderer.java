@@ -1504,6 +1504,9 @@ final class VkTerrainRenderer {
     private long worstGapFence;
     private long worstGapRecord;
     private long worstGapSubmit;
+    /** Frames the background cap held back; they are sleeps, not stalls. */
+    private boolean frameThrottled;
+    private long throttledFrames;
 
     private void notePacing() {
         long end = System.nanoTime();
@@ -1513,6 +1516,14 @@ final class VkTerrainRenderer {
         previousFenceWaitNanos = fenceWaitNanos;
         previousRecordNanos = recordNanos;
         previousSubmitNanos = submitCompositeNanos;
+        if (frameThrottled) {
+            // The gap about to be measured contains a sleep this renderer asked
+            // for. Recording it would put the cap in every number here, and the
+            // clock still has to move on so the next frame is measured from now.
+            throttledFrames++;
+            lastFrameEndNanos = end;
+            return;
+        }
         if (lastFrameEndNanos != 0L) {
             long gap = end - lastFrameEndNanos;
             frameGaps[frameGapAt] = gap;
@@ -1538,7 +1549,11 @@ final class VkTerrainRenderer {
      */
     private void appendPacing(StringBuilder sb) {
         if (frameGapCount < 8) {
-            sb.append("  frame pacing: not enough frames yet\n");
+            sb.append("  frame pacing: not enough frames yet")
+                    .append(throttledFrames > 0
+                            ? " (" + throttledFrames + " held back by the background cap)" : "")
+                    .append('\n');
+            throttledFrames = 0;
             return;
         }
         long[] sorted = new long[frameGapCount];
@@ -1573,6 +1588,11 @@ final class VkTerrainRenderer {
         long ours = worstGapFence + worstGapRecord + worstGapSubmit;
         sb.append(String.format("    of that worst frame, %.0f%% was this renderer\n",
                 100.0 * ours / Math.max(1, worstGapNanos)));
+        if (throttledFrames > 0) {
+            sb.append("    ").append(throttledFrames)
+                    .append(" further frames held back by the background cap, not counted here\n");
+        }
+        throttledFrames = 0;
         frameGapCount = 0;
         frameGapAt = 0;
         worstGapNanos = 0;
@@ -1700,6 +1720,7 @@ final class VkTerrainRenderer {
         // queue's own. This is the other half of the frame: what the card
         // spends inside OpenGL doing our work, which nothing measured before.
         sb.append("  gl cost: composite ").append(glTimeText(compositeTimer))
+                .append(" [").append(compositeTimer.health()).append(']')
                 .append(" (includes waiting for Vulkan), depth back to Vulkan ")
                 .append(depthBlit ? "by hardware copy, untimed" : glTimeText(depthImportTimer))
                 .append('\n');
@@ -4926,6 +4947,7 @@ final class VkTerrainRenderer {
         motionOverWorld = "true".equals(System.getProperty("vulkanmod112.motionOverWorld"));
         showReflections = "true".equals(System.getProperty("vulkanmod112.showReflections"));
         showAccumulation = "true".equals(System.getProperty("vulkanmod112.showAccumulation"));
+        frameThrottled = "true".equals(System.getProperty("vulkanmod112.frameThrottled"));
         // The setting names how much of the history a still pixel keeps, and
         // the top of the slider is not 1.0: a pixel that keeps all of its
         // history never takes anything new, so the world would stop updating.
@@ -6364,12 +6386,41 @@ final class VkTerrainRenderer {
         return ms < 0.0 ? "n/a" : String.format("%.2f ms", ms);
     }
 
+    /**
+     * How long a piece of OpenGL work took on the card.
+     *
+     * <h2>Why there are eight query objects and not two</h2>
+     *
+     * The first version had two and looked at last frame's result at the start
+     * of this one. It never once succeeded: the card runs a frame or three
+     * behind the processor, so one frame later the answer is not ready, and
+     * beginning a query on an object whose result was never collected throws
+     * that result away. Every frame threw away the previous frame's answer and
+     * the printed time stayed at whatever was collected before the world
+     * finished loading — for fifty-seven snapshots running, a number that was
+     * being read as a measurement.
+     *
+     * With a ring, nothing is ever begun on a slot that still owes an answer.
+     * A slot is used only when it is free, results are collected whenever the
+     * card has them, and if every slot is busy the frame simply is not timed —
+     * which is honest, and which the counters beside the time say out loud.
+     */
     private static final class GlTimer {
-        private final int[] query = new int[2];
-        private final boolean[] pending = new boolean[2];
-        private int slot;
+        private static final int SLOTS = 8;
+        private final int[] query = new int[SLOTS];
+        private final boolean[] pending = new boolean[SLOTS];
+        private int active = -1;
         private boolean unavailable;
         private long nanos;
+        /**
+         * Reads taken, and frames that could not be timed, since last asked.
+         *
+         * A timer that stops reading keeps printing its last answer, and a
+         * number that never changes looks exactly like a measurement. The count
+         * beside the time is what makes the difference visible.
+         */
+        private long reads;
+        private long skipped;
 
         void begin() {
             if (unavailable) {
@@ -6380,25 +6431,46 @@ final class VkTerrainRenderer {
                     unavailable = true;
                     return;
                 }
-                query[0] = GL15C.glGenQueries();
-                query[1] = GL15C.glGenQueries();
+                for (int i = 0; i < SLOTS; i++) {
+                    query[i] = GL15C.glGenQueries();
+                }
             }
-            slot ^= 1;
-            int other = slot ^ 1;
-            if (pending[other]
-                    && GL15C.glGetQueryObjecti(query[other], GL15C.GL_QUERY_RESULT_AVAILABLE) != 0) {
-                nanos = GL33C.glGetQueryObjecti64(query[other], GL15C.GL_QUERY_RESULT);
-                pending[other] = false;
+            collect();
+            active = -1;
+            for (int i = 0; i < SLOTS; i++) {
+                if (!pending[i]) {
+                    active = i;
+                    break;
+                }
             }
-            GL15C.glBeginQuery(GL33C.GL_TIME_ELAPSED, query[slot]);
+            if (active < 0) {
+                // Every slot still owes an answer. Timing this frame would mean
+                // discarding one of them, which is how the old version came to
+                // print the same number for ten minutes.
+                skipped++;
+                return;
+            }
+            GL15C.glBeginQuery(GL33C.GL_TIME_ELAPSED, query[active]);
         }
 
         void end() {
-            if (unavailable || query[0] == 0) {
+            if (unavailable || active < 0) {
                 return;
             }
             GL15C.glEndQuery(GL33C.GL_TIME_ELAPSED);
-            pending[slot] = true;
+            pending[active] = true;
+            active = -1;
+        }
+
+        private void collect() {
+            for (int i = 0; i < SLOTS; i++) {
+                if (pending[i]
+                        && GL15C.glGetQueryObjecti(query[i], GL15C.GL_QUERY_RESULT_AVAILABLE) != 0) {
+                    nanos = GL33C.glGetQueryObjecti64(query[i], GL15C.GL_QUERY_RESULT);
+                    pending[i] = false;
+                    reads++;
+                }
+            }
         }
 
         /** Milliseconds, or -1 when the driver will not count for us. */
@@ -6406,15 +6478,25 @@ final class VkTerrainRenderer {
             return unavailable ? -1.0 : nanos / 1_000_000.0;
         }
 
+        /** Reads taken and frames left untimed, since the last time this was asked. */
+        String health() {
+            long r = reads;
+            long s = skipped;
+            reads = 0;
+            skipped = 0;
+            return (r == 0 ? "STALE, no result collected" : r + " reads")
+                    + (s > 0 ? ", " + s + " frames untimed (all slots busy)" : "");
+        }
+
         void destroy() {
             if (query[0] != 0) {
-                GL15C.glDeleteQueries(query[0]);
-                GL15C.glDeleteQueries(query[1]);
-                query[0] = 0;
-                query[1] = 0;
+                for (int i = 0; i < SLOTS; i++) {
+                    GL15C.glDeleteQueries(query[i]);
+                    query[i] = 0;
+                    pending[i] = false;
+                }
             }
-            pending[0] = false;
-            pending[1] = false;
+            active = -1;
         }
     }
 
