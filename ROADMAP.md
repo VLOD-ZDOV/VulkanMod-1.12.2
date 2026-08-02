@@ -8,6 +8,30 @@ rather than crashing.
 
 ## Done
 
+### 0.8.0
+
+- **Ray-traced shadows** from the sun, from a torch in your hand, from a creature that is on fire
+  and from the torches already on the walls — with **frame averaging**, which is what turns one
+  ray per pixel from grain into a soft edge. Needs a card that can trace from a shader; where
+  there is none the settings do nothing and the log says why.
+- **Particles, rain and snow drawn in Vulkan**, riding the pass the water already uses so they
+  cost nothing beyond the drawing.
+- **Water refraction** — the bed moving under the surface rather than sitting still behind it.
+- **A round sun and moon**, built at runtime rather than shipped, which is what makes their size
+  and warmth sliders. The moon keeps its phases.
+- **Named setting profiles**, and **F6** to open the settings from the world.
+- **The Vulkan device is chosen to match OpenGL** rather than by which one is faster, because the
+  faster one is no use if the other half of the frame is on the other card.
+- **The atlas upload no longer stops the frame** twenty times a second while anything is animated.
+- **The log can show a stutter**: the median frame, the worst in twenty, the worst in a hundred,
+  and where the worst one's time went — an average cannot show a frame that takes forty
+  milliseconds once a second, which is the only thing anyone calls a lag.
+- **A chunk probe** on a key of its own, which asks the game why the chunk you are looking at is
+  not drawn.
+- Fixed: the card could be lost outright while ray tracing was on; the world could stop drawing
+  after a resource reload; four violations of the Vulkan specification that every driver had been
+  quietly forgiving.
+
 ### 0.7.0
 
 - **Effects built from the settings screen**, all off by default: water waves, foliage sway,

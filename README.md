@@ -1,4 +1,4 @@
-# VulkanMod112 0.7.0
+# VulkanMod112 0.8.0
 
 Experimental Vulkan terrain renderer for Minecraft Forge 1.12.2. Minecraft still owns the window and OpenGL context; VulkanMod112 mirrors vanilla chunk VBOs to Vulkan, renders opaque terrain there, then composites colour and depth back into the game's framebuffer through GPU external-memory interop.
 
@@ -9,7 +9,10 @@ Experimental Vulkan terrain renderer for Minecraft Forge 1.12.2. Minecraft still
 - Vulkan rendering for the `SOLID`, `CUTOUT_MIPPED`, `CUTOUT` and `TRANSLUCENT` terrain layers.
 - Optional dynamic lights, computed while shading rather than rebuilt into the world.
 - Optional dropping of the vanilla chunk buffers once Vulkan holds the geometry, so the world is stored once in video memory instead of twice.
-- Vanilla OpenGL remains responsible for entities, tile entities, particles, sky and GUI.
+- Particles, rain and snow drawn in Vulkan, riding the translucent pass rather than opening one of their own.
+- Optional ray-traced shadows from the sun, from carried lights, from burning creatures and from the light-emitting blocks already in the world, with frame averaging to turn one ray per pixel into a soft edge. Needs `VK_KHR_acceleration_structure` and `VK_KHR_ray_query`; without them the settings do nothing and say so.
+- Optional water refraction, and a round sun and moon drawn at runtime rather than shipped as files.
+- Vanilla OpenGL remains responsible for entities, tile entities, the sky and the GUI.
 - If Vulkan, required driver extensions, or terrain rendering fail, the game falls back to vanilla OpenGL rather than crashing.
 - Video Settings includes a **VulkanMod112 Settings...** page with presets, a geometry budget, per-setting CPU/GPU/VRAM costs and a render-distance slider up to 64 chunks, or 128 with Extreme Render Distance turned on.
 - Hold-to-zoom on **C** (rebindable under Controls), with mouse sensitivity scaled to match.
@@ -18,9 +21,9 @@ This is not yet a complete replacement for the modern VulkanMod renderer.
 
 ## Current limits
 
-- The world's geometry exists twice by default: once in the game's own OpenGL buffers and once in the Vulkan mirror. On a card with little memory to spare that is what caps the usable render distance, and it depends on how much geometry is actually in view rather than on the distance setting alone. **Drop Vanilla Chunk Buffers** removes the duplicate; it is off by default because every transition into or out of it rebuilds the world. The settings header shows the memory the GPU reports, and the diagnostics log shows what the mirror is using.
+- The world's geometry exists twice by default: once in the game's own OpenGL buffers and once in the Vulkan mirror. On a card with little memory to spare that is what caps the usable render distance, and it depends on how much geometry is actually in view rather than on the distance setting alone. **Drop Vanilla Chunk Buffers** removes the duplicate and is on by default; switching it either way rebuilds the world. The settings header shows the memory the GPU reports, and the diagnostics log shows what the mirror is using.
 - Chunk building and uploading dominate the frame while the camera moves at high render distances. Every chunk is still uploaded twice — once by the game to OpenGL, once here to Vulkan — but this mod's copy now happens on the thread that built the chunk rather than on the thread that draws, so it no longer competes for the per-frame upload budget the game runs on the render thread.
-- Entities, particles, the sky and the GUI are still drawn by vanilla OpenGL.
+- Entities, the sky and the GUI are still drawn by vanilla OpenGL, so no effect here reaches them: a burning creature does not glow, casts nothing into the corner it stands in, and appears in no reflection. Drawing entities in Vulkan is started and switched off — the pass they would go in cannot write depth, and the switch says so.
 - The item model held in first person is not lit by dynamic lights, only what it lights is.
 
 ## Requirements
@@ -53,6 +56,9 @@ Useful JVM properties:
 - `-Dvulkanmod112.allowIncompatibleRenderer=true` — test with OptiFine/shader-mod renderer replacements; unsupported and off by default.
 - `-Dvulkanmod112.geometryBudget=MiB` — geometry budget; 0 derives it from the GPU. Also in the settings screen.
 - `-Dvulkanmod112.framesInFlight=1..3` — how far the CPU may run ahead of the GPU. Also in the settings screen.
+- `-Dvulkanmod112.rayTracing=true` — build acceleration structures over the terrain without opening the menu.
+- `-Dvulkanmod112.noAtlasAnimations=true` — stop uploading animated block textures, to tell that path apart from another when something goes wrong.
+- `-Dvulkanmod112.slowChunkMs=N` — how long a chunk build has to take before it is named in the log. 100 by default.
 
 ## In-game settings
 
