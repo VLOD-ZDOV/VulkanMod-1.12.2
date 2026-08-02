@@ -56,6 +56,31 @@ public final class EntityCapture {
     private static final int MAX_DEPTH = 16;
     /** One part in this many is checked against the driver. */
     private static final int CHECK_EVERY = 64;
+    /**
+     * How many checks are worth doing before the answer is in.
+     *
+     * The check reads the driver's matrix, and reading the driver is a sync
+     * point: the processor waits for the graphics queue to reach it. Early in a
+     * session that costs two or three microseconds. In a loaded scene it was
+     * measured at around fifty — and at ten checks a frame that is half a
+     * millisecond, which is more than the whole vanilla entity pass costs and
+     * far more than the thing being verified.
+     *
+     * The measurement said so plainly and it took a session's log to see it:
+     * the reported cost of the capture rose steadily — 0.28, 0.35, 0.43, 0.55
+     * milliseconds — while the number of parts per frame *fell*. Work that grows
+     * as the scene grows heavier, without the work itself growing, is a wait,
+     * not a cost.
+     *
+     * So the check stops once it has proved the point. Two hundred and eighty
+     * thousand comparisons with not one disagreement is not a hypothesis any
+     * more. -Dvulkanmod112.checkEntityPoseForever=true brings it back for when
+     * the composition is changed again, which is the only time it is in doubt.
+     */
+    private static final int CHECK_BUDGET =
+            Integer.getInteger("vulkanmod112.entityPoseChecks", 20_000);
+    private static final boolean CHECK_FOREVER =
+            "true".equals(System.getProperty("vulkanmod112.checkEntityPoseForever"));
     /** Beyond this the two disagree about where the part is, in blocks. */
     private static final float AGREEMENT = 0.002f;
 
@@ -107,6 +132,7 @@ public final class EntityCapture {
     private static long partsSeen;
     private static long matrixReads;
     private static long checks;
+    private static boolean checking = true;
     private static long disagreements;
     private static float worstError;
 
@@ -241,8 +267,11 @@ public final class EntityCapture {
             // one expression, and the short circuit meant the count only ever
             // saw the bones that were not roots — which is one in a hundred.
             partsSeen++;
-            if (partsSeen % CHECK_EVERY == 0) {
+            if (checking && partsSeen % CHECK_EVERY == 0) {
                 verify(parent);
+                if (!CHECK_FOREVER && checks >= CHECK_BUDGET) {
+                    checking = false;
+                }
             }
             localTransform(part, scale, LOCAL);
             multiply(parent, LOCAL, COMPOSED);
@@ -479,7 +508,8 @@ public final class EntityCapture {
                 + (lastParts == 0 ? "" : String.format(" (%.0f ns a part)", overhead / lastParts))
                 + " is ours; " + matrixReads + " driver reads over " + partsSeen + " parts; "
                 + "placement checked " + checks + " times, " + disagreements + " disagreed, worst "
-                + String.format("%.4f", worstError) + " blocks; "
+                + String.format("%.4f", worstError) + " blocks"
+                + (checking ? "" : " (checking stopped; it costs a driver sync)") + "; "
                 + shapesCached + " model shapes cached"
                 // What drawing these would cost before a single triangle: the
                 // skins have to be copied into Vulkan, and this says how many
