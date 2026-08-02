@@ -236,6 +236,22 @@ public interface VulkanBridge {
     boolean drawsSprites();
 
     /**
+     * Why rays are or are not being traced this session, in one sentence.
+     *
+     * Needed on this side of the bridge and not only in the report, because
+     * the answer is not the setting. Acceleration structures have to be asked
+     * for when the Vulkan device is created, so the switch takes effect at the
+     * next start and everything that depends on it — sun shadows, traced
+     * light, traced block light — quietly does nothing until then. A tester
+     * turned all four on and reported that torches cast no shadow; they were
+     * describing this exactly.
+     */
+    String rayTracingStatus();
+
+    /** Whether rays can actually be traced right now, whatever the setting says. */
+    boolean isRayTracingActive();
+
+    /**
      * Copies one of the game's sprite sheets into Vulkan, by slot.
      *
      * Slot 0 is the block atlas and is never sent here — it is already in

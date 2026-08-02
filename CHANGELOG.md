@@ -6,6 +6,8 @@
 
 - **A torch in your hand now lights itself.** It lit the ground and the walls and stayed dark in your fist, which is the one place the light is most obviously expected to be. The hook meant to fix that was never attached: it was aimed at the class that declares the method rather than the class the game calls it on, and the mixin library is allowed to skip a hook it cannot place without saying so. Every hook in the mod is now required to find its target, so the next one of these stops the game instead of shipping.
 
+- **Ray tracing switched on mid-game now says it needs a restart.** Acceleration structures have to be asked for when the graphics device is created, so the switch takes effect at the next start — and until then sun shadows, traced light and traced block light all quietly do nothing. The settings screen said "applies after the game restarts"; the log said "ray tracing: off in the settings", which to somebody who has just switched it on is worse than saying nothing at all. Both now say what is actually happening, and the check below no longer believes the setting over the device.
+
 - **A setting that cannot do anything now says so.** Every effect in this mod lives inside the Vulkan renderer, so with it switched off they all do nothing — including dynamic lights, whose sources are collected during the Vulkan draw and nowhere else. Nothing said this anywhere: the switch read as on and the log said Vulkan had started, which is true and means something else. The game now names what is switched on and inert, and why, at startup, in the log when it changes, and in the diagnostics report.
 
 ### Changed

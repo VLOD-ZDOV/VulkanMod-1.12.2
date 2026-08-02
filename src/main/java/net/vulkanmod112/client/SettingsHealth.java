@@ -76,15 +76,14 @@ public final class SettingsHealth {
             if (names.length() > 0) {
                 out.append(names).append(" — ").append(why);
             }
-        } else if (!VulkanConfig.isRayTracing()) {
+        } else if (!tracingActive()) {
             // Only worth saying once the renderer itself is out of the way:
             // with it off these are already named above, and naming them twice
             // in one sentence reads as two separate problems.
             StringBuilder names = new StringBuilder();
             appendTracedEffects(names);
             if (names.length() > 0) {
-                out.append(names)
-                        .append(" — these are traced against the world, and ray tracing is off");
+                out.append(names).append(" — ").append(tracingReason());
             }
         }
         return out.length() == 0 ? null : out.toString();
@@ -111,6 +110,45 @@ public final class SettingsHealth {
         // held-item hooks all find an empty list and return what they were
         // given. This is the one that cost the ninety seconds.
         add(out, "dynamic lights", VulkanConfig.isDynamicLights());
+    }
+
+    /**
+     * Whether rays are actually being traced, asked of the device.
+     *
+     * Not {@code VulkanConfig.isRayTracing()}, which is what the player asked
+     * for. Acceleration structures have to be requested when the Vulkan device
+     * is created, so the switch only takes effect at the next start — and in
+     * between, the setting says on and nothing traces. A tester turned on sun
+     * shadows, traced light and traced block light, got no shadow from a torch,
+     * and the check here stayed silent because it believed the setting.
+     *
+     * With no renderer at all the question does not arise; the caller has
+     * already established there is one.
+     */
+    private static boolean tracingActive() {
+        net.vulkanmod112.VulkanBridge bridge = net.vulkanmod112.VulkanLoader.bridgeIfReady();
+        if (bridge == null || !bridge.isInitialized()) {
+            return VulkanConfig.isRayTracing();
+        }
+        try {
+            return bridge.isRayTracingActive();
+        } catch (Throwable t) {
+            // A bridge that cannot answer is not worth a wrong warning.
+            return true;
+        }
+    }
+
+    private static String tracingReason() {
+        net.vulkanmod112.VulkanBridge bridge = net.vulkanmod112.VulkanLoader.bridgeIfReady();
+        if (bridge != null && bridge.isInitialized()) {
+            try {
+                return "these are traced against the world, and ray tracing is "
+                        + bridge.rayTracingStatus();
+            } catch (Throwable t) {
+                // Fall through to the plain sentence below.
+            }
+        }
+        return "these are traced against the world, and ray tracing is off";
     }
 
     /** The three that need rays, whatever else is true. */

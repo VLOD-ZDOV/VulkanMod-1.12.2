@@ -596,8 +596,27 @@ public final class VulkanContextImpl implements VulkanBridge {
         return rayQuerySupported;
     }
 
-    /** One line for the diagnostics report and the settings screen. */
+    @Override
+    public boolean isRayTracingActive() {
+        return rayTracingEnabled && rayQuerySupported;
+    }
+
+    /**
+     * One line for the diagnostics report and the settings screen.
+     *
+     * The stored answer is what was decided when the device was created, and
+     * the setting can have moved since. Saying "off in the settings" to
+     * somebody who has just switched it on is worse than saying nothing: it
+     * sends them to the one place that already shows what they want. So the
+     * two are compared here, every time this is asked.
+     */
+    @Override
     public String rayTracingStatus() {
+        if (!rayTracingEnabled && Boolean.getBoolean("vulkanmod112.rayTracing")) {
+            return "off for this session — it was switched on after the Vulkan device "
+                    + "was created, and acceleration structures have to be asked for at "
+                    + "creation. Restart the game.";
+        }
         return rayTracingStatus;
     }
 
