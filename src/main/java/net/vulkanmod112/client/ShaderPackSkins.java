@@ -52,6 +52,9 @@ public final class ShaderPackSkins {
     public static final String SUN = "sun.png";
     public static final String MOON = "moon_phases.png";
 
+    /** Where a picture worth borrowing might be sitting. */
+    private static final String[] FOLDERS = {"shaderpacks", "resourcepacks"};
+
     private static String[] packs;
     private static final Map<String, ResourceLocation> LOADED =
             new HashMap<String, ResourceLocation>();
@@ -72,23 +75,39 @@ public final class ShaderPackSkins {
         }
         List<String> found = new ArrayList<String>();
         found.add("Off");
-        String folderState = "no shaderpacks folder";
+        String folderState = "no folders found";
         try {
-            File dir = new File(Minecraft.getMinecraft().gameDir, "shaderpacks");
-            if (dir.isDirectory()) {
-                folderState = "folder present";
-            }
-            File[] entries = dir.listFiles();
-            if (entries != null) {
+            // Both folders, because the picture is far likelier to be in the
+            // second. A shader pack is code, and most of them ship no sun at
+            // all — the answer that came back from the first machine to try
+            // this was exactly that. A resource pack is pictures, and the sun
+            // is one of them. Reading a pack that is sitting there switched off
+            // is the whole point: the game only ever shows you the ones you
+            // have turned on, and this way one pack's sun can be borrowed
+            // without taking everything else it would change.
+            int folders = 0;
+            for (String where : FOLDERS) {
+                File dir = new File(Minecraft.getMinecraft().gameDir, where);
+                if (!dir.isDirectory()) {
+                    continue;
+                }
+                folders++;
+                File[] entries = dir.listFiles();
+                if (entries == null) {
+                    continue;
+                }
                 Arrays.sort(entries);
                 for (File entry : entries) {
                     if (entry.isDirectory() || entry.getName().toLowerCase().endsWith(".zip")) {
-                        found.add(entry.getName());
+                        found.add(where + "/" + entry.getName());
                     }
                 }
             }
+            if (folders > 0) {
+                folderState = folders + " folder(s) present";
+            }
         } catch (Throwable t) {
-            LOGGER.warn("Could not list the shader pack folder", t);
+            LOGGER.warn("Could not list the pack folders", t);
         }
         String[] result = found.toArray(new String[found.size()]);
         // An empty answer is not cached. The first thing that asks may be the
@@ -147,8 +166,7 @@ public final class ShaderPackSkins {
         }
         ResourceLocation made = null;
         try {
-            File dir = new File(Minecraft.getMinecraft().gameDir, "shaderpacks");
-            File entry = new File(dir, pack);
+            File entry = new File(Minecraft.getMinecraft().gameDir, pack);
             byte[] bytes = entry.isDirectory() ? readFromFolder(entry, wanted)
                     : readFromZip(entry, wanted);
             if (bytes != null) {

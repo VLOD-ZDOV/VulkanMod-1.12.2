@@ -600,7 +600,23 @@ vec3 foliageNormal(vec3 geometric) {
 // occupy real area on screen, and they are what a reflection is actually made
 // of. Beyond this the fog colour takes over, which is the horizon, which is
 // what water at that distance shows anyway.
-const float REFLECT_REACH = 18.0;
+const float REFLECT_REACH = 34.0;
+/**
+ * The most of the Fresnel term that a flat sky colour is allowed to claim.
+ *
+ * Fresnel says that at a grazing angle water is very nearly a perfect mirror,
+ * and that is true — but a perfect mirror of *nothing* is a sheet of pale
+ * paint. Where the ray found no world to reflect, the fallback is the fog
+ * colour, and believing the Fresnel term completely turned an entire lake into
+ * the colour of the sky: the wash the whole surface had, worse the more the
+ * waves tilted it, because tilting is what puts more of the surface at a
+ * grazing angle.
+ *
+ * So the term is believed in proportion to whether there is anything behind
+ * it. A ray that found the far bank reflects it fully; a ray that found
+ * nothing gets this much and the water keeps being water.
+ */
+const float FLAT_SKY_LIMIT = 0.42;
 
 // How far behind a surface a ray may be and still be counted as having hit it,
 // in blocks. Without this the reflection finds things standing in front of the
@@ -997,6 +1013,9 @@ void main() {
             // What the surface shows: the horizon by default, and whatever is
             // actually standing there when the ray finds it.
             vec3 mirrored = frame.fogColor.rgb;
+            // How much of what is being mixed in is really there, as against
+            // being the sky colour standing in for it.
+            float confidence = 0.0;
             // Only the top of the water reflects. The sides of a water block
             // are the walls of the channel it runs in, and a ray sent off one
             // of those travels along the surface rather than away from it —
@@ -1020,8 +1039,8 @@ void main() {
                 vec4 found = outward > 0.0 && rise > 0.0
                         ? traceReflection(vRelative, ray) : vec4(0.0);
                 found.a *= rise;
-                mirrored = mix(mirrored, found.rgb,
-                               found.a * outward * frame.screenMirror.x);
+                confidence = found.a * outward * frame.screenMirror.x;
+                mirrored = mix(mirrored, found.rgb, confidence);
                 // Shown on its own when asked. What the ray found, at full
                 // strength, with no fresnel deciding how much of it to use and
                 // no water colour under it — deep blue wherever it found
@@ -1034,6 +1053,10 @@ void main() {
                     return;
                 }
             }
+            // Believed in proportion to there being something to reflect. See
+            // FLAT_SKY_LIMIT: a perfect mirror of nothing is pale paint, and
+            // that is what a whole lake turned into.
+            mirror *= mix(FLAT_SKY_LIMIT, 1.0, confidence);
             // Both together, because they are the same fact: where the surface
             // turns into a mirror it stops showing what is under it, and a
             // reflection that let the riverbed through would be a colour laid
