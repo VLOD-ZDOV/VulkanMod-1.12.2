@@ -214,7 +214,7 @@ public final class GuiVulkanProfiles extends GuiScreen {
         super.handleMouseInput();
         int wheel = Mouse.getEventDWheel();
         if (wheel != 0) {
-            this.scroll -= wheel / 120 * ROW_HEIGHT * 2;
+            this.scroll -= net.vulkanmod112.client.gui.Wheel.notches(wheel) * ROW_HEIGHT * 2;
             clampScroll();
         }
     }

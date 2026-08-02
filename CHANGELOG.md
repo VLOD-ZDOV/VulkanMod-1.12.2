@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.9.0]
+
+### Fixed
+
+- **The mouse wheel scrolls the settings screens on Cleanroom.** That loader answers the wheel in detents where LWJGL 2 answers in the units Windows uses — one notch arrives as 1 rather than as 120 — so the reading rounded down to nothing and no list in this mod moved. Both screens now take the magnitude where there is one and the direction where there is not, which is right under either. Reported, and diagnosed, by the person who reported it.
+
+### Changed
+
+- **Ray tracing has a page of its own.** Everything that traces was filed inside a block called Memory, under the video-memory budget. The switch the other eight settings depend on now sits first on a page named for what it does.
+
+- **Shaders have a page of their own**, and the sun, the moon, sky pictures and water refraction moved onto it out of the diagnostics block they had been sitting in.
+
+- **Turning on ray tracing mid-game now says, in chat, that the game has to restart.** The line under the switch said so already; somebody who has just pressed four switches and gone looking for shadows is not reading it.
+
 ## [0.8.1]
 
 ### Fixed
