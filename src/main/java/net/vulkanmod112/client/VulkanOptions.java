@@ -1762,7 +1762,7 @@ final class VulkanOptions {
                                                 net.vulkanmod112.client.ShaderPackSkins
                                                         .nameAt(index));
                                     }
-                                }),
+                                }, true),
                         new VSwitchOption("Round Sun",
                                 "Draw the sun as a round, warm disc instead of vanilla's square "
                                         + "one. The picture is built by this mod rather than "
