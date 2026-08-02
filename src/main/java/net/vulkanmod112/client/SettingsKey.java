@@ -47,6 +47,9 @@ public final class SettingsKey {
             // Only from the world. isPressed drains one queued press, so
             // asking while a screen is open would swallow presses meant for
             // whatever that screen does with them.
+            // Settings changed while a screen was open are written here, once,
+            // rather than on every step of a slider being dragged.
+            VulkanConfig.flush();
             if (mc.currentScreen != null || mc.world == null) {
                 return;
             }

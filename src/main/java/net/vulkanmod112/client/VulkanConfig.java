@@ -500,12 +500,12 @@ public final class VulkanConfig {
     static final int DEF_ZOOM_FACTOR = 4;
 
     private static Configuration config;
-    private static boolean terrainEnabled = DEF_TERRAIN;
+    private static volatile boolean terrainEnabled = DEF_TERRAIN;
     private static boolean overlayEnabled = DEF_OVERLAY;
     /** 0 = leave vanilla's own limit alone. */
     private static int entityDistance = DEF_ENTITY_DISTANCE;
     private static int tileEntityDistance = DEF_TILE_ENTITY_DISTANCE;
-    private static boolean animationsEnabled = DEF_ANIMATIONS;
+    private static volatile boolean animationsEnabled = DEF_ANIMATIONS;
     private static int backgroundFpsLimit = DEF_BACKGROUND_FPS;
     private static boolean ultraLogEnabled = DEF_ULTRA_LOG;
     private static int ultraLogSeconds = DEF_ULTRA_LOG_SECONDS;
@@ -521,15 +521,15 @@ public final class VulkanConfig {
     private static int visibilityWalkInterval = DEF_VISIBILITY_WALK_INTERVAL;
     private static int nearPlaneHundredths = DEF_NEAR_PLANE_HUNDREDTHS;
     private static boolean visibilitySeedCache = DEF_VISIBILITY_SEED_CACHE;
-    private static boolean ownVisibilityWalk = DEF_OWN_VISIBILITY_WALK;
-    private static boolean fastRebuildNear = DEF_FAST_REBUILD_NEAR;
-    private static boolean materialTags = DEF_MATERIAL_TAGS;
+    private static volatile boolean ownVisibilityWalk = DEF_OWN_VISIBILITY_WALK;
+    private static volatile boolean fastRebuildNear = DEF_FAST_REBUILD_NEAR;
+    private static volatile boolean materialTags = DEF_MATERIAL_TAGS;
     private static boolean showMaterials = DEF_SHOW_MATERIALS;
     private static boolean showOcclusion = DEF_SHOW_OCCLUSION;
     private static boolean showMotion = DEF_SHOW_MOTION;
     private static boolean motionOverWorld = DEF_MOTION_OVER_WORLD;
     private static boolean showReflections = DEF_SHOW_REFLECTIONS;
-    private static boolean buildNearOffThread = DEF_BUILD_NEAR_OFF_THREAD;
+    private static volatile boolean buildNearOffThread = DEF_BUILD_NEAR_OFF_THREAD;
     private static boolean fastFrustumTest = DEF_FAST_FRUSTUM_TEST;
     private static boolean vulkanTranslucent = DEF_VULKAN_TRANSLUCENT;
     private static boolean vulkanParticles = DEF_VULKAN_PARTICLES;
@@ -558,7 +558,7 @@ public final class VulkanConfig {
     private static int frameGraphInterval = DEF_FRAME_GRAPH_INTERVAL;
     private static boolean dynamicLights = DEF_DYNAMIC_LIGHTS;
     private static int dynamicLightDistance = DEF_DYNAMIC_LIGHT_DISTANCE;
-    private static boolean dropVanillaBuffers = DEF_DROP_VANILLA_BUFFERS;
+    private static volatile boolean dropVanillaBuffers = DEF_DROP_VANILLA_BUFFERS;
     private static boolean extremeRenderDistance = DEF_EXTREME_RENDER_DISTANCE;
     private static int directionalLight = DEF_DIRECTIONAL_LIGHT;
     private static int heightFog = DEF_HEIGHT_FOG;
@@ -1125,6 +1125,13 @@ public final class VulkanConfig {
         setLightSoftness(DEF_LIGHT_SOFTNESS);
         setTemporalAccumulation(DEF_TEMPORAL_ACCUMULATION);
         setShowAccumulation(DEF_SHOW_ACCUMULATION);
+        // These four sat out of the reset while their neighbours in the same
+        // group were in it, so Reset could leave the world painted in a
+        // diagnostic colour with nothing in the screen admitting why.
+        setShowOcclusion(DEF_SHOW_OCCLUSION);
+        setShowMotion(DEF_SHOW_MOTION);
+        setMotionOverWorld(DEF_MOTION_OVER_WORLD);
+        setShowReflections(DEF_SHOW_REFLECTIONS);
         setVulkanEntities(DEF_VULKAN_ENTITIES);
         setRoundSun(DEF_ROUND_SUN);
         setRoundMoon(DEF_ROUND_MOON);
@@ -1916,7 +1923,31 @@ public final class VulkanConfig {
         }
     }
 
+    /**
+     * Marks the file as needing a write, without writing it.
+     *
+     * A slider is dragged, not clicked: every pixel of travel is a value
+     * change, and each one used to write the whole configuration file to disk
+     * synchronously. Dozens of writes a second while the mouse moves, on the
+     * thread drawing the screen.
+     *
+     * The write is coalesced instead, and forced where it matters: leaving the
+     * settings screen and closing the game both flush. Nothing can be lost that
+     * way — the only window is a crash during a drag, and a slider position is
+     * not what anyone would mourn.
+     */
     private static void save() {
+        saveWanted = true;
+    }
+
+    private static boolean saveWanted;
+
+    /** Writes the file if anything has changed. Cheap when nothing has. */
+    public static void flush() {
+        if (!saveWanted) {
+            return;
+        }
+        saveWanted = false;
         if (config != null && config.hasChanged()) {
             config.save();
         }

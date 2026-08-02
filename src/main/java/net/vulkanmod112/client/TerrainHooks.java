@@ -534,6 +534,9 @@ public final class TerrainHooks {
      * failure is written down and the game goes on closing.
      */
     public static void shutdown() {
+        // The last chance the settings file has to receive anything still
+        // waiting to be written.
+        VulkanConfig.flush();
         VulkanBridge bridge = liveBridge();
         if (bridge == null || !bridge.isInitialized()) {
             return;

@@ -408,6 +408,8 @@ public final class GuiVulkanSettings extends GuiScreen {
      */
     @Override
     public void onGuiClosed() {
+        // Everything moved on this screen reaches the file here, in one write.
+        VulkanConfig.flush();
         this.mc.gameSettings.saveOptions();
         this.mc.gameSettings.onGuiClosed();
     }

@@ -302,6 +302,8 @@ final class VkChunkMirror {
     private long geometryMemory;
     private long geometryCapacity;
     private long nextGeometryOffset;
+    /** Once a session: the second complaint says nothing the first did not. */
+    private boolean markOverrunLogged;
     private final List<FreeRange> freeRanges = new ArrayList<FreeRange>();
     /**
      * How much VRAM the geometry buffer is allowed to take before growth turns
@@ -1103,6 +1105,19 @@ final class VkChunkMirror {
         ensureGeometryCapacity(nextGeometryOffset + capacity);
         long offset = nextGeometryOffset;
         nextGeometryOffset += capacity;
+        // Checked where the mark is moved, not only where growth trips over it.
+        //
+        // A growth copy once found the mark fifty bytes past the buffer it
+        // lives in, and the clamp there stops the read but says nothing about
+        // which allocation put it there — by then the buffer has already been
+        // replaced. This is the only place the mark moves, so a complaint here
+        // names the size that did it, and it is one comparison on a path that
+        // already did a search.
+        if (nextGeometryOffset > geometryCapacity && !markOverrunLogged) {
+            markOverrunLogged = true;
+            LOGGER.warn("Geometry mark moved past the buffer: {} of {} after taking {} bytes",
+                    nextGeometryOffset, geometryCapacity, capacity);
+        }
         return offset;
     }
 
