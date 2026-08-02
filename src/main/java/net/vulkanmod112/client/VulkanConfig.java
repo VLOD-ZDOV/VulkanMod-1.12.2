@@ -361,6 +361,12 @@ public final class VulkanConfig {
     static final boolean DEF_VULKAN_ENTITIES = false;
     /** A round, warm sun instead of vanilla's square one. */
     static final boolean DEF_ROUND_SUN = false;
+    /** A round moon with real phases instead of vanilla's sheet. */
+    static final boolean DEF_ROUND_MOON = false;
+    /** How much water bends what is seen through it. */
+    static final int DEF_WATER_REFRACTION = 0;
+    /** Which shader pack to borrow sky pictures from; empty is none. */
+    static final String DEF_SKIN_PACK = "";
     /** How much of its square the disc fills, as a percentage of the range. */
     static final int DEF_SUN_SIZE = 50;
     /** How warm the rim goes, 0 = white. */
@@ -539,6 +545,9 @@ public final class VulkanConfig {
     private static boolean showAccumulation = DEF_SHOW_ACCUMULATION;
     private static boolean vulkanEntities = DEF_VULKAN_ENTITIES;
     private static boolean roundSun = DEF_ROUND_SUN;
+    private static boolean roundMoon = DEF_ROUND_MOON;
+    private static int waterRefraction = DEF_WATER_REFRACTION;
+    private static String skinPack = DEF_SKIN_PACK;
     private static int sunSize = DEF_SUN_SIZE;
     private static int sunWarmth = DEF_SUN_WARMTH;
     private static int lightSoftness = DEF_LIGHT_SOFTNESS;
@@ -799,6 +808,26 @@ public final class VulkanConfig {
                         + "differently each frame and averaged here, which is a soft edge. Costs "
                         + "one fullscreen pass and does nothing at all unless something is being "
                         + "traced.");
+        skinPack = config.getString("skinPack", CATEGORY_GENERAL, DEF_SKIN_PACK,
+                "Which shader pack in the shaderpacks folder to take the sun and moon pictures "
+                        + "from. Only pictures: a pack's shader code is written against a loader "
+                        + "that does not exist here and cannot be run, but a sun is a PNG, and "
+                        + "reading one out of a pack you already have copies nothing anywhere. A "
+                        + "pack that ships no sun has none to lend, and the game's own is used.");
+        waterRefraction = config.getInt("waterRefraction", CATEGORY_GENERAL,
+                DEF_WATER_REFRACTION, 0, 100,
+                "How much the surface of water bends what is seen through it. Reflection and "
+                        + "refraction are two halves of one thing and only one of them was here: "
+                        + "a pond whose mirror moves while its bed stays put reads as glass laid "
+                        + "over a photograph. What is behind the water is fetched from the same "
+                        + "picture the reflection searches, so it shows the world but not "
+                        + "creatures, which this renderer does not draw.");
+        roundMoon = config.getBoolean("roundMoon", CATEGORY_GENERAL, DEF_ROUND_MOON,
+                "Draw the moon as a round disc with a soft glow. The game does not draw a moon so "
+                        + "much as one cell of an eight-picture sheet chosen by tonight's phase, "
+                        + "so all eight are drawn here — a lit disc with the shadow creeping "
+                        + "across it, which is one circle cut by a moving ellipse. A single disc "
+                        + "in its place would be full every night of the month.");
         roundSun = config.getBoolean("roundSun", CATEGORY_GENERAL, DEF_ROUND_SUN,
                 "Draw the sun as a round, warm disc instead of vanilla's square. The picture is "
                         + "built here rather than shipped, which is what makes its size and its "
@@ -1091,6 +1120,9 @@ public final class VulkanConfig {
         setShowAccumulation(DEF_SHOW_ACCUMULATION);
         setVulkanEntities(DEF_VULKAN_ENTITIES);
         setRoundSun(DEF_ROUND_SUN);
+        setRoundMoon(DEF_ROUND_MOON);
+        setWaterRefraction(DEF_WATER_REFRACTION);
+        setSkinPack(DEF_SKIN_PACK);
         setSunSize(DEF_SUN_SIZE);
         setSunWarmth(DEF_SUN_WARMTH);
         setExtremeRenderDistance(DEF_EXTREME_RENDER_DISTANCE);
@@ -1288,6 +1320,37 @@ public final class VulkanConfig {
         temporalAccumulation = value < 0 ? 0 : (value > 100 ? 100 : value);
         store(CATEGORY_GENERAL, "temporalAccumulation", temporalAccumulation);
         applySystemProperties();
+    }
+
+    public static String getSkinPack() {
+        return skinPack;
+    }
+
+    public static void setSkinPack(String value) {
+        skinPack = value == null ? "" : value;
+        if (config != null) {
+            config.get(CATEGORY_GENERAL, "skinPack", DEF_SKIN_PACK).set(skinPack);
+            save();
+        }
+    }
+
+    public static int getWaterRefraction() {
+        return waterRefraction;
+    }
+
+    public static void setWaterRefraction(int value) {
+        waterRefraction = value < 0 ? 0 : (value > 100 ? 100 : value);
+        store(CATEGORY_GENERAL, "waterRefraction", waterRefraction);
+        applySystemProperties();
+    }
+
+    public static boolean isRoundMoon() {
+        return roundMoon;
+    }
+
+    public static void setRoundMoon(boolean value) {
+        roundMoon = value;
+        store(CATEGORY_GENERAL, "roundMoon", value);
     }
 
     public static boolean isRoundSun() {
@@ -1811,6 +1874,7 @@ public final class VulkanConfig {
         publish("vulkanmod112.bloom", Integer.toString(bloom));
         publish("vulkanmod112.ambientOcclusion", Integer.toString(ambientOcclusion));
         publish("vulkanmod112.screenReflections", Integer.toString(screenReflections));
+        publish("vulkanmod112.waterRefraction", Integer.toString(waterRefraction));
         publish("vulkanmod112.aoRadius", Integer.toString(aoRadius));
         publish("vulkanmod112.showMaterials", Boolean.toString(showMaterials));
         publish("vulkanmod112.showOcclusion", Boolean.toString(showOcclusion));

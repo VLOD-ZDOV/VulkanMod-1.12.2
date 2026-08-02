@@ -1713,6 +1713,56 @@ final class VulkanOptions {
                                         VulkanConfig.setShowOcclusion(value);
                                     }
                                 }),
+                        new VRangeOption("Water Refraction",
+                                "How much the surface of water bends what is seen through it. "
+                                        + "Reflection and refraction are two halves of one thing "
+                                        + "and only one of them was here: a pond whose mirror "
+                                        + "moves while its bed stays perfectly still reads as "
+                                        + "glass laid over a photograph, and the bed is the "
+                                        + "giveaway. What is behind the water comes from the same "
+                                        + "picture the reflection searches, so it shows the world "
+                                        + "but not creatures, which this renderer does not draw. "
+                                        + "Turned up too far, straight edges under water start to "
+                                        + "look like jelly.",
+                                Cost.of(Level.NONE, Level.LOW, Level.NONE),
+                                "Needs Vulkan Water and Glass on.",
+                                0, 100, 5, "%", "Off",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getWaterRefraction();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setWaterRefraction(value);
+                                    }
+                                }),
+                        new VCyclingOption("Sky Pictures From Pack",
+                                "Take the sun and the moon from a shader pack in your "
+                                        + "shaderpacks folder. Only the pictures: a pack's shader "
+                                        + "code is written against a loader that does not exist "
+                                        + "here and cannot be run at all, but a sun is a PNG, and "
+                                        + "reading one out of a pack you already have copies "
+                                        + "nothing into this mod. Packs that ship no sun have "
+                                        + "none to lend, and the game's own is used instead — the "
+                                        + "log says which happened.",
+                                Cost.FREE, null,
+                                net.vulkanmod112.client.ShaderPackSkins.names(),
+                                new VCyclingOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return net.vulkanmod112.client.ShaderPackSkins
+                                                .indexOf(VulkanConfig.getSkinPack());
+                                    }
+
+                                    @Override
+                                    public void set(int index) {
+                                        VulkanConfig.setSkinPack(
+                                                net.vulkanmod112.client.ShaderPackSkins
+                                                        .nameAt(index));
+                                    }
+                                }),
                         new VSwitchOption("Round Sun",
                                 "Draw the sun as a round, warm disc instead of vanilla's square "
                                         + "one. The picture is built by this mod rather than "
@@ -1731,6 +1781,26 @@ final class VulkanOptions {
                                     @Override
                                     public void set(boolean value) {
                                         VulkanConfig.setRoundSun(value);
+                                    }
+                                }),
+                        new VSwitchOption("Round Moon",
+                                "Draw the moon as a round disc with a soft glow. The game does "
+                                        + "not draw a moon so much as one cell of an "
+                                        + "eight-picture sheet chosen by tonight's phase, so all "
+                                        + "eight are drawn here: a lit disc with the shadow "
+                                        + "creeping across it, which is one circle cut by a "
+                                        + "moving ellipse. A single disc in its place would be "
+                                        + "full every night of the month.",
+                                Cost.FREE, null,
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return VulkanConfig.isRoundMoon();
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        VulkanConfig.setRoundMoon(value);
                                     }
                                 }),
                         new VRangeOption("Sun Size",

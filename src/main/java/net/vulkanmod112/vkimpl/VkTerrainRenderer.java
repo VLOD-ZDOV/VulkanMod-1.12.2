@@ -4930,6 +4930,11 @@ final class VkTerrainRenderer {
         // averaging it is a shadow edge that crawls, which is worse than the
         // grain the turning was for. See ditherValue in terrain.frag.
         MemoryUtil.memPutFloat(base + 984, ditherTurn);
+        // How much the surface of water bends what is under it. Nothing at all
+        // unless the scene images are bound — without them the sampler holds
+        // the block atlas, and a riverbed made of atlas is worse than a
+        // riverbed that does not move.
+        MemoryUtil.memPutFloat(base + 988, sceneWanted() ? waterRefraction : 0.0f);
     }
 
     /**
@@ -5072,8 +5077,11 @@ final class VkTerrainRenderer {
         bloomStrength = clampPercent(intProperty("vulkanmod112.bloom", 0));
         aoStrength = clampPercent(intProperty("vulkanmod112.ambientOcclusion", 0));
         aoRadius = Math.max(1, Math.min(6, intProperty("vulkanmod112.aoRadius", 2)));
+        float wantedRefraction = clampPercent(intProperty("vulkanmod112.waterRefraction", 0));
         float wantedReflections = clampPercent(intProperty("vulkanmod112.screenReflections", 0));
-        if ((wantedReflections > 0.0f) != (screenReflections > 0.0f)) {
+        boolean sceneWasWanted = sceneWanted();
+        waterRefraction = wantedRefraction;
+        if (sceneWanted() != sceneWasWanted) {
             screenReflections = wantedReflections;
             // What the water is allowed to look at changed. Rewriting the sets
             // stops the device, so it happens here — on the change — and never
@@ -5083,6 +5091,21 @@ final class VkTerrainRenderer {
         screenReflections = wantedReflections;
         advanceDither();
     }
+
+    /**
+     * Whether the water is allowed to look at the world behind it.
+     *
+     * Two effects want the same two images and either of them is reason enough
+     * to bind them. Asked as one question because it is one: without them
+     * these samplers hold the block atlas, which reflections and refraction
+     * would both happily read as though it were the world.
+     */
+    private boolean sceneWanted() {
+        return screenReflections > 0.0f || waterRefraction > 0.0f;
+    }
+
+    /** How much the water bends what is seen through it; 0 = off. */
+    private float waterRefraction;
 
     private static float clampPercent(int value) {
         return Math.max(0, Math.min(100, value)) / 100.0f;
@@ -5160,7 +5183,7 @@ final class VkTerrainRenderer {
             // out one per layer per frame in flight, so which one that is falls
             // straight out of the index — no separate layout, no second pool.
             VkDescriptorImageInfo.Buffer sceneColorInfo = VkDescriptorImageInfo.calloc(1, stack);
-            boolean sceneReady = colorView != 0 && depthView != 0 && screenReflections > 0.0f;
+            boolean sceneReady = colorView != 0 && depthView != 0 && sceneWanted();
             sceneColorInfo.get(0)
                     .sampler(sceneSampler)
                     .imageView(sceneReady ? colorView : atlasView)
@@ -5187,7 +5210,7 @@ final class VkTerrainRenderer {
                 // existed — nothing bound that the frame is also using, and
                 // nothing for a driver to object to. The sets are rewritten
                 // when the setting changes, which is rare enough to afford it.
-                boolean waterSet = screenReflections > 0.0f
+                boolean waterSet = sceneWanted()
                         && (i % BATCHES_PER_FRAME) == LAYER_TRANSLUCENT;
                 int write = i * 6;
                 writes.get(write)

@@ -69,6 +69,7 @@ layout(set = 0, binding = 3, std140) uniform Frame {
     // z = how far to turn the dither pattern this frame, 0..1. Zero holds it
     //     still, which is what anything without frame averaging wants; see
     //     ditherValue.
+    // w = how much the surface of water bends what is seen through it. 0 off.
     vec4 lightShadow;
 } frame;
 
@@ -99,6 +100,17 @@ const uint MATERIAL_PLANT = 6u;
 // in the lower four. Independent of each other: lava is a material and a
 // light, glowstone is a light and nothing in particular.
 const uint MATERIAL_MASK = 0x0Fu;
+
+/**
+ * How far a fully tilted wave may drag what is under it, in screen widths at
+ * one block away.
+ *
+ * Set by eye against the one thing that gives refraction away when it is
+ * overdone: straight edges under the water — a sand bank, the line of a
+ * channel — start to look like they are made of jelly. Under this the bed
+ * moves with the wave and stays recognisably itself.
+ */
+const float REFRACT_REACH = 1.6;
 
 /**
  * The material of a surface read off the atlas rather than off the vertex.
@@ -938,6 +950,46 @@ void main() {
     }
     if (BLEND) {
         float alpha = tex.a * vColor.a;
+        // What is under the water, moved by the surface it is seen through.
+        //
+        // Reflection and refraction are the two halves of the same thing and
+        // only one of them was here. A still pond with a perfect mirror in it
+        // and a riverbed that does not budge reads as glass laid over a
+        // photograph — the giveaway is precisely that the bed stays put while
+        // the reflection moves.
+        //
+        // The blend would have taken what is behind straight from the frame,
+        // unmoved. So it is fetched here instead, from the same picture the
+        // reflection searches, displaced by the tilt of the wave; and then the
+        // pixel is handed over opaque, because it now carries both halves
+        // itself.
+        if (frame.lightShadow.w > 0.0 && material == MATERIAL_WATER && normal.y > 0.9) {
+            vec4 clip = frame.mvp * vec4(vRelative, 1.0);
+            if (clip.w > 0.0001) {
+                vec2 uv = clip.xy / clip.w * 0.5 + 0.5;
+                float here = clip.z / clip.w;
+                // Divided by how far away the surface is: the same tilt covers
+                // fewer pixels the further off it is, and without this a lake
+                // shears at the horizon while a puddle at your feet barely
+                // moves.
+                vec2 tilt = (mirrorNormal.xz - normal.xz)
+                            * frame.lightShadow.w * REFRACT_REACH / max(1.0, clip.w);
+                vec2 shifted = clamp(uv + tilt, vec2(0.0), vec2(1.0));
+                // Only if what is there is really behind the water. A sample in
+                // front of it is something standing between the eye and the
+                // surface, and smearing that across the water is the artefact
+                // every refraction gets wrong first: a reed on the bank waving
+                // about inside the pond.
+                if (textureLod(sceneDepth, shifted, 0.0).r < here) {
+                    shifted = uv;
+                }
+                vec3 behind = textureLod(sceneColor, shifted, 0.0).rgb;
+                // Exactly what the blend would have done, done here: the frame
+                // times what the water lets through, plus the water itself.
+                shaded = shaded * alpha + behind * (1.0 - alpha);
+                alpha = 1.0;
+            }
+        }
         // frame.heightFog.w: how much of the Fresnel term to believe, 0 off.
         float water = frame.heightFog.w;
         if (water > 0.0 && material == MATERIAL_WATER) {
