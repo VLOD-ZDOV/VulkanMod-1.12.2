@@ -44,6 +44,7 @@ public final class FallbackNotice {
             // renderer never started, this object may be the only one of the
             // two that got registered.
             RenderNotice.flushToChat();
+            RenderNotice.flushRestartToChat();
         }
     }
 

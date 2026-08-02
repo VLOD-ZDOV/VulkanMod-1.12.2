@@ -38,6 +38,8 @@ final class VulkanOptions {
     static VOptionPage[] buildPages(final Minecraft mc) {
         return new VOptionPage[]{
                 renderingPage(mc),
+                shadersPage(mc),
+                rayTracingPage(mc),
                 optimizationsPage(mc),
                 qualityPage(mc),
                 advancedPage(mc)
@@ -330,403 +332,9 @@ final class VulkanOptions {
                                         org.lwjgl.opengl.Display.setVSyncEnabled(value);
                                         mc.gameSettings.saveOptions();
                                     }
-                        })),
-                new VOptionBlock("Shaders",
-                        new VSwitchOption("Material Tags",
-                                "Record what each stretch of a chunk is made of while the chunk is "
-                                        + "being built. On its own this changes nothing you can "
-                                        + "see: it is the groundwork the effects still to come are "
-                                        + "waiting on. The game draws terrain in four layers and a "
-                                        + "layer is not a material — water and stained glass are "
-                                        + "the same layer, so are grass and torches and rails — "
-                                        + "and the vertex carries position, colour, texture and "
-                                        + "light and nothing else. The one moment anything knows "
-                                        + "that a particular block is water is while that block is "
-                                        + "being turned into triangles, so that is where it is "
-                                        + "written down. Costs a branch per block on the building "
-                                        + "threads, and the diagnostics log says what it measured "
-                                        + "rather than leaving that to be believed.",
-                                Cost.of(Level.NONE, Level.NONE, Level.LOW),
-                                "Everything below it in this section that tells one block from "
-                                        + "another needs it, starting with how foliage is lit.",
-                                new VSwitchOption.Access() {
-                                    @Override
-                                    public boolean get() {
-                                        return VulkanConfig.isMaterialTags();
-                                    }
-
-                                    @Override
-                                    public void set(boolean value) {
-                                        VulkanConfig.setMaterialTags(value);
-                                    }
-                                }),
-                        new VSwitchOption("Dynamic Lights",
-                                "Let a carried torch, a dropped glowing block or a burning "
-                                        + "creature light the ground around it. The light is added "
-                                        + "while the world is being shaded rather than written "
-                                        + "into it, so no chunk is rebuilt — and rebuilding chunks "
-                                        + "is exactly what the frame is already waiting on while "
-                                        + "you move, which is what makes the usual approach to "
-                                        + "this cost so much. Any block that gives off light does, "
-                                        + "including modded ones, because the value is read from "
-                                        + "the block itself. Mobs standing in the light, the "
-                                        + "particles a broken block throws off and the view from "
-                                        + "first person are all lit to match. Nothing is written "
-                                        + "into the world and nothing is sent anywhere: this is "
-                                        + "worked out on your machine while the frame is drawn, so "
-                                        + "it changes nothing about mob spawning or daylight "
-                                        + "sensors and works on any server. Another player carrying "
-                                        + "a torch lights the ground for you without needing this "
-                                        + "mod themselves — only the one looking needs it.",
-                                Cost.of(Level.LOW, Level.LOW, Level.NONE), null,
-                                new VSwitchOption.Access() {
-                                    @Override
-                                    public boolean get() {
-                                        return VulkanConfig.isDynamicLights();
-                                    }
-
-                                    @Override
-                                    public void set(boolean value) {
-                                        VulkanConfig.setDynamicLights(value);
-                                    }
-                                }),
-                        new VRangeOption("Directional Light",
-                                "How far dynamic light goes towards caring which way a surface is "
-                                        + "turned. The game's own light is one number per block "
-                                        + "and knows nothing about orientation, so a dropped torch "
-                                        + "lights the underside of the floor it is lying on "
-                                        + "exactly as brightly as the top of it. This renderer can "
-                                        + "work the face out from how the surface changes across "
-                                        + "the screen — every quad in a block model is flat, so "
-                                        + "that is the real face rather than a guess — and dim "
-                                        + "what is turned away from the light. Nothing goes fully "
-                                        + "dark and nothing switches on at once: the flame is "
-                                        + "treated as having width, so its light wraps around a "
-                                        + "corner you are standing next to and stops at one across "
-                                        + "the room. Costs nothing at all while dynamic lights are "
-                                        + "off.",
-                                Cost.of(Level.NONE, Level.LOW, Level.NONE),
-                                "Only does anything while Dynamic Lights is on.",
-                                0, 100, 5, "%", "OFF",
-                                new VRangeOption.Access() {
-                                    @Override
-                                    public int get() {
-                                        return VulkanConfig.getDirectionalLight();
-                                    }
-
-                                    @Override
-                                    public void set(int value) {
-                                        VulkanConfig.setDirectionalLight(value);
-                                    }
-                                }),
-                        new VRangeOption("Height Fog",
-                                "How much colour the ground below you gives up to fog. This is a "
-                                        + "look rather than a fix, and it is honest about its "
-                                        + "limits: it fades towards the game's own fog colour and "
-                                        + "only where the game already has fog, so it cannot "
-                                        + "invent a haze the sky disagrees with. What it cannot "
-                                        + "reach is everything this renderer does not draw — "
-                                        + "entities and particles are fogged by OpenGL, which "
-                                        + "knows nothing about height, so a mob standing in a "
-                                        + "fogged valley stays clearer than the ground under it.",
-                                Cost.of(Level.NONE, Level.LOW, Level.NONE), null,
-                                // A single percent, not a doubled one: this
-                                // string is drawn as it is rather than passed
-                                // through the game's formatter, because its key
-                                // slugs to nothing and no translation can exist
-                                // for it.
-                                0, 100, 5, "%", "OFF",
-                                new VRangeOption.Access() {
-                                    @Override
-                                    public int get() {
-                                        return VulkanConfig.getHeightFog();
-                                    }
-
-                                    @Override
-                                    public void set(int value) {
-                                        VulkanConfig.setHeightFog(value);
-                                    }
-                                }),
-                        new VRangeOption("Water Reflection",
-                                "How much of a water surface turns into a reflection of the sky as "
-                                        + "you look along it. Looking straight down you see the "
-                                        + "bottom; looking along the water you see the horizon, and "
-                                        + "the change between the two is steep and happens near the "
-                                        + "end — which is how water actually behaves and something "
-                                        + "the game has never done. What it reflects is the game's "
-                                        + "own fog colour, and that is not a stand-in: at a grazing "
-                                        + "angle what flat water shows you is the horizon, and the "
-                                        + "fog colour is the horizon, so this follows sunrise, "
-                                        + "weather and being underwater without being told about "
-                                        + "any of them.",
-                                Cost.of(Level.NONE, Level.LOW, Level.NONE),
-                                "Needs Vulkan Water and Glass on; the OpenGL copy of the water "
-                                        + "knows nothing about this.",
-                                0, 100, 5, "%", "OFF",
-                                new VRangeOption.Access() {
-                                    @Override
-                                    public int get() {
-                                        return VulkanConfig.getWaterReflection();
-                                    }
-
-                                    @Override
-                                    public void set(int value) {
-                                        VulkanConfig.setWaterReflection(value);
-                                    }
-                                }),
-                        new VRangeOption("Screen Reflections",
-                                "How much of a water reflection is the world that is actually "
-                                        + "standing there, rather than the flat fog colour the "
-                                        + "row above puts on it. The reflected ray is followed "
-                                        + "across the picture that has already been drawn — which "
-                                        + "is possible at all only because water is drawn in a "
-                                        + "pass of its own, after the opaque world is finished and "
-                                        + "handed back, so the colour and depth of everything "
-                                        + "behind the surface exist by the time a water pixel is "
-                                        + "being shaded. Nothing is traced against the world "
-                                        + "itself, which is what makes this cost a loop rather "
-                                        + "than a second copy of the world in memory. What it can "
-                                        + "find is exactly what is on screen and no more: a ray "
-                                        + "leaving the edge of the frame, or turning back towards "
-                                        + "you where nothing was ever drawn, has no answer, and "
-                                        + "the fog colour finishes it — which is not a patch, "
-                                        + "since the fog colour is the horizon and the horizon is "
-                                        + "what flat water shows at that angle anyway. Creatures "
-                                        + "are missing from it for the same reason they are "
-                                        + "missing from everything else here: the game draws them "
-                                        + "after this renderer has finished. Reflecting what is "
-                                        + "off screen needs rays into the world itself, which is a "
-                                        + "different thing entirely and is not this.",
-                                Cost.of(Level.NONE, Level.MEDIUM, Level.NONE),
-                                "Experimental. Needs Vulkan Water and Glass on, and Water "
-                                        + "Reflection above zero.",
-                                0, 100, 5, "%", "OFF",
-                                new VRangeOption.Access() {
-                                    @Override
-                                    public int get() {
-                                        return VulkanConfig.getScreenReflections();
-                                    }
-
-                                    @Override
-                                    public void set(int value) {
-                                        VulkanConfig.setScreenReflections(value);
-                                    }
-                                }),
-                        new VRangeOption("Ambient Occlusion",
-                                "How much a point is darkened by how little of its surroundings it "
-                                        + "can see. The game shades a face by which way it points "
-                                        + "and by nothing else, so an inside corner is lit exactly "
-                                        + "like an open wall and a room has no shape to it. What is "
-                                        + "missing is a question about the neighbourhood rather "
-                                        + "than about the surface, which is what a depth buffer "
-                                        + "answers — and the depth buffer is already here, so this "
-                                        + "costs no geometry and no second pass over the world. "
-                                        + "Eight neighbours are asked whether they stand in front "
-                                        + "of the surface, at half resolution and blurred, because "
-                                        + "the answer is about corners and crevices rather than "
-                                        + "about texels. This is not the only occlusion in the "
-                                        + "picture and is scaled knowing it: the game bakes its "
-                                        + "own into the corners of every block while the chunk is "
-                                        + "built, and what this adds lands on top of that rather "
-                                        + "than instead of it, so a seam darkened twice comes out "
-                                        + "blacker than anything else in a room. The whole length "
-                                        + "of the slider is meant to be usable. Terrain only: "
-                                        + "entities are drawn by the game after this renderer has "
-                                        + "finished, so a creature casts no shadow into the corner "
-                                        + "it stands in.",
-                                Cost.of(Level.NONE, Level.LOW, Level.LOW),
-                                "Needs Vulkan Terrain on.",
-                                0, 100, 5, "%", "OFF",
-                                new VRangeOption.Access() {
-                                    @Override
-                                    public int get() {
-                                        return VulkanConfig.getAmbientOcclusion();
-                                    }
-
-                                    @Override
-                                    public void set(int value) {
-                                        VulkanConfig.setAmbientOcclusion(value);
-                                    }
-                                }),
-                        new VRangeOption("Ambient Occlusion Reach",
-                                "How far a corner's shadow reaches, in blocks. The row above says "
-                                        + "how dark, this one says how far, and the second is what "
-                                        + "decides whether it reads as shadow at all: a reach under "
-                                        + "a block draws a dark line along the seam where a wall "
-                                        + "meets a ceiling rather than a shadow fading out of it, "
-                                        + "because everything the effect has to say is then said "
-                                        + "within a few pixels. Two blocks is a little under the "
-                                        + "height of a doorway, which is the scale a room's corners "
-                                        + "are read at. Larger is softer and reaches further; it "
-                                        + "costs nothing extra, the same sixteen neighbours are "
-                                        + "asked, only further apart — so the wider it goes the "
-                                        + "coarser the answer, and past four blocks a small alcove "
-                                        + "is missed entirely by a set of samples spread across a "
-                                        + "room.",
-                                Cost.of(Level.NONE, Level.NONE, Level.NONE),
-                                "Needs Ambient Occlusion above zero.",
-                                1, 6, 1, " blocks", null,
-                                new VRangeOption.Access() {
-                                    @Override
-                                    public int get() {
-                                        return VulkanConfig.getAoRadius();
-                                    }
-
-                                    @Override
-                                    public void set(int value) {
-                                        VulkanConfig.setAoRadius(value);
-                                    }
-                                }),
-                        new VRangeOption("Bloom",
-                                "How much light spills off a glowing surface into the pixels "
-                                        + "around it. Lava, torches, glowstone and any modded "
-                                        + "block that gives off light — and only those. What "
-                                        + "glows is not guessed at from how bright a pixel is, "
-                                        + "which is the usual way and the wrong one here: snow "
-                                        + "and sand in sunlight are as bright on screen as lava "
-                                        + "and are not lights. The terrain shader knows the "
-                                        + "difference while it is shading — the game's own block "
-                                        + "light says whether a surface is lit from outside or is "
-                                        + "the source — so it writes the answer into the one part "
-                                        + "of an opaque pixel that was carrying a constant, and "
-                                        + "the glow is pulled out of that. Three passes over half "
-                                        + "the screen, on the GPU only. "
-                                        + "The glow is added once the game has finished drawing "
-                                        + "the world — after entities, particles, weather and "
-                                        + "water, and before the hand — so a mob standing in front "
-                                        + "of lava is inside the glow rather than pasted over it, "
-                                        + "and a torch throws light onto the sky, which is not "
-                                        + "drawn until long after this mod's own frame is "
-                                        + "finished. What still does not glow is the creatures "
-                                        + "themselves: a burning creeper spills no light, because "
-                                        + "knowing which pixels of an entity are a light needs "
-                                        + "something the game does not record anywhere this can "
-                                        + "reach.",
-                                Cost.of(Level.NONE, Level.LOW, Level.LOW),
-                                "Needs Vulkan Terrain and Material Tags on.",
-                                0, 100, 5, "%", "OFF",
-                                new VRangeOption.Access() {
-                                    @Override
-                                    public int get() {
-                                        return VulkanConfig.getBloom();
-                                    }
-
-                                    @Override
-                                    public void set(int value) {
-                                        VulkanConfig.setBloom(value);
-                                    }
-                                }),
-                        new VRangeOption("Foliage Sway",
-                                "How far the top of a plant leans in the wind. The vertex is moved "
-                                        + "rather than the shading faked, and only the top pair of "
-                                        + "corners of each quad: the bottom of a plant is in the "
-                                        + "ground and stays there. Nothing had to be stored to know "
-                                        + "which corners those are — the game builds every quad's "
-                                        + "four in one fixed order, and its own table gives the "
-                                        + "same answer for all four vertical faces, so the corner "
-                                        + "number is the marker and it costs nothing. Grass, "
-                                        + "flowers, saplings and crops only. Leaves are a solid "
-                                        + "cube whose top face would tear in half under the same "
-                                        + "rule, and a plant taller than one block has the top of "
-                                        + "its lower half and the bottom of its upper half at the "
-                                        + "same height, so it would come apart at the seam — both "
-                                        + "are left still until there is somewhere to record how "
-                                        + "far up its own plant a block is.",
-                                Cost.of(Level.NONE, Level.LOW, Level.NONE),
-                                "Needs Material Tags on; nothing else can tell grass from a torch.",
-                                0, 100, 5, "%", "OFF",
-                                new VRangeOption.Access() {
-                                    @Override
-                                    public int get() {
-                                        return VulkanConfig.getFoliageSway();
-                                    }
-
-                                    @Override
-                                    public void set(int value) {
-                                        VulkanConfig.setFoliageSway(value);
-                                    }
-                                }),
-                        new VRangeOption("Water Waves",
-                                "How much a moving wave pattern tilts the surface of water. "
-                                        + "Nothing is displaced and nothing is built: the water "
-                                        + "stays exactly where the game put it, a boat floats where "
-                                        + "it always did, and what moves is only which way the "
-                                        + "surface is treated as facing. That is enough, because "
-                                        + "every answer this renderer has about water already comes "
-                                        + "from that direction — the sky reflection breaks up along "
-                                        + "the crests instead of lying flat, and a torch held over "
-                                        + "the water scatters across it rather than landing as one "
-                                        + "smooth patch. Only the top of a water block waves; the "
-                                        + "sides are the walls of the channel it runs in. The "
-                                        + "pattern repeats every sixteen blocks, which is the price "
-                                        + "of it staying still while you walk instead of swimming "
-                                        + "along behind you.",
-                                Cost.of(Level.NONE, Level.LOW, Level.NONE),
-                                "Needs Vulkan Water and Glass on; the OpenGL copy of the water "
-                                        + "knows nothing about this.",
-                                0, 100, 5, "%", "OFF",
-                                new VRangeOption.Access() {
-                                    @Override
-                                    public int get() {
-                                        return VulkanConfig.getWaterWaves();
-                                    }
-
-                                    @Override
-                                    public void set(int value) {
-                                        VulkanConfig.setWaterWaves(value);
-                                    }
-                                }),
-                        new VRangeOption("Height Fog Depth",
-                                "How far below you the ground has to be before height fog has "
-                                        + "taken nearly all of the colour the setting above lets "
-                                        + "it take. The two work together: one says how much, this "
-                                        + "says how soon. Lower it and a valley a few blocks under "
-                                        + "your feet is already hazy; raise it and only the floor "
-                                        + "of a deep ravine is.",
-                                Cost.of(Level.NONE, Level.NONE, Level.NONE),
-                                "Only does anything while Height Fog is above 0.",
-                                4, 96, 4, " blocks", null,
-                                new VRangeOption.Access() {
-                                    @Override
-                                    public int get() {
-                                        return VulkanConfig.getHeightFogDepth();
-                                    }
-
-                                    @Override
-                                    public void set(int value) {
-                                        VulkanConfig.setHeightFogDepth(value);
-                                    }
-                                }),
-                        new VRangeOption("Dynamic Light Distance",
-                                "How far away a light source may be and still be drawn, in blocks. "
-                                        + "This is not how far the light reaches — that comes from "
-                                        + "the source itself, and a torch lights about fifteen "
-                                        + "blocks around it whatever this says. What it decides is "
-                                        + "whether a distant torch lights the ground it stands on "
-                                        + "at all, and a pool of light on the ground is visible "
-                                        + "from as far away as the ground is. An early version cut "
-                                        + "this off at 24 blocks, reasoning that a level-15 light "
-                                        + "reaches 15, and lights visibly winked out as you flew "
-                                        + "away from torches that were still in plain sight. "
-                                        + "Lowering it costs nothing and buys nothing except fewer "
-                                        + "distant lights: every loaded entity is looked at either "
-                                        + "way, and only the nearest 32 sources are ever drawn.",
-                                Cost.of(Level.NONE, Level.NONE, Level.NONE),
-                                "Only does anything while Dynamic Lights is on.",
-                                1, 200, 1, " blocks", null,
-                                new VRangeOption.Access() {
-                                    @Override
-                                    public int get() {
-                                        return VulkanConfig.getDynamicLightDistance();
-                                    }
-
-                                    @Override
-                                    public void set(int value) {
-                                        VulkanConfig.setDynamicLightDistance(value);
-                                    }
-                                })
-                        ));
+                        })));
     }
+
 
     private static VOptionPage optimizationsPage(final Minecraft mc) {
         return new VOptionPage("Optimizations",
@@ -1327,192 +935,6 @@ final class VulkanOptions {
                                         VulkanConfig.setFramesInFlight(value);
                                     }
                                 }),
-                        new VRangeOption("Ray Traced Sun Shadows",
-                                "Shadows cast by the world onto itself, traced against the terrain "
-                                        + "rather than guessed from the screen. Needs Terrain "
-                                        + "Acceleration Structures on and a card that can trace "
-                                        + "from a shader; without either it does nothing and says "
-                                        + "so in the diagnostics report. The shadow lowers how "
-                                        + "much sky light a surface receives instead of darkening "
-                                        + "the finished picture — that is how this game shades, "
-                                        + "and it is why a cave lit by a torch is left alone and "
-                                        + "why night changes nothing. Creatures do not cast one "
-                                        + "yet: the mod does not own them.",
-                                Cost.of(Level.NONE, Level.HIGH, Level.NONE),
-                                "Needs Terrain Acceleration Structures.",
-                                0, 100, 5, "%", "OFF",
-                                new VRangeOption.Access() {
-                                    @Override
-                                    public int get() {
-                                        return VulkanConfig.getSunShadows();
-                                    }
-
-                                    @Override
-                                    public void set(int value) {
-                                        VulkanConfig.setSunShadows(value);
-                                    }
-                                }),
-                        new VRangeOption("Traced Block Light",
-                                "How much of the game's own block light to replace with light "
-                                        + "traced from the blocks that emit it. Vanilla's block "
-                                        + "light is a flood fill through air: it reaches around "
-                                        + "corners correctly and it is completely flat, because it "
-                                        + "is one number per block with no idea where the light "
-                                        + "came from — a torch on one wall lights a room exactly "
-                                        + "as a torch on the other does. Traced light has a "
-                                        + "direction and casts a shadow. What it costs is range: "
-                                        + "only sources near you are found and only the nearest "
-                                        + "thirty-two fit, so turned up fully, a cave lit from "
-                                        + "further off goes dark. Needs Traced Light Shadows above "
-                                        + "zero.",
-                                Cost.of(Level.LOW, Level.HIGH, Level.NONE),
-                                "Needs Terrain Acceleration Structures.",
-                                0, 100, 5, "%", "OFF",
-                                new VRangeOption.Access() {
-                                    @Override
-                                    public int get() {
-                                        return VulkanConfig.getTracedBlockLight();
-                                    }
-
-                                    @Override
-                                    public void set(int value) {
-                                        VulkanConfig.setTracedBlockLight(value);
-                                    }
-                                }),
-                        new VRangeOption("Light Shadow Softness",
-                                "How soft the edge of a shadow cast by a torch or a fire is, kept "
-                                        + "apart from the sun's: a small flame a step away and a "
-                                        + "star a long way off are not the same kind of source and "
-                                        + "do not want the same edge. Zero gives the perfectly "
-                                        + "crisp one.",
-                                Cost.FREE, "Needs Traced Light Shadows.",
-                                0, 100, 5, "%", "HARD",
-                                new VRangeOption.Access() {
-                                    @Override
-                                    public int get() {
-                                        return VulkanConfig.getLightSoftness();
-                                    }
-
-                                    @Override
-                                    public void set(int value) {
-                                        VulkanConfig.setLightSoftness(value);
-                                    }
-                                }),
-                        new VRangeOption("Traced Light Shadows",
-                                "How many moving lights a surface may ask whether anything stands "
-                                        + "in the way. A carried torch, a burning creature or a "
-                                        + "dropped glowing block is added to the world as a "
-                                        + "straight line from the source with a falloff — nothing "
-                                        + "in this game's lighting knows what is between two "
-                                        + "points, which is why a torch lights the far side of a "
-                                        + "wall and the room around a corner. Tracing that line is "
-                                        + "what stops it, and it is one ray per light per surface, "
-                                        + "which is what this number is buying. Most surfaces have "
-                                        + "one such light near them or none. Needs Terrain "
-                                        + "Acceleration Structures.",
-                                Cost.of(Level.NONE, Level.MEDIUM, Level.NONE),
-                                "Needs Terrain Acceleration Structures.",
-                                0, 8, 1, " lights", "OFF",
-                                new VRangeOption.Access() {
-                                    @Override
-                                    public int get() {
-                                        return VulkanConfig.getTracedLights();
-                                    }
-
-                                    @Override
-                                    public void set(int value) {
-                                        VulkanConfig.setTracedLights(value);
-                                    }
-                                }),
-                        new VRangeOption("Shadow Softness",
-                                "How soft the edge of a traced shadow is. One ray gives one answer "
-                                        + "per pixel, so at zero the edge follows the pixel grid "
-                                        + "exactly — accurate, and a staircase. Higher values "
-                                        + "spread that same ray over a disc, which trades the "
-                                        + "staircase for a dithered band. It costs nothing either "
-                                        + "way: the number of rays does not change, only where the "
-                                        + "one ray is aimed.",
-                                Cost.FREE, "Needs Ray Traced Sun Shadows.",
-                                0, 100, 5, "%", "HARD",
-                                new VRangeOption.Access() {
-                                    @Override
-                                    public int get() {
-                                        return VulkanConfig.getShadowSoftness();
-                                    }
-
-                                    @Override
-                                    public void set(int value) {
-                                        VulkanConfig.setShadowSoftness(value);
-                                    }
-                                }),
-                        new VRangeOption("Frame Accumulation",
-                                "How much of what a pixel looked like last frame it keeps. A "
-                                        + "traced shadow is worked out from one ray per pixel, "
-                                        + "and one ray is grain; the rays are aimed differently "
-                                        + "each frame and averaged here, which is what turns them "
-                                        + "into a soft edge. History is thrown away wherever it "
-                                        + "would smear instead of smooth — off the edge of the "
-                                        + "screen, on anything that has just changed, and more "
-                                        + "the faster you are turning. Costs one fullscreen pass "
-                                        + "and does nothing at all unless something is traced.",
-                                Cost.of(Level.NONE, Level.LOW, Level.LOW),
-                                "Needs a traced effect to be on.",
-                                0, 100, 5, "%", "Off",
-                                new VRangeOption.Access() {
-                                    @Override
-                                    public int get() {
-                                        return VulkanConfig.getTemporalAccumulation();
-                                    }
-
-                                    @Override
-                                    public void set(int value) {
-                                        VulkanConfig.setTemporalAccumulation(value);
-                                    }
-                                }),
-                        new VRangeOption("Block Light Search",
-                                "How far around you light-emitting blocks are looked for, in "
-                                        + "blocks. The search runs a few times a second rather "
-                                        + "than every frame, and is spread across frames — "
-                                        + "placing a torch lights the room within a fraction of "
-                                        + "a second instead of within a frame, which nobody can "
-                                        + "see. Whole sixteen-block sections holding no block "
-                                        + "light are dismissed without being read, so widening "
-                                        + "this costs far less than the volume suggests.",
-                                Cost.of(Level.LOW, Level.NONE, Level.NONE),
-                                "Needs Traced Block Light.",
-                                4, 50, 2, " blocks", null,
-                                new VRangeOption.Access() {
-                                    @Override
-                                    public int get() {
-                                        return VulkanConfig.getBlockLightRadius();
-                                    }
-
-                                    @Override
-                                    public void set(int value) {
-                                        VulkanConfig.setBlockLightRadius(value);
-                                    }
-                                }),
-                        new VRangeOption("Shadow Reach",
-                                "How far from you the world carries the structures a ray can hit, "
-                                        + "in blocks. This decides both what is able to cast a "
-                                        + "shadow onto you and what the whole thing costs in video "
-                                        + "memory and in building time — past it there is nothing "
-                                        + "to hit, so shadows fade out over the last quarter "
-                                        + "rather than ending at a circle drawn around you. Raise "
-                                        + "it if you can see where the shadows stop.",
-                                Cost.of(Level.LOW, Level.MEDIUM, Level.MEDIUM), null,
-                                32, 256, 16, " blocks", null,
-                                new VRangeOption.Access() {
-                                    @Override
-                                    public int get() {
-                                        return VulkanConfig.getRayTracingRadius();
-                                    }
-
-                                    @Override
-                                    public void set(int value) {
-                                        VulkanConfig.setRayTracingRadius(value);
-                                    }
-                                }),
                         new VSwitchOption("Entity Capture",
                                 "Read what the game draws for every creature and draw none of it. "
                                         + "The first step of moving entities into Vulkan, and it "
@@ -1532,30 +954,6 @@ final class VulkanOptions {
                                     @Override
                                     public void set(boolean value) {
                                         VulkanConfig.setEntityCapture(value);
-                                    }
-                                }),
-                        new VSwitchOption("Terrain Acceleration Structures",
-                                "Build the structures a traced ray needs over the terrain this mod "
-                                        + "draws. Nothing uses them yet, and the world looks "
-                                        + "exactly the same with this on. What it produces is a "
-                                        + "measurement: the obstacle to ray tracing in this game "
-                                        + "has always been that the structure has to be rebuilt "
-                                        + "whenever a chunk is, and rebuilding chunks is already "
-                                        + "the largest cost in a moving frame — this turns that "
-                                        + "sentence into a number in the diagnostics report. Needs "
-                                        + "Vulkan 1.2 and the acceleration-structure extension; if "
-                                        + "the card cannot, the report says which part is missing.",
-                                Cost.of(Level.LOW, Level.MEDIUM, Level.HIGH),
-                                "Applies after the game restarts.",
-                                new VSwitchOption.Access() {
-                                    @Override
-                                    public boolean get() {
-                                        return VulkanConfig.isRayTracing();
-                                    }
-
-                                    @Override
-                                    public void set(boolean value) {
-                                        VulkanConfig.setRayTracing(value);
                                     }
                                 }),
                         new VRangeOption("Vulkan GPU",
@@ -1713,149 +1111,6 @@ final class VulkanOptions {
                                         VulkanConfig.setShowOcclusion(value);
                                     }
                                 }),
-                        new VRangeOption("Water Refraction",
-                                "How much the surface of water bends what is seen through it. "
-                                        + "Reflection and refraction are two halves of one thing "
-                                        + "and only one of them was here: a pond whose mirror "
-                                        + "moves while its bed stays perfectly still reads as "
-                                        + "glass laid over a photograph, and the bed is the "
-                                        + "giveaway. What is behind the water comes from the same "
-                                        + "picture the reflection searches, so it shows the world "
-                                        + "but not creatures, which this renderer does not draw. "
-                                        + "Turned up too far, straight edges under water start to "
-                                        + "look like jelly.",
-                                Cost.of(Level.NONE, Level.LOW, Level.NONE),
-                                "Needs Vulkan Water and Glass on.",
-                                0, 100, 5, "%", "Off",
-                                new VRangeOption.Access() {
-                                    @Override
-                                    public int get() {
-                                        return VulkanConfig.getWaterRefraction();
-                                    }
-
-                                    @Override
-                                    public void set(int value) {
-                                        VulkanConfig.setWaterRefraction(value);
-                                    }
-                                }),
-                        new VCyclingOption("Sky Pictures From Pack",
-                                "Take the sun and the moon from a shader pack in your "
-                                        + "shaderpacks folder. Only the pictures: a pack's shader "
-                                        + "code is written against a loader that does not exist "
-                                        + "here and cannot be run at all, but a sun is a PNG, and "
-                                        + "reading one out of a pack you already have copies "
-                                        + "nothing into this mod. Packs that ship no sun have "
-                                        + "none to lend, and the game's own is used instead — the "
-                                        + "log says which happened.",
-                                Cost.FREE, null,
-                                net.vulkanmod112.client.ShaderPackSkins.names(),
-                                new VCyclingOption.Access() {
-                                    @Override
-                                    public int get() {
-                                        return net.vulkanmod112.client.ShaderPackSkins
-                                                .indexOf(VulkanConfig.getSkinPack());
-                                    }
-
-                                    @Override
-                                    public void set(int index) {
-                                        VulkanConfig.setSkinPack(
-                                                net.vulkanmod112.client.ShaderPackSkins
-                                                        .nameAt(index));
-                                    }
-                                }, true),
-                        new VSwitchOption("Round Sun",
-                                "Draw the sun as a round, warm disc instead of vanilla's square "
-                                        + "one. The picture is built by this mod rather than "
-                                        + "shipped as a file, which is what makes its size and "
-                                        + "warmth sliders. Nothing else about the sky changes — "
-                                        + "the quad, where it is, how it blends and the moon are "
-                                        + "all still the game's, and a mod that draws its own sky "
-                                        + "never reaches this at all.",
-                                Cost.FREE, null,
-                                new VSwitchOption.Access() {
-                                    @Override
-                                    public boolean get() {
-                                        return VulkanConfig.isRoundSun();
-                                    }
-
-                                    @Override
-                                    public void set(boolean value) {
-                                        VulkanConfig.setRoundSun(value);
-                                    }
-                                }),
-                        new VSwitchOption("Round Moon",
-                                "Draw the moon as a round disc with a soft glow. The game does "
-                                        + "not draw a moon so much as one cell of an "
-                                        + "eight-picture sheet chosen by tonight's phase, so all "
-                                        + "eight are drawn here: a lit disc with the shadow "
-                                        + "creeping across it, which is one circle cut by a "
-                                        + "moving ellipse. A single disc in its place would be "
-                                        + "full every night of the month.",
-                                Cost.FREE, null,
-                                new VSwitchOption.Access() {
-                                    @Override
-                                    public boolean get() {
-                                        return VulkanConfig.isRoundMoon();
-                                    }
-
-                                    @Override
-                                    public void set(boolean value) {
-                                        VulkanConfig.setRoundMoon(value);
-                                    }
-                                }),
-                        new VRangeOption("Moon Size",
-                                "How large the moon is drawn. Same trick as the sun: the quad the "
-                                        + "game gives it cannot be resized from here, but how "
-                                        + "much of its picture the disc fills can.",
-                                Cost.FREE, "Needs Round Moon.",
-                                0, 100, 5, "%", null,
-                                new VRangeOption.Access() {
-                                    @Override
-                                    public int get() {
-                                        return VulkanConfig.getMoonSize();
-                                    }
-
-                                    @Override
-                                    public void set(int value) {
-                                        VulkanConfig.setMoonSize(value);
-                                    }
-                                }),
-                        new VRangeOption("Sun Size",
-                                "How large the disc is drawn. The quad the game gives the sun "
-                                        + "cannot be resized from here, but how much of it the "
-                                        + "disc fills can, which comes to the same thing. The "
-                                        + "middle of the range is close to where vanilla put it.",
-                                Cost.FREE, "Needs Round Sun.",
-                                0, 100, 5, "%", null,
-                                new VRangeOption.Access() {
-                                    @Override
-                                    public int get() {
-                                        return VulkanConfig.getSunSize();
-                                    }
-
-                                    @Override
-                                    public void set(int value) {
-                                        VulkanConfig.setSunSize(value);
-                                    }
-                                }),
-                        new VRangeOption("Sun Warmth",
-                                "How far towards orange the rim of the sun goes. 0 leaves it "
-                                        + "white. The centre stays bright either way: a sun that "
-                                        + "is one flat colour looks painted on, and the game's "
-                                        + "own is not flat either.",
-                                Cost.FREE, "Needs Round Sun.",
-                                0, 100, 5, "%", "White",
-                                new VRangeOption.Access() {
-                                    @Override
-                                    public int get() {
-                                        return VulkanConfig.getSunWarmth();
-                                    }
-
-                                    @Override
-                                    public void set(int value) {
-                                        VulkanConfig.setSunWarmth(value);
-                                    }
-                                }),
                         new VSwitchOption("Vulkan Entities (broken)",
                                 "KNOWN BROKEN, and left here only so the work can be continued: "
                                         + "creatures come out see-through, water covers them even "
@@ -2006,5 +1261,762 @@ final class VulkanOptions {
     /** Kept so the class is obviously client-side only. */
     static GameSettings settings(Minecraft mc) {
         return mc.gameSettings;
+    }
+
+    private static VOptionPage shadersPage(final Minecraft mc) {
+        return new VOptionPage("Shaders",
+                new VOptionBlock("Shaders",
+                        new VSwitchOption("Material Tags",
+                                "Record what each stretch of a chunk is made of while the chunk is "
+                                        + "being built. On its own this changes nothing you can "
+                                        + "see: it is the groundwork the effects still to come are "
+                                        + "waiting on. The game draws terrain in four layers and a "
+                                        + "layer is not a material — water and stained glass are "
+                                        + "the same layer, so are grass and torches and rails — "
+                                        + "and the vertex carries position, colour, texture and "
+                                        + "light and nothing else. The one moment anything knows "
+                                        + "that a particular block is water is while that block is "
+                                        + "being turned into triangles, so that is where it is "
+                                        + "written down. Costs a branch per block on the building "
+                                        + "threads, and the diagnostics log says what it measured "
+                                        + "rather than leaving that to be believed.",
+                                Cost.of(Level.NONE, Level.NONE, Level.LOW),
+                                "Everything below it in this section that tells one block from "
+                                        + "another needs it, starting with how foliage is lit.",
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return VulkanConfig.isMaterialTags();
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        VulkanConfig.setMaterialTags(value);
+                                    }
+                                }),
+                        new VSwitchOption("Dynamic Lights",
+                                "Let a carried torch, a dropped glowing block or a burning "
+                                        + "creature light the ground around it. The light is added "
+                                        + "while the world is being shaded rather than written "
+                                        + "into it, so no chunk is rebuilt — and rebuilding chunks "
+                                        + "is exactly what the frame is already waiting on while "
+                                        + "you move, which is what makes the usual approach to "
+                                        + "this cost so much. Any block that gives off light does, "
+                                        + "including modded ones, because the value is read from "
+                                        + "the block itself. Mobs standing in the light, the "
+                                        + "particles a broken block throws off and the view from "
+                                        + "first person are all lit to match. Nothing is written "
+                                        + "into the world and nothing is sent anywhere: this is "
+                                        + "worked out on your machine while the frame is drawn, so "
+                                        + "it changes nothing about mob spawning or daylight "
+                                        + "sensors and works on any server. Another player carrying "
+                                        + "a torch lights the ground for you without needing this "
+                                        + "mod themselves — only the one looking needs it.",
+                                Cost.of(Level.LOW, Level.LOW, Level.NONE), null,
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return VulkanConfig.isDynamicLights();
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        VulkanConfig.setDynamicLights(value);
+                                    }
+                                }),
+                        new VRangeOption("Directional Light",
+                                "How far dynamic light goes towards caring which way a surface is "
+                                        + "turned. The game's own light is one number per block "
+                                        + "and knows nothing about orientation, so a dropped torch "
+                                        + "lights the underside of the floor it is lying on "
+                                        + "exactly as brightly as the top of it. This renderer can "
+                                        + "work the face out from how the surface changes across "
+                                        + "the screen — every quad in a block model is flat, so "
+                                        + "that is the real face rather than a guess — and dim "
+                                        + "what is turned away from the light. Nothing goes fully "
+                                        + "dark and nothing switches on at once: the flame is "
+                                        + "treated as having width, so its light wraps around a "
+                                        + "corner you are standing next to and stops at one across "
+                                        + "the room. Costs nothing at all while dynamic lights are "
+                                        + "off.",
+                                Cost.of(Level.NONE, Level.LOW, Level.NONE),
+                                "Only does anything while Dynamic Lights is on.",
+                                0, 100, 5, "%", "OFF",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getDirectionalLight();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setDirectionalLight(value);
+                                    }
+                                }),
+                        new VRangeOption("Height Fog",
+                                "How much colour the ground below you gives up to fog. This is a "
+                                        + "look rather than a fix, and it is honest about its "
+                                        + "limits: it fades towards the game's own fog colour and "
+                                        + "only where the game already has fog, so it cannot "
+                                        + "invent a haze the sky disagrees with. What it cannot "
+                                        + "reach is everything this renderer does not draw — "
+                                        + "entities and particles are fogged by OpenGL, which "
+                                        + "knows nothing about height, so a mob standing in a "
+                                        + "fogged valley stays clearer than the ground under it.",
+                                Cost.of(Level.NONE, Level.LOW, Level.NONE), null,
+                                // A single percent, not a doubled one: this
+                                // string is drawn as it is rather than passed
+                                // through the game's formatter, because its key
+                                // slugs to nothing and no translation can exist
+                                // for it.
+                                0, 100, 5, "%", "OFF",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getHeightFog();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setHeightFog(value);
+                                    }
+                                }),
+                        new VRangeOption("Water Reflection",
+                                "How much of a water surface turns into a reflection of the sky as "
+                                        + "you look along it. Looking straight down you see the "
+                                        + "bottom; looking along the water you see the horizon, and "
+                                        + "the change between the two is steep and happens near the "
+                                        + "end — which is how water actually behaves and something "
+                                        + "the game has never done. What it reflects is the game's "
+                                        + "own fog colour, and that is not a stand-in: at a grazing "
+                                        + "angle what flat water shows you is the horizon, and the "
+                                        + "fog colour is the horizon, so this follows sunrise, "
+                                        + "weather and being underwater without being told about "
+                                        + "any of them.",
+                                Cost.of(Level.NONE, Level.LOW, Level.NONE),
+                                "Needs Vulkan Water and Glass on; the OpenGL copy of the water "
+                                        + "knows nothing about this.",
+                                0, 100, 5, "%", "OFF",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getWaterReflection();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setWaterReflection(value);
+                                    }
+                                }),
+                        new VRangeOption("Screen Reflections",
+                                "How much of a water reflection is the world that is actually "
+                                        + "standing there, rather than the flat fog colour the "
+                                        + "row above puts on it. The reflected ray is followed "
+                                        + "across the picture that has already been drawn — which "
+                                        + "is possible at all only because water is drawn in a "
+                                        + "pass of its own, after the opaque world is finished and "
+                                        + "handed back, so the colour and depth of everything "
+                                        + "behind the surface exist by the time a water pixel is "
+                                        + "being shaded. Nothing is traced against the world "
+                                        + "itself, which is what makes this cost a loop rather "
+                                        + "than a second copy of the world in memory. What it can "
+                                        + "find is exactly what is on screen and no more: a ray "
+                                        + "leaving the edge of the frame, or turning back towards "
+                                        + "you where nothing was ever drawn, has no answer, and "
+                                        + "the fog colour finishes it — which is not a patch, "
+                                        + "since the fog colour is the horizon and the horizon is "
+                                        + "what flat water shows at that angle anyway. Creatures "
+                                        + "are missing from it for the same reason they are "
+                                        + "missing from everything else here: the game draws them "
+                                        + "after this renderer has finished. Reflecting what is "
+                                        + "off screen needs rays into the world itself, which is a "
+                                        + "different thing entirely and is not this.",
+                                Cost.of(Level.NONE, Level.MEDIUM, Level.NONE),
+                                "Experimental. Needs Vulkan Water and Glass on, and Water "
+                                        + "Reflection above zero.",
+                                0, 100, 5, "%", "OFF",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getScreenReflections();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setScreenReflections(value);
+                                    }
+                                }),
+                        new VRangeOption("Ambient Occlusion",
+                                "How much a point is darkened by how little of its surroundings it "
+                                        + "can see. The game shades a face by which way it points "
+                                        + "and by nothing else, so an inside corner is lit exactly "
+                                        + "like an open wall and a room has no shape to it. What is "
+                                        + "missing is a question about the neighbourhood rather "
+                                        + "than about the surface, which is what a depth buffer "
+                                        + "answers — and the depth buffer is already here, so this "
+                                        + "costs no geometry and no second pass over the world. "
+                                        + "Eight neighbours are asked whether they stand in front "
+                                        + "of the surface, at half resolution and blurred, because "
+                                        + "the answer is about corners and crevices rather than "
+                                        + "about texels. This is not the only occlusion in the "
+                                        + "picture and is scaled knowing it: the game bakes its "
+                                        + "own into the corners of every block while the chunk is "
+                                        + "built, and what this adds lands on top of that rather "
+                                        + "than instead of it, so a seam darkened twice comes out "
+                                        + "blacker than anything else in a room. The whole length "
+                                        + "of the slider is meant to be usable. Terrain only: "
+                                        + "entities are drawn by the game after this renderer has "
+                                        + "finished, so a creature casts no shadow into the corner "
+                                        + "it stands in.",
+                                Cost.of(Level.NONE, Level.LOW, Level.LOW),
+                                "Needs Vulkan Terrain on.",
+                                0, 100, 5, "%", "OFF",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getAmbientOcclusion();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setAmbientOcclusion(value);
+                                    }
+                                }),
+                        new VRangeOption("Ambient Occlusion Reach",
+                                "How far a corner's shadow reaches, in blocks. The row above says "
+                                        + "how dark, this one says how far, and the second is what "
+                                        + "decides whether it reads as shadow at all: a reach under "
+                                        + "a block draws a dark line along the seam where a wall "
+                                        + "meets a ceiling rather than a shadow fading out of it, "
+                                        + "because everything the effect has to say is then said "
+                                        + "within a few pixels. Two blocks is a little under the "
+                                        + "height of a doorway, which is the scale a room's corners "
+                                        + "are read at. Larger is softer and reaches further; it "
+                                        + "costs nothing extra, the same sixteen neighbours are "
+                                        + "asked, only further apart — so the wider it goes the "
+                                        + "coarser the answer, and past four blocks a small alcove "
+                                        + "is missed entirely by a set of samples spread across a "
+                                        + "room.",
+                                Cost.of(Level.NONE, Level.NONE, Level.NONE),
+                                "Needs Ambient Occlusion above zero.",
+                                1, 6, 1, " blocks", null,
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getAoRadius();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setAoRadius(value);
+                                    }
+                                }),
+                        new VRangeOption("Bloom",
+                                "How much light spills off a glowing surface into the pixels "
+                                        + "around it. Lava, torches, glowstone and any modded "
+                                        + "block that gives off light — and only those. What "
+                                        + "glows is not guessed at from how bright a pixel is, "
+                                        + "which is the usual way and the wrong one here: snow "
+                                        + "and sand in sunlight are as bright on screen as lava "
+                                        + "and are not lights. The terrain shader knows the "
+                                        + "difference while it is shading — the game's own block "
+                                        + "light says whether a surface is lit from outside or is "
+                                        + "the source — so it writes the answer into the one part "
+                                        + "of an opaque pixel that was carrying a constant, and "
+                                        + "the glow is pulled out of that. Three passes over half "
+                                        + "the screen, on the GPU only. "
+                                        + "The glow is added once the game has finished drawing "
+                                        + "the world — after entities, particles, weather and "
+                                        + "water, and before the hand — so a mob standing in front "
+                                        + "of lava is inside the glow rather than pasted over it, "
+                                        + "and a torch throws light onto the sky, which is not "
+                                        + "drawn until long after this mod's own frame is "
+                                        + "finished. What still does not glow is the creatures "
+                                        + "themselves: a burning creeper spills no light, because "
+                                        + "knowing which pixels of an entity are a light needs "
+                                        + "something the game does not record anywhere this can "
+                                        + "reach.",
+                                Cost.of(Level.NONE, Level.LOW, Level.LOW),
+                                "Needs Vulkan Terrain and Material Tags on.",
+                                0, 100, 5, "%", "OFF",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getBloom();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setBloom(value);
+                                    }
+                                }),
+                        new VRangeOption("Foliage Sway",
+                                "How far the top of a plant leans in the wind. The vertex is moved "
+                                        + "rather than the shading faked, and only the top pair of "
+                                        + "corners of each quad: the bottom of a plant is in the "
+                                        + "ground and stays there. Nothing had to be stored to know "
+                                        + "which corners those are — the game builds every quad's "
+                                        + "four in one fixed order, and its own table gives the "
+                                        + "same answer for all four vertical faces, so the corner "
+                                        + "number is the marker and it costs nothing. Grass, "
+                                        + "flowers, saplings and crops only. Leaves are a solid "
+                                        + "cube whose top face would tear in half under the same "
+                                        + "rule, and a plant taller than one block has the top of "
+                                        + "its lower half and the bottom of its upper half at the "
+                                        + "same height, so it would come apart at the seam — both "
+                                        + "are left still until there is somewhere to record how "
+                                        + "far up its own plant a block is.",
+                                Cost.of(Level.NONE, Level.LOW, Level.NONE),
+                                "Needs Material Tags on; nothing else can tell grass from a torch.",
+                                0, 100, 5, "%", "OFF",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getFoliageSway();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setFoliageSway(value);
+                                    }
+                                }),
+                        new VRangeOption("Water Waves",
+                                "How much a moving wave pattern tilts the surface of water. "
+                                        + "Nothing is displaced and nothing is built: the water "
+                                        + "stays exactly where the game put it, a boat floats where "
+                                        + "it always did, and what moves is only which way the "
+                                        + "surface is treated as facing. That is enough, because "
+                                        + "every answer this renderer has about water already comes "
+                                        + "from that direction — the sky reflection breaks up along "
+                                        + "the crests instead of lying flat, and a torch held over "
+                                        + "the water scatters across it rather than landing as one "
+                                        + "smooth patch. Only the top of a water block waves; the "
+                                        + "sides are the walls of the channel it runs in. The "
+                                        + "pattern repeats every sixteen blocks, which is the price "
+                                        + "of it staying still while you walk instead of swimming "
+                                        + "along behind you.",
+                                Cost.of(Level.NONE, Level.LOW, Level.NONE),
+                                "Needs Vulkan Water and Glass on; the OpenGL copy of the water "
+                                        + "knows nothing about this.",
+                                0, 100, 5, "%", "OFF",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getWaterWaves();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setWaterWaves(value);
+                                    }
+                                }),
+                        new VRangeOption("Height Fog Depth",
+                                "How far below you the ground has to be before height fog has "
+                                        + "taken nearly all of the colour the setting above lets "
+                                        + "it take. The two work together: one says how much, this "
+                                        + "says how soon. Lower it and a valley a few blocks under "
+                                        + "your feet is already hazy; raise it and only the floor "
+                                        + "of a deep ravine is.",
+                                Cost.of(Level.NONE, Level.NONE, Level.NONE),
+                                "Only does anything while Height Fog is above 0.",
+                                4, 96, 4, " blocks", null,
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getHeightFogDepth();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setHeightFogDepth(value);
+                                    }
+                                }),
+                        new VRangeOption("Dynamic Light Distance",
+                                "How far away a light source may be and still be drawn, in blocks. "
+                                        + "This is not how far the light reaches — that comes from "
+                                        + "the source itself, and a torch lights about fifteen "
+                                        + "blocks around it whatever this says. What it decides is "
+                                        + "whether a distant torch lights the ground it stands on "
+                                        + "at all, and a pool of light on the ground is visible "
+                                        + "from as far away as the ground is. An early version cut "
+                                        + "this off at 24 blocks, reasoning that a level-15 light "
+                                        + "reaches 15, and lights visibly winked out as you flew "
+                                        + "away from torches that were still in plain sight. "
+                                        + "Lowering it costs nothing and buys nothing except fewer "
+                                        + "distant lights: every loaded entity is looked at either "
+                                        + "way, and only the nearest 32 sources are ever drawn.",
+                                Cost.of(Level.NONE, Level.NONE, Level.NONE),
+                                "Only does anything while Dynamic Lights is on.",
+                                1, 200, 1, " blocks", null,
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getDynamicLightDistance();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setDynamicLightDistance(value);
+                                    }
+                                })),
+                new VOptionBlock("Sky and Water",
+                        new VRangeOption("Water Refraction",
+                                "How much the surface of water bends what is seen through it. "
+                                        + "Reflection and refraction are two halves of one thing "
+                                        + "and only one of them was here: a pond whose mirror "
+                                        + "moves while its bed stays perfectly still reads as "
+                                        + "glass laid over a photograph, and the bed is the "
+                                        + "giveaway. What is behind the water comes from the same "
+                                        + "picture the reflection searches, so it shows the world "
+                                        + "but not creatures, which this renderer does not draw. "
+                                        + "Turned up too far, straight edges under water start to "
+                                        + "look like jelly.",
+                                Cost.of(Level.NONE, Level.LOW, Level.NONE),
+                                "Needs Vulkan Water and Glass on.",
+                                0, 100, 5, "%", "Off",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getWaterRefraction();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setWaterRefraction(value);
+                                    }
+                                }),
+                        new VSwitchOption("Round Sun",
+                                "Draw the sun as a round, warm disc instead of vanilla's square "
+                                        + "one. The picture is built by this mod rather than "
+                                        + "shipped as a file, which is what makes its size and "
+                                        + "warmth sliders. Nothing else about the sky changes — "
+                                        + "the quad, where it is, how it blends and the moon are "
+                                        + "all still the game's, and a mod that draws its own sky "
+                                        + "never reaches this at all.",
+                                Cost.FREE, null,
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return VulkanConfig.isRoundSun();
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        VulkanConfig.setRoundSun(value);
+                                    }
+                                }),
+                        new VSwitchOption("Round Moon",
+                                "Draw the moon as a round disc with a soft glow. The game does "
+                                        + "not draw a moon so much as one cell of an "
+                                        + "eight-picture sheet chosen by tonight's phase, so all "
+                                        + "eight are drawn here: a lit disc with the shadow "
+                                        + "creeping across it, which is one circle cut by a "
+                                        + "moving ellipse. A single disc in its place would be "
+                                        + "full every night of the month.",
+                                Cost.FREE, null,
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return VulkanConfig.isRoundMoon();
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        VulkanConfig.setRoundMoon(value);
+                                    }
+                                }),
+                        new VRangeOption("Moon Size",
+                                "How large the moon is drawn. Same trick as the sun: the quad the "
+                                        + "game gives it cannot be resized from here, but how "
+                                        + "much of its picture the disc fills can.",
+                                Cost.FREE, "Needs Round Moon.",
+                                0, 100, 5, "%", null,
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getMoonSize();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setMoonSize(value);
+                                    }
+                                }),
+                        new VRangeOption("Sun Size",
+                                "How large the disc is drawn. The quad the game gives the sun "
+                                        + "cannot be resized from here, but how much of it the "
+                                        + "disc fills can, which comes to the same thing. The "
+                                        + "middle of the range is close to where vanilla put it.",
+                                Cost.FREE, "Needs Round Sun.",
+                                0, 100, 5, "%", null,
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getSunSize();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setSunSize(value);
+                                    }
+                                }),
+                        new VRangeOption("Sun Warmth",
+                                "How far towards orange the rim of the sun goes. 0 leaves it "
+                                        + "white. The centre stays bright either way: a sun that "
+                                        + "is one flat colour looks painted on, and the game's "
+                                        + "own is not flat either.",
+                                Cost.FREE, "Needs Round Sun.",
+                                0, 100, 5, "%", "White",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getSunWarmth();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setSunWarmth(value);
+                                    }
+                                }),
+                        new VCyclingOption("Sky Pictures From Pack",
+                                "Take the sun and the moon from a shader pack in your "
+                                        + "shaderpacks folder. Only the pictures: a pack's shader "
+                                        + "code is written against a loader that does not exist "
+                                        + "here and cannot be run at all, but a sun is a PNG, and "
+                                        + "reading one out of a pack you already have copies "
+                                        + "nothing into this mod. Packs that ship no sun have "
+                                        + "none to lend, and the game's own is used instead — the "
+                                        + "log says which happened.",
+                                Cost.FREE, null,
+                                net.vulkanmod112.client.ShaderPackSkins.names(),
+                                new VCyclingOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return net.vulkanmod112.client.ShaderPackSkins
+                                                .indexOf(VulkanConfig.getSkinPack());
+                                    }
+
+                                    @Override
+                                    public void set(int index) {
+                                        VulkanConfig.setSkinPack(
+                                                net.vulkanmod112.client.ShaderPackSkins
+                                                        .nameAt(index));
+                                    }
+                                }, true)));
+    }
+
+    private static VOptionPage rayTracingPage(final Minecraft mc) {
+        return new VOptionPage("Ray Tracing",
+                new VOptionBlock("Ray Tracing",
+                        new VSwitchOption("Terrain Acceleration Structures",
+                                "Build the structures a traced ray needs over the terrain this mod "
+                                        + "draws. Nothing uses them yet, and the world looks "
+                                        + "exactly the same with this on. What it produces is a "
+                                        + "measurement: the obstacle to ray tracing in this game "
+                                        + "has always been that the structure has to be rebuilt "
+                                        + "whenever a chunk is, and rebuilding chunks is already "
+                                        + "the largest cost in a moving frame — this turns that "
+                                        + "sentence into a number in the diagnostics report. Needs "
+                                        + "Vulkan 1.2 and the acceleration-structure extension; if "
+                                        + "the card cannot, the report says which part is missing.",
+                                Cost.of(Level.LOW, Level.MEDIUM, Level.HIGH),
+                                "Applies after the game restarts.",
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return VulkanConfig.isRayTracing();
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        VulkanConfig.setRayTracing(value);
+                                    }
+                                }),
+                        new VRangeOption("Ray Traced Sun Shadows",
+                                "Shadows cast by the world onto itself, traced against the terrain "
+                                        + "rather than guessed from the screen. Needs Terrain "
+                                        + "Acceleration Structures on and a card that can trace "
+                                        + "from a shader; without either it does nothing and says "
+                                        + "so in the diagnostics report. The shadow lowers how "
+                                        + "much sky light a surface receives instead of darkening "
+                                        + "the finished picture — that is how this game shades, "
+                                        + "and it is why a cave lit by a torch is left alone and "
+                                        + "why night changes nothing. Creatures do not cast one "
+                                        + "yet: the mod does not own them.",
+                                Cost.of(Level.NONE, Level.HIGH, Level.NONE),
+                                "Needs Terrain Acceleration Structures.",
+                                0, 100, 5, "%", "OFF",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getSunShadows();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setSunShadows(value);
+                                    }
+                                }),
+                        new VRangeOption("Shadow Softness",
+                                "How soft the edge of a traced shadow is. One ray gives one answer "
+                                        + "per pixel, so at zero the edge follows the pixel grid "
+                                        + "exactly — accurate, and a staircase. Higher values "
+                                        + "spread that same ray over a disc, which trades the "
+                                        + "staircase for a dithered band. It costs nothing either "
+                                        + "way: the number of rays does not change, only where the "
+                                        + "one ray is aimed.",
+                                Cost.FREE, "Needs Ray Traced Sun Shadows.",
+                                0, 100, 5, "%", "HARD",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getShadowSoftness();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setShadowSoftness(value);
+                                    }
+                                }),
+                        new VRangeOption("Shadow Reach",
+                                "How far from you the world carries the structures a ray can hit, "
+                                        + "in blocks. This decides both what is able to cast a "
+                                        + "shadow onto you and what the whole thing costs in video "
+                                        + "memory and in building time — past it there is nothing "
+                                        + "to hit, so shadows fade out over the last quarter "
+                                        + "rather than ending at a circle drawn around you. Raise "
+                                        + "it if you can see where the shadows stop.",
+                                Cost.of(Level.LOW, Level.MEDIUM, Level.MEDIUM), null,
+                                32, 256, 16, " blocks", null,
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getRayTracingRadius();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setRayTracingRadius(value);
+                                    }
+                                }),
+                        new VRangeOption("Traced Light Shadows",
+                                "How many moving lights a surface may ask whether anything stands "
+                                        + "in the way. A carried torch, a burning creature or a "
+                                        + "dropped glowing block is added to the world as a "
+                                        + "straight line from the source with a falloff — nothing "
+                                        + "in this game's lighting knows what is between two "
+                                        + "points, which is why a torch lights the far side of a "
+                                        + "wall and the room around a corner. Tracing that line is "
+                                        + "what stops it, and it is one ray per light per surface, "
+                                        + "which is what this number is buying. Most surfaces have "
+                                        + "one such light near them or none. Needs Terrain "
+                                        + "Acceleration Structures.",
+                                Cost.of(Level.NONE, Level.MEDIUM, Level.NONE),
+                                "Needs Terrain Acceleration Structures.",
+                                0, 8, 1, " lights", "OFF",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getTracedLights();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setTracedLights(value);
+                                    }
+                                }),
+                        new VRangeOption("Light Shadow Softness",
+                                "How soft the edge of a shadow cast by a torch or a fire is, kept "
+                                        + "apart from the sun's: a small flame a step away and a "
+                                        + "star a long way off are not the same kind of source and "
+                                        + "do not want the same edge. Zero gives the perfectly "
+                                        + "crisp one.",
+                                Cost.FREE, "Needs Traced Light Shadows.",
+                                0, 100, 5, "%", "HARD",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getLightSoftness();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setLightSoftness(value);
+                                    }
+                                }),
+                        new VRangeOption("Traced Block Light",
+                                "How much of the game's own block light to replace with light "
+                                        + "traced from the blocks that emit it. Vanilla's block "
+                                        + "light is a flood fill through air: it reaches around "
+                                        + "corners correctly and it is completely flat, because it "
+                                        + "is one number per block with no idea where the light "
+                                        + "came from — a torch on one wall lights a room exactly "
+                                        + "as a torch on the other does. Traced light has a "
+                                        + "direction and casts a shadow. What it costs is range: "
+                                        + "only sources near you are found and only the nearest "
+                                        + "thirty-two fit, so turned up fully, a cave lit from "
+                                        + "further off goes dark. Needs Traced Light Shadows above "
+                                        + "zero.",
+                                Cost.of(Level.LOW, Level.HIGH, Level.NONE),
+                                "Needs Terrain Acceleration Structures.",
+                                0, 100, 5, "%", "OFF",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getTracedBlockLight();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setTracedBlockLight(value);
+                                    }
+                                }),
+                        new VRangeOption("Block Light Search",
+                                "How far around you light-emitting blocks are looked for, in "
+                                        + "blocks. The search runs a few times a second rather "
+                                        + "than every frame, and is spread across frames — "
+                                        + "placing a torch lights the room within a fraction of "
+                                        + "a second instead of within a frame, which nobody can "
+                                        + "see. Whole sixteen-block sections holding no block "
+                                        + "light are dismissed without being read, so widening "
+                                        + "this costs far less than the volume suggests.",
+                                Cost.of(Level.LOW, Level.NONE, Level.NONE),
+                                "Needs Traced Block Light.",
+                                4, 50, 2, " blocks", null,
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getBlockLightRadius();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setBlockLightRadius(value);
+                                    }
+                                }),
+                        new VRangeOption("Frame Accumulation",
+                                "How much of what a pixel looked like last frame it keeps. A "
+                                        + "traced shadow is worked out from one ray per pixel, "
+                                        + "and one ray is grain; the rays are aimed differently "
+                                        + "each frame and averaged here, which is what turns them "
+                                        + "into a soft edge. History is thrown away wherever it "
+                                        + "would smear instead of smooth — off the edge of the "
+                                        + "screen, on anything that has just changed, and more "
+                                        + "the faster you are turning. Costs one fullscreen pass "
+                                        + "and does nothing at all unless something is traced.",
+                                Cost.of(Level.NONE, Level.LOW, Level.LOW),
+                                "Needs a traced effect to be on.",
+                                0, 100, 5, "%", "Off",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getTemporalAccumulation();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setTemporalAccumulation(value);
+                                    }
+                                })));
     }
 }

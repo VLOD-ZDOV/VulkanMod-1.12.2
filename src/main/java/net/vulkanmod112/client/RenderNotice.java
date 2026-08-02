@@ -64,6 +64,51 @@ public final class RenderNotice {
                 + "vulkanmod112-diagnostics.log next to the game's own log.");
     }
 
+    /**
+     * The one setting whose switch does nothing until the game starts again.
+     *
+     * Acceleration structures, the extensions they need and the device
+     * addresses the geometry buffer wants are all requested when the Vulkan
+     * device is created and cannot be added to a running one. So turning ray
+     * tracing on mid-game leaves the switch on, the device unchanged, and sun
+     * shadows, traced light and traced block light all doing nothing.
+     *
+     * The settings screen has always said "applies after the game restarts"
+     * under the option. That was not enough: a player who has just switched
+     * four things on and gone looking for shadows is not reading a line under
+     * the switch they already pressed. So it is said again in the chat they
+     * are looking at, once, at the moment it becomes true.
+     */
+    private static boolean restartTold;
+    private static String pendingRestart;
+
+    public static void restartNeededForRayTracing() {
+        if (restartTold) {
+            return;
+        }
+        restartTold = true;
+        pendingRestart = "";
+    }
+
+    /** Called from the same safe point as the notice above. */
+    public static void flushRestartToChat() {
+        if (pendingRestart == null) {
+            return;
+        }
+        Minecraft mc = Minecraft.getMinecraft();
+        if (mc == null || mc.ingameGUI == null || mc.player == null) {
+            return;
+        }
+        pendingRestart = null;
+        say(mc, TextFormatting.YELLOW + "[VulkanMod112] " + TextFormatting.WHITE
+                + "Ray tracing is on in the settings, but this session is not tracing.");
+        say(mc, TextFormatting.GRAY + "Acceleration structures have to be asked for when the "
+                + "graphics device is created, so the switch takes effect the next time the game "
+                + "starts. Until then sun shadows, traced light and traced block light do nothing.");
+        say(mc, TextFormatting.GRAY + "Restart the game and they will be there — the setting is "
+                + "already saved.");
+    }
+
     private static void say(Minecraft mc, String line) {
         mc.ingameGUI.getChatGUI().printChatMessage(new TextComponentString(line));
     }

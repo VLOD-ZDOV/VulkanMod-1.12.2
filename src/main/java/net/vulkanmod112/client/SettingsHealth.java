@@ -77,6 +77,12 @@ public final class SettingsHealth {
                 out.append(names).append(" — ").append(why);
             }
         } else if (!tracingActive()) {
+            // Said in the chat as well, once, and only for the case the player
+            // can actually do something about: they asked for tracing, the
+            // device has not got it, and one restart is the whole of the fix.
+            if (VulkanConfig.isRayTracing()) {
+                RenderNotice.restartNeededForRayTracing();
+            }
             // Only worth saying once the renderer itself is out of the way:
             // with it off these are already named above, and naming them twice
             // in one sentence reads as two separate problems.
