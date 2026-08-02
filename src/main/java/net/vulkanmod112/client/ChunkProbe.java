@@ -129,9 +129,24 @@ public final class ChunkProbe {
                 }
             }
         }
+        int queued = 0;
+        try {
+            java.util.Set<RenderChunk> waiting =
+                    ((RenderGlobalAccessor) mc.renderGlobal).vulkanmod112$chunksToUpdate();
+            queued = waiting == null ? -1 : waiting.size();
+        } catch (Throwable ignored) {
+            queued = -1;
+        }
+        // When every chunk carries the same stamp the stamp is not being set at
+        // all — this renderer can do its own visibility search, and that one
+        // does not mark what it visits. Saying so is better than reporting that
+        // everything was reached, which is what the raw number looks like.
+        boolean stampWorks = reached < frustum.renderChunks.length;
         LOGGER.info("Chunk probe: grid holds {} chunks, {} built, {} of those empty, "
-                        + "{} reached by the visibility walk on the newest frame",
-                frustum.renderChunks.length, built, empty, reached);
+                        + "{} waiting to be built; walk stamp {}",
+                frustum.renderChunks.length, built, empty, queued,
+                stampWorks ? reached + " chunks reached this frame"
+                        : "NOT SET — nothing marks what it visits, so 'reached' means nothing");
 
         RenderChunk chunk = findChunk(frustum, target);
         if (chunk == null) {
@@ -145,7 +160,9 @@ public final class ChunkProbe {
         line.append("Chunk probe: looking at ").append(target)
                 .append(", its chunk starts at ").append(chunk.getPosition())
                 .append("; walk stamp ").append(stamp).append(" against newest ").append(newest)
-                .append(stamp == newest ? " — REACHED this frame" : " — NOT reached this frame")
+                .append(stampWorks
+                        ? (stamp == newest ? " — REACHED this frame" : " — NOT reached this frame")
+                        : " — stamp not in use, ignore this")
                 .append("; needs rebuild ").append(chunk.needsUpdate());
         if (compiled == null || compiled == CompiledChunk.DUMMY) {
             line.append("; never built");
@@ -171,10 +188,11 @@ public final class ChunkProbe {
             line.append(' ').append(open).append(" of 30 face pairs");
         }
         LOGGER.info(line.toString());
-        LOGGER.info("Chunk probe: read it as — not reached and few pairs open means vanilla's own "
-                + "graph refused it and the mod is innocent; not reached with pairs open means the "
-                + "walk is stale, which is ours; reached but absent from the screen means the loss "
-                + "is after the walk, in this renderer");
+        LOGGER.info("Chunk probe: read it as — \"never built\" with \"needs rebuild true\" is a "
+                + "chunk waiting in the queue, and then the queue length above is the thing to "
+                + "look at, not the visibility walk; \"built\" and not empty but absent from the "
+                + "screen means the loss is after the build, in this renderer; few open face "
+                + "pairs means vanilla's own graph refused it and the mod is innocent");
     }
 
     /**

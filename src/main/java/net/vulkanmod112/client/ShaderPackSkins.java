@@ -72,8 +72,12 @@ public final class ShaderPackSkins {
         }
         List<String> found = new ArrayList<String>();
         found.add("Off");
+        String folderState = "no shaderpacks folder";
         try {
             File dir = new File(Minecraft.getMinecraft().gameDir, "shaderpacks");
+            if (dir.isDirectory()) {
+                folderState = "folder present";
+            }
             File[] entries = dir.listFiles();
             if (entries != null) {
                 Arrays.sort(entries);
@@ -86,9 +90,18 @@ public final class ShaderPackSkins {
         } catch (Throwable t) {
             LOGGER.warn("Could not list the shader pack folder", t);
         }
-        packs = found.toArray(new String[found.size()]);
-        LOGGER.info("Shader packs available to borrow pictures from: {}", packs.length - 1);
-        return packs;
+        String[] result = found.toArray(new String[found.size()]);
+        // An empty answer is not cached. The first thing that asks may be the
+        // settings screen being built before the game has its folders, and a
+        // list of nothing kept for the session would look exactly like a folder
+        // with nothing in it — which is the report that came back, from a
+        // machine that had a pack sitting right there.
+        if (result.length > 1) {
+            packs = result;
+        }
+        LOGGER.info("Shader packs available to borrow pictures from: {} ({})",
+                result.length - 1, folderState);
+        return result;
     }
 
     /** Forgets the listing, so a pack added while the game runs can be seen. */

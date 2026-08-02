@@ -1803,6 +1803,23 @@ final class VulkanOptions {
                                         VulkanConfig.setRoundMoon(value);
                                     }
                                 }),
+                        new VRangeOption("Moon Size",
+                                "How large the moon is drawn. Same trick as the sun: the quad the "
+                                        + "game gives it cannot be resized from here, but how "
+                                        + "much of its picture the disc fills can.",
+                                Cost.FREE, "Needs Round Moon.",
+                                0, 100, 5, "%", null,
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getMoonSize();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setMoonSize(value);
+                                    }
+                                }),
                         new VRangeOption("Sun Size",
                                 "How large the disc is drawn. The quad the game gives the sun "
                                         + "cannot be resized from here, but how much of it the "

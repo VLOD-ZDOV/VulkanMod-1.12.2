@@ -363,6 +363,8 @@ public final class VulkanConfig {
     static final boolean DEF_ROUND_SUN = false;
     /** A round moon with real phases instead of vanilla's sheet. */
     static final boolean DEF_ROUND_MOON = false;
+    /** How much of its cell the moon disc fills. */
+    static final int DEF_MOON_SIZE = 40;
     /** How much water bends what is seen through it. */
     static final int DEF_WATER_REFRACTION = 0;
     /** Which shader pack to borrow sky pictures from; empty is none. */
@@ -546,6 +548,7 @@ public final class VulkanConfig {
     private static boolean vulkanEntities = DEF_VULKAN_ENTITIES;
     private static boolean roundSun = DEF_ROUND_SUN;
     private static boolean roundMoon = DEF_ROUND_MOON;
+    private static int moonSize = DEF_MOON_SIZE;
     private static int waterRefraction = DEF_WATER_REFRACTION;
     private static String skinPack = DEF_SKIN_PACK;
     private static int sunSize = DEF_SUN_SIZE;
@@ -822,6 +825,10 @@ public final class VulkanConfig {
                         + "over a photograph. What is behind the water is fetched from the same "
                         + "picture the reflection searches, so it shows the world but not "
                         + "creatures, which this renderer does not draw.");
+        moonSize = config.getInt("moonSize", CATEGORY_GENERAL, DEF_MOON_SIZE, 0, 100,
+                "How large the moon is drawn. Same trick as the sun: the quad the game gives it "
+                        + "cannot be resized from here, but how much of its picture the disc "
+                        + "fills can.");
         roundMoon = config.getBoolean("roundMoon", CATEGORY_GENERAL, DEF_ROUND_MOON,
                 "Draw the moon as a round disc with a soft glow. The game does not draw a moon so "
                         + "much as one cell of an eight-picture sheet chosen by tonight's phase, "
@@ -1121,6 +1128,7 @@ public final class VulkanConfig {
         setVulkanEntities(DEF_VULKAN_ENTITIES);
         setRoundSun(DEF_ROUND_SUN);
         setRoundMoon(DEF_ROUND_MOON);
+        setMoonSize(DEF_MOON_SIZE);
         setWaterRefraction(DEF_WATER_REFRACTION);
         setSkinPack(DEF_SKIN_PACK);
         setSunSize(DEF_SUN_SIZE);
@@ -1342,6 +1350,15 @@ public final class VulkanConfig {
         waterRefraction = value < 0 ? 0 : (value > 100 ? 100 : value);
         store(CATEGORY_GENERAL, "waterRefraction", waterRefraction);
         applySystemProperties();
+    }
+
+    public static int getMoonSize() {
+        return moonSize;
+    }
+
+    public static void setMoonSize(int value) {
+        moonSize = value < 0 ? 0 : (value > 100 ? 100 : value);
+        store(CATEGORY_GENERAL, "moonSize", moonSize);
     }
 
     public static boolean isRoundMoon() {

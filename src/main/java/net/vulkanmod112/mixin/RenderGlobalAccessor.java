@@ -11,4 +11,8 @@ public interface RenderGlobalAccessor {
 
     @Accessor("viewFrustum")
     ViewFrustum vulkanmod112$viewFrustum();
+
+    /** What is still waiting to be turned into triangles. */
+    @Accessor("chunksToUpdate")
+    java.util.Set<net.minecraft.client.renderer.chunk.RenderChunk> vulkanmod112$chunksToUpdate();
 }

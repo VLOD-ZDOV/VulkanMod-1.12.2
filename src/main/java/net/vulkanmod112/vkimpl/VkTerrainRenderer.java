@@ -5079,16 +5079,21 @@ final class VkTerrainRenderer {
         aoRadius = Math.max(1, Math.min(6, intProperty("vulkanmod112.aoRadius", 2)));
         float wantedRefraction = clampPercent(intProperty("vulkanmod112.waterRefraction", 0));
         float wantedReflections = clampPercent(intProperty("vulkanmod112.screenReflections", 0));
+        // Both are read, then both are stored, and only then is the question
+        // asked. Storing one and asking with the other still in its old value
+        // is how turning reflections on stopped rewriting the descriptor sets —
+        // and a set that was never rewritten still holds the block atlas, so
+        // the water reflected every texture in the game at once. Two lines in
+        // the wrong order, and the symptom named nothing that was near them.
         boolean sceneWasWanted = sceneWanted();
         waterRefraction = wantedRefraction;
+        screenReflections = wantedReflections;
         if (sceneWanted() != sceneWasWanted) {
-            screenReflections = wantedReflections;
             // What the water is allowed to look at changed. Rewriting the sets
             // stops the device, so it happens here — on the change — and never
             // in a frame that did not ask for it.
             reflectionBindingsDirty = true;
         }
-        screenReflections = wantedReflections;
         advanceDither();
     }
 

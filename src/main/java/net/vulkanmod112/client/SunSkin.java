@@ -135,7 +135,11 @@ public final class SunSkin {
         int cell = SIZE / 2;
         BufferedImage image = new BufferedImage(cell * 4, cell * 2, BufferedImage.TYPE_INT_ARGB);
         float centre = (cell - 1) / 2.0f;
-        float radius = centre * 0.62f;
+        // A third of the cell rather than two thirds. The first version filled
+        // it, and a moon that fills its cell is drawn at the full width of the
+        // quad the game gives it — which is a great deal larger than vanilla's
+        // own moon, because vanilla's does not fill its cell either.
+        float radius = centre * (0.16f + VulkanConfig.getMoonSize() / 100.0f * 0.34f);
         float edge = Math.max(1.0f, radius * 0.14f);
         float haloReach = Math.min(radius * 2.0f, centre * HALO_LIMIT);
         for (int phase = 0; phase < 8; phase++) {
@@ -187,12 +191,13 @@ public final class SunSkin {
         if (!VulkanConfig.isRoundMoon()) {
             return null;
         }
-        if (moonLocation != null && moonBuiltFor == 1) {
+        int wanted = VulkanConfig.getMoonSize();
+        if (moonLocation != null && moonBuiltFor == wanted) {
             return moonLocation;
         }
         try {
             moonLocation = moonSheet();
-            moonBuiltFor = 1;
+            moonBuiltFor = wanted;
         } catch (Throwable t) {
             moonLocation = null;
         }
