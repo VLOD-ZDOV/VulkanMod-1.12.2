@@ -352,6 +352,14 @@ public final class VulkanConfig {
     /** Diagnostic: paint how much history each pixel is keeping. */
     static final boolean DEF_SHOW_ACCUMULATION = false;
     /**
+     * Draw creatures through Vulkan instead of letting the game draw them.
+     *
+     * Off. This is the newest and largest thing the renderer takes over, it is
+     * the place mods reach into most, and unlike everything before it, it
+     * replaces vanilla's drawing rather than adding to it.
+     */
+    static final boolean DEF_VULKAN_ENTITIES = false;
+    /**
      * Let the render-distance slider go past 64, up to 128.
      *
      * Off by default because what it unlocks is not "more of the same". The
@@ -523,6 +531,7 @@ public final class VulkanConfig {
     private static int blockLightRadius = DEF_BLOCK_LIGHT_RADIUS;
     private static int temporalAccumulation = DEF_TEMPORAL_ACCUMULATION;
     private static boolean showAccumulation = DEF_SHOW_ACCUMULATION;
+    private static boolean vulkanEntities = DEF_VULKAN_ENTITIES;
     private static int lightSoftness = DEF_LIGHT_SOFTNESS;
     private static boolean frameGraph = DEF_FRAME_GRAPH;
     private static int frameGraphInterval = DEF_FRAME_GRAPH_INTERVAL;
@@ -781,6 +790,15 @@ public final class VulkanConfig {
                         + "differently each frame and averaged here, which is a soft edge. Costs "
                         + "one fullscreen pass and does nothing at all unless something is being "
                         + "traced.");
+        vulkanEntities = config.getBoolean("vulkanEntities", CATEGORY_ADVANCED,
+                DEF_VULKAN_ENTITIES,
+                "Draw creatures through Vulkan instead of letting the game draw them. "
+                        + "Experimental, and the first thing here that replaces vanilla's own "
+                        + "drawing rather than adding to it: a mod that builds its models some "
+                        + "other way is untouched and draws as it always did, but anything using "
+                        + "the ordinary model classes is taken. What it buys is not frames — it "
+                        + "is that creatures exist in this renderer at all, which is what "
+                        + "reflections and glow have been waiting for.");
         showAccumulation = config.getBoolean("showAccumulation", CATEGORY_ADVANCED,
                 DEF_SHOW_ACCUMULATION,
                 "Diagnostic: paint each pixel by how much of its history it kept instead of by "
@@ -1049,6 +1067,7 @@ public final class VulkanConfig {
         setLightSoftness(DEF_LIGHT_SOFTNESS);
         setTemporalAccumulation(DEF_TEMPORAL_ACCUMULATION);
         setShowAccumulation(DEF_SHOW_ACCUMULATION);
+        setVulkanEntities(DEF_VULKAN_ENTITIES);
         setExtremeRenderDistance(DEF_EXTREME_RENDER_DISTANCE);
         setDirectionalLight(DEF_DIRECTIONAL_LIGHT);
         setHeightFog(DEF_HEIGHT_FOG);
@@ -1243,6 +1262,16 @@ public final class VulkanConfig {
     public static void setTemporalAccumulation(int value) {
         temporalAccumulation = value < 0 ? 0 : (value > 100 ? 100 : value);
         store(CATEGORY_GENERAL, "temporalAccumulation", temporalAccumulation);
+        applySystemProperties();
+    }
+
+    public static boolean isVulkanEntities() {
+        return vulkanEntities;
+    }
+
+    public static void setVulkanEntities(boolean value) {
+        vulkanEntities = value;
+        store(CATEGORY_ADVANCED, "vulkanEntities", value);
         applySystemProperties();
     }
 

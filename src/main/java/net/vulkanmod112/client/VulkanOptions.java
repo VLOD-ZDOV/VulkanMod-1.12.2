@@ -1713,6 +1713,32 @@ final class VulkanOptions {
                                         VulkanConfig.setShowOcclusion(value);
                                     }
                                 }),
+                        new VSwitchOption("Vulkan Entities",
+                                "Draw creatures through Vulkan instead of letting the game draw "
+                                        + "them. Experimental, and the first thing here that "
+                                        + "replaces vanilla's own drawing rather than adding to "
+                                        + "it — a mod that builds its models some other way is "
+                                        + "untouched and draws as it always did, but anything "
+                                        + "using the ordinary model classes is taken. It will not "
+                                        + "give you frames and may cost a few: the pose is worked "
+                                        + "out on the processor where the graphics card used to "
+                                        + "do it. What it buys is that creatures exist in this "
+                                        + "renderer at all, which is what reflections and glow "
+                                        + "have been waiting for. If something looks wrong, this "
+                                        + "is the switch to turn off first.",
+                                Cost.of(Level.LOW, Level.NONE, Level.LOW),
+                                "Needs Vulkan Terrain on.",
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return VulkanConfig.isVulkanEntities();
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        VulkanConfig.setVulkanEntities(value);
+                                    }
+                                }),
                         new VSwitchOption("Show Accumulation",
                                 "Paint each pixel by how much of its history it kept instead of "
                                         + "by the world. White is a pixel that has been averaging "

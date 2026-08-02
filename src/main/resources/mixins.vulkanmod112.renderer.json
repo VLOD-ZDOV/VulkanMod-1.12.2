@@ -32,6 +32,7 @@
     "ModelPartMixin",
     "ModelBaseMixin",
     "GlMatrixMixin",
+    "LightmapCoordMixin",
     "EntityPassMixin",
     "WeatherRenderMixin",
     "HeldItemLightMixin",

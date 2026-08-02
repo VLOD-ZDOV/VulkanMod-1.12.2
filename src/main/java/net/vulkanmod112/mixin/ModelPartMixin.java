@@ -2,6 +2,7 @@ package net.vulkanmod112.mixin;
 
 import net.minecraft.client.model.ModelRenderer;
 import net.vulkanmod112.client.EntityCapture;
+import net.vulkanmod112.client.EntityGeometry;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -24,8 +25,16 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(ModelRenderer.class)
 public abstract class ModelPartMixin {
 
-    @Inject(method = "render(F)V", at = @At("HEAD"))
+    @Inject(method = "render(F)V", at = @At("HEAD"), cancellable = true)
     private void vulkanmod112$capture(float scale, CallbackInfo ci) {
+        // Taking the bone means taking its children: they are drawn inside the
+        // frame this call builds, so a hook that stops it never sees them. The
+        // walk is repeated on our side, and only then is the game told not to
+        // bother.
+        if (EntityGeometry.takePart((ModelRenderer) (Object) this, scale)) {
+            ci.cancel();
+            return;
+        }
         EntityCapture.beginPart((ModelRenderer) (Object) this, scale);
     }
 

@@ -2,6 +2,7 @@ package net.vulkanmod112.mixin;
 
 import net.minecraft.client.renderer.RenderGlobal;
 import net.vulkanmod112.client.EntityCapture;
+import net.vulkanmod112.client.EntityGeometry;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -23,6 +24,9 @@ public abstract class EntityPassMixin {
                                          net.minecraft.client.renderer.culling.ICamera camera,
                                          float partialTicks, CallbackInfo ci) {
         EntityCapture.arm();
+        // Here and not later: at this moment the model-view holds the camera
+        // and nothing else, so inverting it is inverting the view.
+        EntityGeometry.beginPass();
     }
 
     @Inject(method = "renderEntities", at = @At("RETURN"))
@@ -30,5 +34,6 @@ public abstract class EntityPassMixin {
                                             net.minecraft.client.renderer.culling.ICamera camera,
                                             float partialTicks, CallbackInfo ci) {
         EntityCapture.disarm();
+        EntityGeometry.flushToBridge();
     }
 }

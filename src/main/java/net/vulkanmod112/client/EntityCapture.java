@@ -373,7 +373,14 @@ public final class EntityCapture {
      * Children are drawn without any of it being undone first, which is what
      * makes the frames nest.
      */
-    private static void localTransform(ModelRenderer part, float scale, float[] out) {
+    /**
+     * Shared with the drawing path, which composes the same poses for real.
+     *
+     * One copy of this arithmetic, not two: it was verified against the driver
+     * two hundred and eighty thousand times, and a second copy would be a
+     * second thing to verify.
+     */
+    static void localTransform(ModelRenderer part, float scale, float[] out) {
         // The game's own sine table rather than the library's. It is a lookup
         // into sixty-five thousand precomputed values, which is what vanilla
         // uses everywhere it animates anything — and twelve calls to the real
@@ -449,6 +456,17 @@ public final class EntityCapture {
      * first. A model drawn at two scales is already wrong in vanilla, and
      * copying that is more useful than being right differently.
      */
+    /** The part's geometry, baked once and kept; empty when it has none. */
+    static float[] shapeOf(ModelRenderer part, float scale) {
+        float[] shape = GEOMETRY.get(part);
+        if (shape == null) {
+            shape = bake(part, scale);
+            GEOMETRY.put(part, shape);
+            shapesCached++;
+        }
+        return shape;
+    }
+
     private static float[] bake(ModelRenderer part, float scale) {
         java.util.List<ModelBox> boxes = part.cubeList;
         if (boxes == null || boxes.isEmpty()) {

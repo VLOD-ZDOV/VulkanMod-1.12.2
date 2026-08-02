@@ -246,6 +246,14 @@ public interface VulkanBridge {
     void updateSpriteTexture(int slot, int glTextureId);
 
     /**
+     * The sprite slot holding an OpenGL texture, copying it in on first sight.
+     *
+     * Zero means there is no room, and the caller is expected to leave that
+     * creature to the game rather than to lose it.
+     */
+    int spriteSlotForTexture(int glTextureId);
+
+    /**
      * Hands over one batch of camera-facing quads for this frame.
      *
      * {@code vertices} is the game's own buffer in its

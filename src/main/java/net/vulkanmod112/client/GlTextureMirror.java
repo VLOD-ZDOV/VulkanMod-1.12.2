@@ -59,6 +59,54 @@ public final class GlTextureMirror {
         return BOUND[0];
     }
 
+    /**
+     * The colour and the light the fixed-function pipeline would have applied.
+     *
+     * A model's vertices carry neither. The display list holds position,
+     * texture coordinate and normal; everything else — the white a sheep is
+     * tinted, the red flash of something hurt, the dye on leather, and how much
+     * light the creature stands in — is state set just before the draw and
+     * multiplied in by a pipeline that no longer exists once we are the one
+     * drawing. So it is mirrored at the two places the game sets it.
+     */
+    private static float red = 1.0f;
+    private static float green = 1.0f;
+    private static float blue = 1.0f;
+    private static float alpha = 1.0f;
+    private static float lightU;
+    private static float lightV;
+
+    public static void color(float r, float g, float b, float a) {
+        red = r;
+        green = g;
+        blue = b;
+        alpha = a;
+    }
+
+    /** Packed the way a vertex wants it: red in the low byte through to alpha. */
+    public static int packedColor() {
+        return clampByte(red) | clampByte(green) << 8 | clampByte(blue) << 16
+                | clampByte(alpha) << 24;
+    }
+
+    private static int clampByte(float v) {
+        int i = (int) (v * 255.0f + 0.5f);
+        return i < 0 ? 0 : (i > 255 ? 255 : i);
+    }
+
+    public static void lightmap(float u, float v) {
+        lightU = u;
+        lightV = v;
+    }
+
+    public static short lightU() {
+        return (short) lightU;
+    }
+
+    public static short lightV() {
+        return (short) lightV;
+    }
+
     public static int activeUnit() {
         return activeUnit;
     }

@@ -224,7 +224,20 @@ final class VkTerrainRenderer {
     /** Vanilla PARTICLE_POSITION_TEX_COLOR_LMAP: pos 3f | uv 2f | colour 4ub | light 2s. */
     private static final int SPRITE_VERTEX_STRIDE = 28;
     /** 0 is the block atlas, then the particle sheet, rain and snow. */
-    private static final int SPRITE_SLOTS = 4;
+    /**
+     * Sheets that can be in Vulkan at once.
+     *
+     * Three of these are the game's permanent sheets — particles, rain, snow —
+     * and the rest are creature skins, handed out as they are first seen. The
+     * number comes from a measurement rather than a guess: a real session drew
+     * creatures with sixteen or seventeen distinct textures totalling two
+     * tenths of a megabyte, so there is nothing here to evict and no cache to
+     * build. If a scene ever needs more than this, the ones past it are drawn
+     * by the game as they always were.
+     */
+    private static final int SPRITE_SLOTS = 48;
+    /** Slots below this belong to the game's permanent sheets. */
+    private static final int FIRST_SKIN_SLOT = 4;
     /**
      * Ceiling on one frame's sprite geometry, in vertices.
      *
@@ -1760,9 +1773,21 @@ final class VkTerrainRenderer {
         sb.append("  sprites: ").append(spritePipeline == 0 ? "pipeline missing" : "in Vulkan")
                 .append(", last frame ").append(spriteFrameBatches).append(" batches, ")
                 .append(spriteFrameVertices).append(" vertices; sheets");
-        for (int slot = 1; slot < SPRITE_SLOTS; slot++) {
+        for (int slot = 1; slot < FIRST_SKIN_SLOT; slot++) {
             sb.append(' ').append(slot).append('=')
                     .append(spriteImages[slot] == 0 ? "-" : "ok");
+        }
+        int skins = 0;
+        for (int slot = FIRST_SKIN_SLOT; slot < SPRITE_SLOTS; slot++) {
+            if (spriteImages[slot] != 0) {
+                skins++;
+            }
+        }
+        sb.append(", skins ").append(skins).append('/')
+                .append(SPRITE_SLOTS - FIRST_SKIN_SLOT);
+        if (skinSlotsExhausted > 0) {
+            sb.append(" (").append(skinSlotsExhausted)
+                    .append(" left to the game for want of a slot)");
         }
         if (spriteDropped > 0) {
             sb.append(", ").append(spriteDropped).append(" batches dropped");
@@ -2199,6 +2224,34 @@ final class VkTerrainRenderer {
      * megabytes large, to draw the handful of block-shaped particles a broken
      * block throws off, would be a poor trade.
      */
+    /**
+     * The slot holding this OpenGL texture, copying it in the first time.
+     *
+     * Returns zero when there is no room, which the caller reads as "let the
+     * game draw this one" — a creature missing from our pass is a creature
+     * drawn the old way, not a creature missing from the screen.
+     */
+    synchronized int spriteSlotForTexture(int glTextureId) {
+        if (glTextureId <= 0) {
+            return 0;
+        }
+        for (int slot = FIRST_SKIN_SLOT; slot < SPRITE_SLOTS; slot++) {
+            if (spriteGlIds[slot] == glTextureId && spriteImages[slot] != 0) {
+                return slot;
+            }
+        }
+        for (int slot = FIRST_SKIN_SLOT; slot < SPRITE_SLOTS; slot++) {
+            if (spriteImages[slot] == 0) {
+                updateSpriteTexture(slot, glTextureId);
+                return spriteImages[slot] == 0 ? 0 : slot;
+            }
+        }
+        skinSlotsExhausted++;
+        return 0;
+    }
+
+    private long skinSlotsExhausted;
+
     synchronized void updateSpriteTexture(int slot, int glTextureId) {
         if (slot <= 0 || slot >= SPRITE_SLOTS || glTextureId <= 0) {
             return;

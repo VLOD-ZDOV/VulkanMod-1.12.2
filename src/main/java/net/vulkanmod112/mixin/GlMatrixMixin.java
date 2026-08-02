@@ -42,6 +42,16 @@ public abstract class GlMatrixMixin {
         GlTextureMirror.bindTexture(texture);
     }
 
+    @Inject(method = "color(FFFF)V", at = @At("HEAD"))
+    private static void vulkanmod112$color4(float r, float g, float b, float a, CallbackInfo ci) {
+        GlTextureMirror.color(r, g, b, a);
+    }
+
+    @Inject(method = "color(FFF)V", at = @At("HEAD"))
+    private static void vulkanmod112$color3(float r, float g, float b, CallbackInfo ci) {
+        GlTextureMirror.color(r, g, b, 1.0f);
+    }
+
     @Inject(method = "matrixMode", at = @At("HEAD"))
     private static void vulkanmod112$matrixMode(int mode, CallbackInfo ci) {
         GlMatrixMirror.setMode(mode);
