@@ -1,6 +1,43 @@
 # Changelog
 
-## [Unreleased]
+## [0.8.0]
+
+### Added
+
+- **Ray-traced shadows.** The sun casts real shadows across the world, and so does a torch in your hand, a creature that is on fire, and the torches already on the walls. A shadow here does not darken the finished colour — it lowers how much sky light a surface receives, which is what the game itself does when night falls, and is why a cave lit by a torch does not go dark when the sun goes behind a hill. Sharpness is a slider for the sun and another for flames, and at zero the edge follows the pixel grid exactly. Needs a card that can trace rays from a shader; where there is none the setting simply does nothing and says so in the log.
+- **Frame averaging**, which is what makes the shadows above usable. One ray per pixel is grain, not a soft edge; the rays are aimed differently each frame and this mixes each pixel with what it was, which turns them into one. History is thrown away wherever keeping it would smear rather than smooth — off the edge of the screen, on anything that has just changed, and increasingly the faster you turn. There is a diagnostic view that paints how much history each pixel kept.
+- **Water refraction.** Reflection and refraction are two halves of one thing and only one of them was here: a pond whose mirror moves while its bed stays perfectly still reads as glass laid over a photograph, and it is the bed that gives it away. The displacement follows the tilt of the wave and shrinks with distance, so a lake does not shear at the horizon.
+- **Particles, rain and snow are drawn by Vulkan.** They ride the pass the water already uses rather than opening one of their own, so they cost nothing beyond the drawing itself.
+- **A round sun and moon.** The pictures are built by the mod rather than shipped as files, which is what makes their size and warmth sliders instead of somebody's fixed choice. The moon is drawn as all eight of its phases, because the game does not draw a moon so much as one cell of a sheet chosen by tonight's phase.
+- **Named setting profiles.** Save the whole settings screen under a name and switch between them — a heavy one for screenshots, a light one for playing.
+- **A key that opens the settings**, **F6** by default and rebindable. Every setting here is judged by looking at the world, and the trip through four menus and back is what stops people comparing two values.
+- **The Vulkan device is chosen to match OpenGL** rather than by which one is fastest. On a machine with two cards the fast one is of no use if the other half of the frame is on the other card, and this is the difference between the mod working and the mod standing aside.
+- **Traced light from the blocks already in the world**, replacing as much of the game's own flat block light as you ask for. Vanilla's is a flood fill: correct around corners and completely flat, with no idea where the light came from, so a torch on a wall lights a room exactly like a torch on the floor. Searched up to fifty blocks around you.
+- **Sky pictures can be borrowed from a pack you already have** — a resource pack sitting switched off, or a shader pack that happens to ship one. Only the pictures: a shader pack's code is written against a loader that does not exist here. Most shader packs ship no sun at all, and the log says so plainly rather than leaving you wondering.
+
+### Performance
+
+- **The atlas upload no longer stops the frame twenty times a second.** Every tick in which any animated texture changes — lava, water, fire, a portal, which is to say nearly every scene — the thread drawing the frame built a command buffer, submitted it and waited for the card to finish before anything else in the frame could happen. Nothing waits now: the work is carried by the frame's own commands.
+- **The world is kept once instead of twice by default.** The blocks used to sit in both the game's memory and this mod's; dropping the game's copy frees around a gigabyte of video memory, which is what limited how far the render distance could be pushed.
+
+### Fixed
+
+- **The card could be lost outright while ray tracing was on.** Shadow structures are built one after another into a single list of commands, each naming the scratch memory it will write to, and a bigger chunk arriving later in a batch grew that memory and freed the old one on the spot — while commands already recorded went on naming it. A write to freed memory, which on this hardware takes the display with it. It needed the world to be filling in for a bigger chunk to arrive after a smaller one, so it never happened standing still, which is most of why it took three occurrences and two wrong answers to find.
+- **The world could stop drawing after a resource reload**, for the same shape of reason: memory the card was still copying from was freed before it had finished. It now waits.
+- Four violations of the Vulkan specification that every driver had simply been letting through — a buffer copied without being marked as copyable, two copies reading past the end of what they were copying from, a batched draw command used without asking whether the driver supports batching, and a shared index buffer freed while frames still named it. All were years old and none had a symptom until they did.
+
+### Diagnostics
+
+- **The log can now show you a stutter.** A frame that takes forty milliseconds once a second is invisible in an average over three hundred frames and is the single thing anyone calls a lag. The report gives the middle frame, the worst one in twenty, the worst one in a hundred, and for the worst frame in the interval, where its time went and how much of it was this mod at all. Frames held back by the background framerate cap are counted separately instead of being reported as stalls, which is what they used to look like.
+- **A number in the log had stopped being a measurement.** The OpenGL timer printed the same value to the hundredth for fifty-seven reports running, because it never once managed to collect a result and kept the last one it had — from while the world was still loading. It reported the cost as sixty-five milliseconds; the real figure is a little over one. Both timers now print how many results they actually collected, because a number that never changes looks exactly like a stable system.
+- **Chunk builds are reported as a spread rather than an average.** The average was known and is about two milliseconds; what was not known was how often one takes hundreds. Anything past a tenth of a second writes a line naming where it was.
+- **A chunk probe**, on a key of its own and unbound by default. It asks the game why the chunk you are looking at is not on screen — whether it was reached by the visibility search, whether it was ever built, whether it is waiting to be, and how many ways through it the game believes exist. It answered a question in two presses that had survived weeks of switching settings on and off: the chunk that would not draw is one vanilla's own visibility graph declines to reach, and this mod was never involved.
+
+### Experimental
+
+- **Creatures can be drawn by Vulkan**, and should not be yet — the switch says so. Everything about where a creature's bones go is solved and verified; what is not is the pass they are drawn in, which cannot write depth, so a mob is see-through and water covers one standing above it. It is left in, off and labelled, because the work continues from there.
+
+### Also in this release
 
 ### Added
 
