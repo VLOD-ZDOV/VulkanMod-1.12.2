@@ -105,6 +105,7 @@ public final class VulkanProfiles {
             }
             out = new FileOutputStream(target);
             values.store(out, "VulkanMod112 profile: " + name);
+            SixSeven.noteProfileSaved(name);
             return true;
         } catch (IOException e) {
             net.vulkanmod112.VulkanMod112.LOGGER.warn("Could not save the profile " + name, e);
