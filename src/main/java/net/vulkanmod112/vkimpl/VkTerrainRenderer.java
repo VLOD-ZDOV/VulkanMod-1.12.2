@@ -3951,6 +3951,11 @@ final class VkTerrainRenderer {
         int prevProgram = GL11C.glGetInteger(GL20C.GL_CURRENT_PROGRAM);
         int prevFbo = GL11C.glGetInteger(GL30C.GL_FRAMEBUFFER_BINDING);
         int prevTexture = GL11C.glGetInteger(GL11C.GL_TEXTURE_BINDING_2D);
+        // The unit as well as the binding. glPushAttrib does not carry the
+        // active unit back, this pass sets it to zero, and the game's next
+        // draw would find its light map unit no longer selected. Every other
+        // full-screen pass in this file saves it; this one did not.
+        int prevActive = GL11C.glGetInteger(GL13C.GL_ACTIVE_TEXTURE);
         if (!ensureToneTargets(prevFbo, prevTexture)) {
             return;
         }
@@ -3989,8 +3994,10 @@ final class VkTerrainRenderer {
 
         org.lwjgl.opengl.GL11.glPopAttrib();
         GL20C.glUseProgram(prevProgram);
+        // Both framebuffer targets, because the blit above bound them apart.
         GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo);
         GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, prevTexture);
+        GL13C.glActiveTexture(prevActive);
     }
 
     private int toneTexture;
@@ -4003,6 +4010,7 @@ final class VkTerrainRenderer {
     private int toneHeight;
     private boolean toneFailed;
     private long toneFrames;
+    private float waterGlint;
     private float toneStrength;
     private float toneWarmth;
 
@@ -5062,10 +5070,10 @@ final class VkTerrainRenderer {
         // vec4 lightInfo at 96: x is how many of the array below to read.
         MemoryUtil.memPutFloat(base + 96, dynamicLightCount);
         // y: how strongly the sun glints off water and ice. The rest of this
-        // vec4 was spare, so the setting cost no change to the layout.
-        MemoryUtil.memPutFloat(base + 100,
-                clampPercent(intProperty("vulkanmod112.waterGlint", 0)));
-        MemoryUtil.memPutFloat(base + 100, 0.0f);
+        // vec4 was spare, so the setting cost no change to the layout — and the
+        // zeroing of the spare part is why the value goes here and not one line
+        // earlier, which is exactly where it went the first time.
+        MemoryUtil.memPutFloat(base + 100, waterGlint);
         MemoryUtil.memPutFloat(base + 104, 0.0f);
         MemoryUtil.memPutFloat(base + 108, 0.0f);
         for (int i = 0; i < dynamicLightCount * 4; i++) {
@@ -5304,6 +5312,7 @@ final class VkTerrainRenderer {
         waterReflection = clampPercent(intProperty("vulkanmod112.waterReflection", 0));
         waterWaves = clampPercent(intProperty("vulkanmod112.waterWaves", 0));
         foliageSway = clampPercent(intProperty("vulkanmod112.foliageSway", 0));
+        waterGlint = clampPercent(intProperty("vulkanmod112.waterGlint", 0));
         toneStrength = clampPercent(intProperty("vulkanmod112.sceneTone", 0));
         toneWarmth = clampPercent(intProperty("vulkanmod112.sceneWarmth", 50)) * 2.0f - 1.0f;
         bloomStrength = clampPercent(intProperty("vulkanmod112.bloom", 0));
@@ -7401,6 +7410,7 @@ final class VkTerrainRenderer {
             destroyBloomTargets();
             destroyAoTargets();
             destroyAccumTargets();
+            destroyToneTargets();
             GL11C.glDeleteTextures(glColorTexture);
             GL11C.glDeleteTextures(glDepthTexture);
             EXTMemoryObject.glDeleteMemoryObjectsEXT(glColorMemoryObject);

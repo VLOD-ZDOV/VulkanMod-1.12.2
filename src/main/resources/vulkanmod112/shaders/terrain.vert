@@ -124,13 +124,20 @@ void main() {
     // is handed over in the origin's spare fourth float.
     if (frame.water.w > 0.0 && frame.frameInfo.z > 0.5) {
         if (inMaterial == MATERIAL_LEAVES) {
-            // Read at the centre of the block rather than at the vertex, so
-            // every corner of the cube takes the same offset and the cube
-            // stays a cube. The field is already world-aligned — the camera's
-            // own place on the lattice is added into it — so flooring it lands
-            // on block boundaries and not on some offset of the camera.
+            // Read at the vertex, and the amplitude is what keeps the cube a
+            // cube. Flooring to the block cell was the first attempt and it
+            // does not work: a cube's corners sit exactly on the boundaries of
+            // that cell, so floor() sends the near and far faces to different
+            // cells and shears the block worse than reading it plainly would.
+            // There is nothing in a corner that says where its block began.
+            //
+            // So the wave is read where the vertex is, and the difference
+            // across one block is what a seam could open by. Over a lattice
+            // sixteen blocks wide that difference is about a hundredth of a
+            // block at this reach — under a pixel at any distance worth
+            // looking at, and the canopy breathes without coming apart.
             vec2 field = relative.xz + frame.water.yz;
-            relative.xz += swayOffset(floor(field) + 0.5, frame.frameInfo.x)
+            relative.xz += swayOffset(field, frame.frameInfo.x)
                     * (LEAF_REACH * frame.water.w);
         } else if (inMaterial == MATERIAL_PLANT
                 || inMaterial == MATERIAL_PLANT_TALL_LOWER

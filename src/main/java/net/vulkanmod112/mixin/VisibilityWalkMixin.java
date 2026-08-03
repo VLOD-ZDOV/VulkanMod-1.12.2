@@ -16,21 +16,14 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * Stops the visibility walk from being redone for a world that is merely still
- * filling in.
+ * Counts what makes the game redo its visibility walk.
  *
  * The walk is the flood fill in {@code RenderGlobal.setupTerrain} that decides
  * which chunks are on screen. The game's own profiler puts it at 25% to 48% of
  * the frame at render distance 64 — the largest single item, some eight times
  * what drawing the world costs — and it reruns whenever
- * {@code displayListEntitiesDirty} is set.
- *
- * The obvious-looking trigger is the {@code !chunksToUpdate.isEmpty()} term of
- * the condition, and that is where this first interposed. A counter said the
- * queue was empty every single time, and then that the redirect was not reached
- * at all: the flag was already true, so the condition short-circuited past it.
- * The two writes that actually set it both run *after* the walk, later in the
- * same frame:
+ * {@code displayListEntitiesDirty} is set. Two writes set it, both running
+ * after the walk, later in the same frame:
  *
  * <pre>
  * // setupTerrain, in the loop that refills the rebuild queue
@@ -42,29 +35,30 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * </pre>
  *
  * So any visible chunk waiting to be rebuilt, and any chunk finishing its
- * upload, buys a full walk on the next frame — at render distance 64, every
- * frame for as long as the world is filling in.
+ * upload, buys a full walk on the next frame.
  *
- * Those two writes are rate-limited here. Three things make that safe, and each
- * one is here because leaving it out was a real defect:
+ * <h2>What this used to do, and why it does not</h2>
  *
- * - <b>A suppressed write is deferred, never dropped.</b> It is re-applied at
- *   the top of the next frame once the interval has passed. Simply skipping it
- *   meant that if the last arming write of a filling world landed inside a
- *   suppression window and the camera then never moved, the flag stayed false
- *   forever and those chunks were never drawn at all.
- * - <b>Camera movement is judged against our own record of the previous
- *   frame.</b> Vanilla overwrites its {@code lastViewEntity*} fields near the
- *   top of {@code setupTerrain}, before the write we redirect, so comparing
- *   against those compares the frame to itself and never sees movement.
- * - <b>The timer marks when a walk ran, not when a write was allowed.</b> Walks
- *   also come from camera movement, from {@code loadRenderers}, and from this
- *   mod's own zoom; without stamping those, the next suppressible write always
- *   measured a stale interval and sailed through.
+ * Those two writes used to be rate-limited here — held back while the camera
+ * stood still until a timer elapsed. That is gone. Not because it was broken,
+ * but because it was measured: of ten thousand requests a second, nine and a
+ * half thousand come from the camera moving rather than from a chunk
+ * finishing, and the limiter deliberately never touched those. There is no
+ * interval at which it would have helped more than the seed cache already
+ * does, so its setting had no position worth choosing, stood at zero, and made
+ * every branch under it unreachable.
  *
- * The cost, plainly: a chunk that finishes building can wait up to the
- * configured interval before it is drawn. Off by default — this changes the
- * game's logic, not this mod's renderer.
+ * <h2>What is left, and why the class is</h2>
+ *
+ * The counting. "The walk ran on 1882 frames of 2316, from 136399 requests, of
+ * which 102198 were the camera moving" is the sentence that says where the
+ * frame went, and nothing else in the game can say it — the flag is set from
+ * three places that share nothing but the field they write.
+ *
+ * Camera movement is judged against this class's own record of the previous
+ * frame, not vanilla's: the game overwrites its {@code lastViewEntity*} fields
+ * near the top of {@code setupTerrain}, before the write watched here, so
+ * comparing against those compares a frame to itself and never sees movement.
  */
 @Mixin(RenderGlobal.class)
 public abstract class VisibilityWalkMixin implements WalkTimer {
