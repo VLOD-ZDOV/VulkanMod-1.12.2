@@ -1822,7 +1822,7 @@ final class VkTerrainRenderer {
                     .append(" left to the game for want of a slot)");
         }
         if (spriteDropped > 0) {
-            sb.append(", ").append(spriteDropped).append(" batches dropped");
+            sb.append(", ").append(spriteDropped).append(" batches handed back to OpenGL");
         }
         sb.append('\n');
         sb.append("  index buffer: ").append(quadIndexCapacityQuads).append(" quads")
@@ -2174,7 +2174,34 @@ final class VkTerrainRenderer {
         LOGGER.info(sb.toString());
     }
 
+    /**
+     * Whether a frame has been signalled to OpenGL and not yet waited for.
+     *
+     * There is one interop semaphore pair for the whole renderer, not one per
+     * frame in flight, and that is safe only because {@link #submitFrame()} and
+     * {@link #composite()} are called as a pair, on one thread, once per real
+     * frame. Signalling a binary semaphore twice without a wait between is
+     * undefined behaviour, and the symptom would be a device loss some frames
+     * later with nothing pointing at the cause — which this project has already
+     * paid for three times.
+     *
+     * Today no path breaks the pairing. Nothing enforced it either: a future
+     * early return or a thrown exception between the two would break it in
+     * silence. So the invariant is now stated rather than assumed, and says so
+     * once if it is ever untrue.
+     */
+    private boolean frameSignalled;
+    private boolean pairingWarned;
+
     private void submitFrame() {
+        if (frameSignalled && !pairingWarned) {
+            pairingWarned = true;
+            LOGGER.error("A frame was signalled to OpenGL twice without a wait between. "
+                    + "The interop semaphores are one pair for the whole renderer and rely on "
+                    + "submitFrame and composite being called together; something now calls them "
+                    + "apart. Expect a device loss with no obvious cause.");
+        }
+        frameSignalled = true;
         try (MemoryStack stack = stackPush()) {
             vkCmdEndRenderPass(commandBuffer);
             // Handed to OpenGL as the last thing this frame records, so the
@@ -2863,6 +2890,7 @@ final class VkTerrainRenderer {
 
     /** GL side: wait for Vulkan, draw the shared frame into the game's framebuffer, signal back. */
     private void composite() {
+        frameSignalled = false;
         compositeTimer.begin();
         try {
             compositeInner();

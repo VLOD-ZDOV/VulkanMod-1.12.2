@@ -2,6 +2,14 @@
 
 ## [0.9.0]
 
+### Added
+
+- **A time of day and a weather of your own**, on this screen only. Nothing is sent to a server, nothing is written to the world, and no other player sees it — mobs still burn at dawn and a storm the server believes in still charges a creeper. Every effect in this mod looks different at a different hour, and this is how to see two hours without waiting for one.
+
+- **A budget for explosion particles.** The client is sent the list of blocks an explosion destroyed and asks for two particles at every one of them, so a large charge of TNT is tens of thousands of them born in a single tick. Past the limit one in eight is kept rather than none, because cutting off leaves a hole where the blast was biggest. Off by default.
+
+- **The primed TNT cube is recorded once instead of rebuilt per charge per frame.** The game looks the model up and issues seven draw calls for every lit charge in every frame; five hundred charges is three and a half thousand of them describing one identical cube. The picture is the same to the pixel — the list is recorded from the game's own call.
+
 ### Fixed
 
 - **The mouse wheel scrolls the settings screens on Cleanroom.** That loader answers the wheel in detents where LWJGL 2 answers in the units Windows uses — one notch arrives as 1 rather than as 120 — so the reading rounded down to nothing and no list in this mod moved. Both screens now take the magnitude where there is one and the direction where there is not, which is right under either. Reported, and diagnosed, by the person who reported it.
@@ -29,6 +37,8 @@
 - **The diagnostics report records every setting**, not the five it used to. A report saying an effect looks wrong could not be told from a report by someone who never turned it on.
 
 - **Settings changes are written to the log as they happen**, so a report can be read as a sequence of events rather than reconstructed by comparing snapshots.
+
+- **A batch the renderer will not take is drawn rather than dropped.** It used to be counted, logged as left to OpenGL, and then left to nobody, because the caller had already been told the geometry was handled.
 
 - **Turning on Ultra Logging mid-session now captures the log too.** It only attached at startup, so a file started after something went wrong contained snapshots and not one line of the mod's own log — which is the half that says what happened.
 

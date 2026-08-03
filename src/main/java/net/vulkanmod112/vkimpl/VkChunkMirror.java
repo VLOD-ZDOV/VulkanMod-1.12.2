@@ -465,8 +465,45 @@ final class VkChunkMirror {
     }
 
     /** Called by the terrain renderer at the start of each frame. */
+    /**
+     * The thread that stamps frames, remembered so the assumption below can be
+     * checked instead of believed.
+     *
+     * Everything the deferred release does is correct on one condition: that
+     * {@code upload()} and {@code release()} run on the same thread that calls
+     * this. A buffer retired here is stamped with the number of the frame being
+     * recorded, and is freed once that frame's fence has passed — which is only
+     * a safe statement about a buffer the render thread itself stopped using.
+     * From another thread the stamp could be one frame out in either direction,
+     * and the failure would be a use-after-free seen as a device loss with
+     * nothing pointing at it.
+     *
+     * The two callers are documented "client thread only" on the bridge, and in
+     * this game that is the render thread. Nothing says why it matters here,
+     * and byte copying has already moved off this thread once
+     * ({@code stageFromWorker}); whoever moves the rest deserves a warning
+     * rather than three days.
+     */
+    private Thread stampingThread;
+    private boolean threadWarned;
+
     synchronized void setFrameStamp(long stamp) {
+        this.stampingThread = Thread.currentThread();
         this.frameStamp = stamp;
+    }
+
+    /** Says so, once, if the frame-stamp assumption has stopped being true. */
+    private void checkStampingThread(String what) {
+        if (threadWarned || stampingThread == null
+                || stampingThread == Thread.currentThread()) {
+            return;
+        }
+        threadWarned = true;
+        LOGGER.error("{} came from {} while frames are stamped on {}. Deferred freeing of "
+                + "geometry is stamped with the frame being recorded and is only sound from the "
+                + "thread that records it; from anywhere else a buffer can be freed while a "
+                + "frame still names it.", what, Thread.currentThread().getName(),
+                stampingThread.getName());
     }
 
     /**
@@ -678,6 +715,7 @@ final class VkChunkMirror {
     }
 
     synchronized void upload(int slot, ByteBuffer data) {
+        checkStampingThread("A chunk upload");
         int size = data.remaining();
         Entry entry = entries.get(slot);
         if (entry != null && entry.capacity < size) {
@@ -755,6 +793,7 @@ final class VkChunkMirror {
     }
 
     synchronized void release(int slot) {
+        checkStampingThread("A chunk release");
         // Drop any staged copy first: its destination is about to be freed,
         // and a later chunk reusing this slot must not inherit it.
         synchronized (workerLock) {

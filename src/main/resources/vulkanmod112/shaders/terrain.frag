@@ -947,7 +947,13 @@ void main() {
         shaded = materialColor(material) * light;
     }
 
-    int mode = int(frame.fogColor.a);
+    // Rounded, not truncated, and the sprite shader does the same. Both read
+    // this one field of this one buffer, and a particle taking a different fog
+    // mode from the terrain behind it would be a hard thing to see and a
+    // harder one to explain. Today the value is written as a whole number and
+    // either reading gives the same answer; agreeing costs nothing and stops
+    // that from being load-bearing.
+    int mode = int(frame.fogColor.a + 0.5);
     // Kept for the emissive mask below: how much of this surface survived the
     // fog. Light that the fog swallowed must not glow either — inside lava,
     // where the fog is thick enough to hide the world, the silhouettes of
