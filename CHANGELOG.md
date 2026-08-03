@@ -4,6 +4,8 @@
 
 ### Added
 
+- **Tall plants, leaves and cobwebs move in the wind.** A plant two blocks high used to stand still because moving the top of its lower half and the bottom of its upper half separately would have pulled the stem apart; the halves are now told apart and the seam moves as one place. Leaves drift as whole cubes rather than by their corners, which is what a full cube needs — the wave is read once at the block's centre, so the cube stays a cube and the canopy has no holes in it. Cobwebs were never classified at all and stood in a draught perfectly still.
+
 - **A time of day and a weather of your own**, on this screen only. Nothing is sent to a server, nothing is written to the world, and no other player sees it — mobs still burn at dawn and a storm the server believes in still charges a creeper. Every effect in this mod looks different at a different hour, and this is how to see two hours without waiting for one.
 
 - **A budget for explosion particles.** The client is sent the list of blocks an explosion destroyed and asks for two particles at every one of them, so a large charge of TNT is tens of thousands of them born in a single tick. Past the limit one in eight is kept rather than none, because cutting off leaves a hole where the blast was biggest. Off by default.
