@@ -4873,6 +4873,10 @@ final class VkTerrainRenderer {
         }
         // vec4 lightInfo at 96: x is how many of the array below to read.
         MemoryUtil.memPutFloat(base + 96, dynamicLightCount);
+        // y: how strongly the sun glints off water and ice. The rest of this
+        // vec4 was spare, so the setting cost no change to the layout.
+        MemoryUtil.memPutFloat(base + 100,
+                clampPercent(intProperty("vulkanmod112.waterGlint", 0)));
         MemoryUtil.memPutFloat(base + 100, 0.0f);
         MemoryUtil.memPutFloat(base + 104, 0.0f);
         MemoryUtil.memPutFloat(base + 108, 0.0f);

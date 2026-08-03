@@ -102,6 +102,7 @@ public final class SettingsHealth {
     private static void appendTerrainEffects(StringBuilder out) {
         add(out, "water waves", VulkanConfig.getWaterWaves());
         add(out, "water reflections", VulkanConfig.getWaterReflection());
+        add(out, "sun glint on water and ice", VulkanConfig.getWaterGlint());
         add(out, "screen reflections", VulkanConfig.getScreenReflections());
         add(out, "water refraction", VulkanConfig.getWaterRefraction());
         add(out, "swaying foliage", VulkanConfig.getFoliageSway());

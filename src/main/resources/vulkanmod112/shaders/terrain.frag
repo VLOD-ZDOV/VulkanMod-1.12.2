@@ -29,7 +29,9 @@ layout(set = 0, binding = 3, std140) uniform Frame {
     mat4 mvp;
     vec4 fogColor;   // rgb = colour, a = mode: 0 off, 1 linear, 2 exp, 3 exp2
     vec4 fogParams;  // x = start, y = end, z = density
-    vec4 lightInfo;  // x = how many of lights[] are in use
+    // x = how many of lights[] are in use, y = how strongly the sun glints
+    // off water and ice. yzw were spare; see sunGlint.
+    vec4 lightInfo;
     vec4 lights[32]; // xyz = position relative to the camera, w = light level
     // x = seconds, y = directional light strength (0 = off),
     // z = 1 when vMaterial is real, w = 1 to paint the world by material
@@ -129,6 +131,39 @@ bool isFoliage(uint material) {
  * moves with the wave and stays recognisably itself.
  */
 const float REFRACT_REACH = 1.6;
+
+/** How tight the glint is: water ripples broadly, a sheet of ice sharply. */
+const float WATER_GLINT_SHARPNESS = 48.0;
+const float ICE_GLINT_SHARPNESS = 96.0;
+/** Full strength at the setting's maximum. Above this the sun becomes a lamp. */
+const float GLINT_MAX = 2.5;
+/** Not white: sunlight is warm, and a neutral glint reads as a specular bug. */
+const vec3 SUN_TINT = vec3(1.0, 0.96, 0.88);
+
+/**
+ * The sun itself on a surface, rather than the sky the surface reflects.
+ *
+ * Water in the open shows two different things at once. One is the horizon,
+ * which the fresnel term mixes in and which the screen reflection sharpens —
+ * that is the surface acting as a mirror. The other is a narrow bright glint
+ * of the sun sliding along the ripples, and no reflection can ever produce it:
+ * the sun is a light, not a surface that was drawn into the scene for a ray to
+ * find. Reflecting the sky where the sun is gives its colour, not its shape.
+ *
+ * That glint is one of the plainest marks of a shader pack on water, and it is
+ * nearly free here — the direction of the sun and the calmed normal of the
+ * surface are both already computed for the reflection.
+ *
+ * Faded out as the sun meets the horizon, the same way its shadow is: a glint
+ * from a sun that is not up reads as a light with no source.
+ */
+float sunGlint(vec3 n, float sharpness) {
+    if (frame.sun.y <= 0.0) {
+        return 0.0;
+    }
+    vec3 h = normalize(normalize(-vRelative) + frame.sun.xyz);
+    return pow(max(dot(n, h), 0.0), sharpness) * min(frame.sun.y * 4.0, 1.0);
+}
 
 /**
  * The material of a surface read off the atlas rather than off the vertex.
@@ -1111,6 +1146,31 @@ void main() {
             // over water rather than water behaving like water.
             shaded = mix(shaded, mirrored, mirror);
             alpha = mix(alpha, 1.0, mirror);
+        }
+        // The sun on the surface. Water first, then ice — which the game side
+        // has labelled all along while nothing here ever read the label: ice
+        // was drawn as an ordinary translucent quad, and a frozen lake is the
+        // one surface in this world that ought to flash when the sun is on it.
+        float glintStrength = frame.lightInfo.y;
+        if (glintStrength > 0.0) {
+            float g = 0.0;
+            if (material == MATERIAL_WATER) {
+                g = sunGlint(mirrorNormal, WATER_GLINT_SHARPNESS);
+            } else if (material == MATERIAL_ICE) {
+                // The flat face, not a calmed ripple: a sheet of ice has no
+                // ripple, and its highlight is broad and sudden rather than
+                // scattered — which is what makes it read as ice and not water.
+                g = sunGlint(normal, ICE_GLINT_SHARPNESS);
+            }
+            g *= glintStrength * GLINT_MAX;
+            if (g > 0.0) {
+                shaded += SUN_TINT * g;
+                // Raised with it, because the frame is premultiplied below: a
+                // glint added to a surface that lets most light through would
+                // otherwise be scaled down by exactly the amount that makes it
+                // worth having.
+                alpha = mix(alpha, 1.0, clamp(g, 0.0, 1.0));
+            }
         }
         outColor = vec4(shaded * alpha, alpha);
     } else {

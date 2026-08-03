@@ -384,10 +384,11 @@ public final class VanillaFrame {
             return "visibility walk: never reached our check — the dirty flag was already set";
         }
         String line = String.format(
-                "visibility walk: RAN %d of %d frames — %d arm requests, churn %d, camera moved %d, "
-                        + "deferred %d, paid back %d",
-                walkRan, walkFramesSeen, walkAsked, walkQueuePending,
-                walkCameraMoved, walkSuppressed, walkDeferredPaid);
+                // "deferred" and "paid back" are gone with the throttle that
+                // produced them. Two counters that could only ever print zero
+                // are two numbers that read as measurements and are not.
+                "visibility walk: RAN %d of %d frames — %d arm requests, churn %d, camera moved %d",
+                walkRan, walkFramesSeen, walkAsked, walkQueuePending, walkCameraMoved);
         walkRan = 0L;
         walkFramesSeen = 0L;
         walkAsked = 0L;

@@ -4,6 +4,8 @@
 
 ### Added
 
+- **The sun glints off water and ice.** The narrow bright spot that slides along the ripples, and the sudden broad flash off a frozen lake. This is not the reflection and could never come from it: the sun is a light rather than a surface a ray can find, so reflecting the sky where it stands gives you its colour and never its shape. Ice had been labelled by the game side all along while nothing in the shader ever read the label.
+
 - **The frame time graph can sit in any of the four corners.** The default is the bottom left, and so is the chat window — a readout over what you are reading is a tool nobody leaves on. The two lines of numbers move to the other side of the graph in the top corners, so nothing runs off the screen.
 
 - **Tall plants, leaves and cobwebs move in the wind.** A plant two blocks high used to stand still because moving the top of its lower half and the bottom of its upper half separately would have pulled the stem apart; the halves are now told apart and the seam moves as one place. Leaves drift as whole cubes rather than by their corners, which is what a full cube needs — the wave is read once at the block's centre, so the cube stays a cube and the canopy has no holes in it. Cobwebs were never classified at all and stood in a draught perfectly still.
@@ -17,6 +19,10 @@
 ### Fixed
 
 - **The mouse wheel scrolls the settings screens on Cleanroom.** That loader answers the wheel in detents where LWJGL 2 answers in the units Windows uses — one notch arrives as 1 rather than as 120 — so the reading rounded down to nothing and no list in this mod moved. Both screens now take the magnitude where there is one and the direction where there is not, which is right under either. Reported, and diagnosed, by the person who reported it.
+
+### Removed
+
+- **The visibility walk interval.** It held back the game's visibility search while the camera stood still, and it was measured and closed long ago: nine and a half of every ten thousand requests a second come from the camera moving, which it deliberately never touched, so no value of it helped. It sat at zero, which made every branch below it unreachable — a hundred and eighty seven lines that read as a working mechanism and did nothing, in code that had already broken once silently. The counting it also did is kept; that is the line that says where a frame went.
 
 ### Changed
 

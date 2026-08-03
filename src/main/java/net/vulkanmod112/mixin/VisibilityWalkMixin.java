@@ -72,12 +72,6 @@ public abstract class VisibilityWalkMixin implements WalkTimer {
     @Shadow
     private boolean displayListEntitiesDirty;
 
-    /** When the flood fill last ran, however it was triggered. */
-    @Unique
-    private long vulkanmod112$lastWalkNanos;
-    /** A write we held back, owed to the game as soon as the interval passes. */
-    @Unique
-    private boolean vulkanmod112$armDeferred;
     @Unique
     private boolean vulkanmod112$cameraMovedThisFrame;
     @Unique
@@ -111,11 +105,6 @@ public abstract class VisibilityWalkMixin implements WalkTimer {
         vulkanmod112$prevPitch = viewEntity.rotationPitch;
         vulkanmod112$prevYaw = viewEntity.rotationYaw;
 
-        if (vulkanmod112$armDeferred && vulkanmod112$intervalElapsed()) {
-            vulkanmod112$armDeferred = false;
-            displayListEntitiesDirty = true;
-            VanillaFrame.countDeferredWalk();
-        }
     }
 
     /**
@@ -137,8 +126,6 @@ public abstract class VisibilityWalkMixin implements WalkTimer {
      */
     @Override
     public void vulkanmod112$noteWalkRan() {
-        vulkanmod112$lastWalkNanos = System.nanoTime();
-        vulkanmod112$armDeferred = false;
         VanillaFrame.countWalkRan();
     }
 
@@ -160,28 +147,29 @@ public abstract class VisibilityWalkMixin implements WalkTimer {
         vulkanmod112$setDirty(value);
     }
 
-    @Unique
-    private boolean vulkanmod112$intervalElapsed() {
-        int intervalMs = VulkanConfig.getVisibilityWalkInterval();
-        return intervalMs <= 0
-                || System.nanoTime() - vulkanmod112$lastWalkNanos >= intervalMs * 1_000_000L;
-    }
-
     /**
-     * Clearing the flag always goes straight through; only arming it is
-     * rate-limited, and only when the camera held still.
+     * Passes the flag through, and counts what asked for it.
+     *
+     * There used to be a rate limiter here — arming the walk was held back
+     * while the camera stood still until a timer elapsed. It is gone, and not
+     * because it was broken: the project measured it and closed it. Of ten
+     * thousand requests a second, nine and a half thousand come from the camera
+     * moving rather than from a chunk finishing, and the limiter deliberately
+     * never touched those. There is no value of the interval where it would
+     * have helped more than the seed cache already does, so the setting had no
+     * position worth choosing and stood at zero, which made every branch below
+     * it unreachable. A hundred and eighty seven lines that read as a working
+     * mechanism and did nothing — and that had already broken once, subtly and
+     * silently, by suppressing an arming it then never restored.
+     *
+     * The counting stays, and is the whole reason this class is still here.
+     * "The walk ran on 1882 frames of 2316, from 136399 requests, of which
+     * 102198 were the camera moving" is the sentence that told us where the
+     * frame went, and no other place in the game can say it.
      */
     @Unique
     private void vulkanmod112$setDirty(boolean value) {
-        boolean throttled = value
-                && !vulkanmod112$cameraMovedThisFrame
-                && VulkanConfig.getVisibilityWalkInterval() > 0
-                && !vulkanmod112$intervalElapsed();
-        VanillaFrame.countWalk(value, vulkanmod112$cameraMovedThisFrame, throttled);
-        if (throttled) {
-            vulkanmod112$armDeferred = true;
-            return;
-        }
+        VanillaFrame.countWalk(value, vulkanmod112$cameraMovedThisFrame, false);
         displayListEntitiesDirty = value;
     }
 }

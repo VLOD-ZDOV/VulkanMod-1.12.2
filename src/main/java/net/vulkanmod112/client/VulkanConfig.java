@@ -63,7 +63,6 @@ public final class VulkanConfig {
      * same tenth of a second. The visible cost is that a chunk which finished
      * building may wait up to this long before it is drawn.
      */
-    static final int DEF_VISIBILITY_WALK_INTERVAL = 0;
     /**
      * Near clipping plane in hundredths of a block; 0 keeps vanilla's 0.05.
      *
@@ -371,6 +370,7 @@ public final class VulkanConfig {
     static final String DEF_SKIN_PACK = "";
     /** How much of its square the disc fills, as a percentage of the range. */
     static final int DEF_SUN_SIZE = 50;
+    static final int DEF_WATER_GLINT = 0;
     static final int DEF_FRAME_GRAPH_CORNER = 0;
     static final boolean DEF_CACHE_BLOCK_ENTITY_MODELS = true;
     static final int DEF_EXPLOSION_PARTICLES = 0;
@@ -524,7 +524,6 @@ public final class VulkanConfig {
     private static int framesInFlight = DEF_FRAMES_IN_FLIGHT;
     private static boolean chunkPreloadEnabled = DEF_CHUNK_PRELOAD;
     private static int chunkBuildThreads = DEF_CHUNK_BUILD_THREADS;
-    private static int visibilityWalkInterval = DEF_VISIBILITY_WALK_INTERVAL;
     private static int nearPlaneHundredths = DEF_NEAR_PLANE_HUNDREDTHS;
     private static boolean visibilitySeedCache = DEF_VISIBILITY_SEED_CACHE;
     private static volatile boolean ownVisibilityWalk = DEF_OWN_VISIBILITY_WALK;
@@ -558,6 +557,7 @@ public final class VulkanConfig {
     private static int waterRefraction = DEF_WATER_REFRACTION;
     private static String skinPack = DEF_SKIN_PACK;
     private static int sunSize = DEF_SUN_SIZE;
+    private static int waterGlint = DEF_WATER_GLINT;
     private static int frameGraphCorner = DEF_FRAME_GRAPH_CORNER;
     private static boolean cacheBlockEntityModels = DEF_CACHE_BLOCK_ENTITY_MODELS;
     private static int explosionParticles = DEF_EXPLOSION_PARTICLES;
@@ -663,13 +663,6 @@ public final class VulkanConfig {
                 "How many threads build chunk geometry. 0 keeps vanilla's count, which it derives from "
                         + "the heap rather than the CPU and so caps well below a large core count. "
                         + "Takes effect on the next world load.");
-        visibilityWalkInterval = config.getInt("visibilityWalkInterval", CATEGORY_OPTIMIZATION,
-                DEF_VISIBILITY_WALK_INTERVAL, 0, 500,
-                "Milliseconds between visibility walks that only pending chunk rebuilds asked for. "
-                        + "The walk decides which chunks are visible and is the largest single item in "
-                        + "the frame; while a world fills in, the game repeats it every frame even with "
-                        + "the camera perfectly still. 0 leaves vanilla alone. A finished chunk may wait "
-                        + "up to this long before it appears.");
         nearPlaneHundredths = config.getInt("nearPlaneHundredths", CATEGORY_OPTIMIZATION,
                 DEF_NEAR_PLANE_HUNDREDTHS, 0, 50,
                 "Near clipping plane in hundredths of a block. 0 keeps vanilla's 0.05, which at long "
@@ -856,6 +849,10 @@ public final class VulkanConfig {
                 "How large the disc is drawn. The quad the game gives the sun cannot be resized "
                         + "from here, but how much of it the disc fills can, which comes to the "
                         + "same thing. The middle of the range is close to where vanilla put it.");
+        waterGlint = config.getInt("waterGlint", CATEGORY_GENERAL, DEF_WATER_GLINT, 0, 100,
+                "How brightly the sun glints off water and ice. Not the reflection: the sun is a "
+                        + "light rather than a surface a ray can find, so reflecting the sky where "
+                        + "it stands gives its colour and never its shape.");
         frameGraphCorner = config.getInt("frameGraphCorner", CATEGORY_ADVANCED,
                 DEF_FRAME_GRAPH_CORNER, 0, 3,
                 "Which corner the frame time graph sits in. The default is the bottom left, "
@@ -1133,7 +1130,6 @@ public final class VulkanConfig {
         setFramesInFlight(DEF_FRAMES_IN_FLIGHT);
         setChunkPreloadEnabled(DEF_CHUNK_PRELOAD);
         setChunkBuildThreads(DEF_CHUNK_BUILD_THREADS);
-        setVisibilityWalkInterval(DEF_VISIBILITY_WALK_INTERVAL);
         setNearPlaneHundredths(DEF_NEAR_PLANE_HUNDREDTHS);
         setVisibilitySeedCacheEnabled(DEF_VISIBILITY_SEED_CACHE);
         setOwnVisibilityWalk(DEF_OWN_VISIBILITY_WALK);
@@ -1176,6 +1172,7 @@ public final class VulkanConfig {
         setWaterRefraction(DEF_WATER_REFRACTION);
         setSkinPack(DEF_SKIN_PACK);
         setSunSize(DEF_SUN_SIZE);
+        setWaterGlint(DEF_WATER_GLINT);
         setFrameGraphCorner(DEF_FRAME_GRAPH_CORNER);
         setCacheBlockEntityModels(DEF_CACHE_BLOCK_ENTITY_MODELS);
         setExplosionParticles(DEF_EXPLOSION_PARTICLES);
@@ -1209,14 +1206,7 @@ public final class VulkanConfig {
     }
 
     /** Milliseconds between rebuild-triggered visibility walks; 0 leaves vanilla alone. */
-    public static int getVisibilityWalkInterval() {
-        return visibilityWalkInterval;
-    }
 
-    public static void setVisibilityWalkInterval(int value) {
-        visibilityWalkInterval = value;
-        store(CATEGORY_OPTIMIZATION, "visibilityWalkInterval", value);
-    }
 
     public static boolean isVisibilitySeedCacheEnabled() {
         return visibilitySeedCache;
@@ -1427,6 +1417,16 @@ public final class VulkanConfig {
     public static void setRoundSun(boolean value) {
         roundSun = value;
         store(CATEGORY_GENERAL, "roundSun", value);
+    }
+
+    public static int getWaterGlint() {
+        return waterGlint;
+    }
+
+    public static void setWaterGlint(int value) {
+        waterGlint = value < 0 ? 0 : (value > 100 ? 100 : value);
+        store(CATEGORY_GENERAL, "waterGlint", waterGlint);
+        applySystemProperties();
     }
 
     public static int getFrameGraphCorner() {
@@ -2016,6 +2016,7 @@ public final class VulkanConfig {
         // that they appear in the one list that says what a session was
         // configured with, and so that the command line can pin them like any
         // other setting.
+        publish("vulkanmod112.waterGlint", Integer.toString(waterGlint));
         publish("vulkanmod112.frameGraphCorner", Integer.toString(frameGraphCorner));
         publish("vulkanmod112.cacheBlockEntityModels", Boolean.toString(cacheBlockEntityModels));
         publish("vulkanmod112.explosionParticles", Integer.toString(explosionParticles));
