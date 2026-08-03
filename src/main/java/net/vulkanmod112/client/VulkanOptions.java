@@ -774,6 +774,26 @@ final class VulkanOptions {
                                     }
                                 })),
                 new VOptionBlock("Effects",
+                        new VSwitchOption("Cache TNT Model",
+                                "Record the primed TNT cube once and replay it, instead of looking "
+                                        + "the model up and rebuilding its twelve quads for every "
+                                        + "charge in every frame. The game does that per charge per "
+                                        + "frame — seven draw calls each — so five hundred lit "
+                                        + "charges is three and a half thousand of them describing "
+                                        + "one identical cube. The picture is the same to the pixel: "
+                                        + "the list is recorded from the game's own call.",
+                                Cost.of(Level.LOW, Level.NONE, Level.NONE), null,
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return VulkanConfig.isCacheBlockEntityModels();
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        VulkanConfig.setCacheBlockEntityModels(value);
+                                    }
+                                }),
                         new VRangeOption("Explosion Particles",
                                 "How many particles one tick's explosions may spawn before the "
                                         + "rest are thinned out. The server sends the client the "

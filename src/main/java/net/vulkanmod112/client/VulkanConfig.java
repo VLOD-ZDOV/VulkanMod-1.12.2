@@ -371,6 +371,7 @@ public final class VulkanConfig {
     static final String DEF_SKIN_PACK = "";
     /** How much of its square the disc fills, as a percentage of the range. */
     static final int DEF_SUN_SIZE = 50;
+    static final boolean DEF_CACHE_BLOCK_ENTITY_MODELS = true;
     static final int DEF_EXPLOSION_PARTICLES = 0;
     static final int DEF_TIME_CONTROL = 0;
     static final int DEF_TIME_OF_DAY = 12;
@@ -556,6 +557,7 @@ public final class VulkanConfig {
     private static int waterRefraction = DEF_WATER_REFRACTION;
     private static String skinPack = DEF_SKIN_PACK;
     private static int sunSize = DEF_SUN_SIZE;
+    private static boolean cacheBlockEntityModels = DEF_CACHE_BLOCK_ENTITY_MODELS;
     private static int explosionParticles = DEF_EXPLOSION_PARTICLES;
     private static int timeControl = DEF_TIME_CONTROL;
     private static int timeOfDay = DEF_TIME_OF_DAY;
@@ -852,6 +854,11 @@ public final class VulkanConfig {
                 "How large the disc is drawn. The quad the game gives the sun cannot be resized "
                         + "from here, but how much of it the disc fills can, which comes to the "
                         + "same thing. The middle of the range is close to where vanilla put it.");
+        cacheBlockEntityModels = config.getBoolean("cacheBlockEntityModels", CATEGORY_OPTIMIZATION,
+                DEF_CACHE_BLOCK_ENTITY_MODELS,
+                "Record the primed TNT cube once and replay it, instead of looking the model up "
+                        + "and rebuilding its twelve quads for every charge in every frame. The "
+                        + "picture is identical — the list is recorded from the game's own call.");
         explosionParticles = config.getInt("explosionParticles", CATEGORY_OPTIMIZATION,
                 DEF_EXPLOSION_PARTICLES, 0, 20000,
                 "How many particles one tick's explosions may spawn before they are thinned. "
@@ -1163,6 +1170,7 @@ public final class VulkanConfig {
         setWaterRefraction(DEF_WATER_REFRACTION);
         setSkinPack(DEF_SKIN_PACK);
         setSunSize(DEF_SUN_SIZE);
+        setCacheBlockEntityModels(DEF_CACHE_BLOCK_ENTITY_MODELS);
         setExplosionParticles(DEF_EXPLOSION_PARTICLES);
         setTimeControl(DEF_TIME_CONTROL);
         setTimeOfDay(DEF_TIME_OF_DAY);
@@ -1412,6 +1420,16 @@ public final class VulkanConfig {
     public static void setRoundSun(boolean value) {
         roundSun = value;
         store(CATEGORY_GENERAL, "roundSun", value);
+    }
+
+    public static boolean isCacheBlockEntityModels() {
+        return cacheBlockEntityModels;
+    }
+
+    public static void setCacheBlockEntityModels(boolean value) {
+        cacheBlockEntityModels = value;
+        store(CATEGORY_OPTIMIZATION, "cacheBlockEntityModels", value);
+        applySystemProperties();
     }
 
     public static int getExplosionParticles() {
@@ -1981,6 +1999,7 @@ public final class VulkanConfig {
         // that they appear in the one list that says what a session was
         // configured with, and so that the command line can pin them like any
         // other setting.
+        publish("vulkanmod112.cacheBlockEntityModels", Boolean.toString(cacheBlockEntityModels));
         publish("vulkanmod112.explosionParticles", Integer.toString(explosionParticles));
         publish("vulkanmod112.timeControl", Integer.toString(timeControl));
         publish("vulkanmod112.timeOfDay", Integer.toString(timeOfDay));

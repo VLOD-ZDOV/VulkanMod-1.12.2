@@ -41,6 +41,7 @@
     "WeatherRenderMixin",
     "WorldDisplayMixin",
     "ExplosionParticleMixin",
+    "TntRenderMixin",
     "HeldItemLightMixin",
     "MaterialTagMixin",
     "SceneBloomMixin"

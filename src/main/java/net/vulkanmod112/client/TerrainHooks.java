@@ -166,6 +166,9 @@ public final class TerrainHooks {
         // The particle, rain and snow sheets are reloaded on the same event and
         // handed fresh GL names; copies made from the old ones are last pack's.
         SpriteHooks.forgetSheets();
+        // Recorded lists hold texture coordinates, and stitching decides
+        // those afresh; keeping them would draw last pack's pixels.
+        TntModelCache.forget();
     }
 
     /**

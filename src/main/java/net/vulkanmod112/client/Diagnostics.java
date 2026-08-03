@@ -393,6 +393,7 @@ public final class Diagnostics {
         out.println("  " + DynamicLights.stats());
         out.println("  " + WeatherHooks.stats());
         out.println("  " + ExplosionParticles.stats());
+        out.println("  " + TntModelCache.stats());
         out.println("  " + ChunkBuildStats.stats());
         out.println("  " + MaterialRuns.stats());
         out.println("  " + FrameGraph.stats());
