@@ -1176,12 +1176,12 @@ public final class VulkanContextImpl implements VulkanBridge {
     }
 
     @Override
-    public synchronized void submitSprites(java.nio.ByteBuffer vertices, int vertexCount,
-                                           int spriteSlot, float alphaCutoff) {
+    public synchronized boolean submitSprites(java.nio.ByteBuffer vertices, int vertexCount,
+                                              int spriteSlot, float alphaCutoff) {
         if (!initialized || !interopCapable || terrainRenderer == null) {
-            return;
+            return false;
         }
-        terrainRenderer.submitSprites(vertices, vertexCount, spriteSlot, alphaCutoff);
+        return terrainRenderer.submitSprites(vertices, vertexCount, spriteSlot, alphaCutoff);
     }
 
     @Override

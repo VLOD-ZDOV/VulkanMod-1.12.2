@@ -2352,17 +2352,26 @@ final class VkTerrainRenderer {
      * handed geometry and the way this game has always drawn every particle in
      * the world.
      */
-    synchronized void submitSprites(ByteBuffer vertices, int vertexCount, int slot, float cutoff) {
+    /**
+     * @return false when this batch was not taken, so the caller draws it the
+     *         way the game would have. This used to return nothing: a batch
+     *         that would not fit was counted, logged as "left to OpenGL", and
+     *         then left to nobody — the caller had already been told the
+     *         geometry was handled. One rain field is one batch and does not
+     *         fit, so weather through this path was invisible.
+     */
+    synchronized boolean submitSprites(ByteBuffer vertices, int vertexCount, int slot, float cutoff) {
         if (vertices == null || slot < 0 || slot >= SPRITE_SLOTS) {
-            return;
+            return false;
         }
         vertexCount -= vertexCount % 4;
         if (vertexCount < 4) {
-            return;
+            // Nothing to draw at all; nobody needs to draw it instead.
+            return true;
         }
         int bytes = vertexCount * SPRITE_VERTEX_STRIDE;
         if (vertices.remaining() < bytes) {
-            return;
+            return false;
         }
         if (spriteScratchVertices + vertexCount > MAX_SPRITE_VERTICES
                 || spriteBatchCount >= spriteCutoffs.length && !growSpriteBatches()) {
@@ -2372,7 +2381,7 @@ final class VkTerrainRenderer {
                 LOGGER.warn("More sprite geometry in one frame than this renderer will hold "
                         + "({} vertices); the surplus is left to OpenGL", MAX_SPRITE_VERTICES);
             }
-            return;
+            return false;
         }
         int used = spriteScratchVertices * SPRITE_VERTEX_STRIDE;
         if (spriteScratch == null || spriteScratch.capacity() - used < bytes) {
@@ -2393,6 +2402,7 @@ final class VkTerrainRenderer {
         spriteBatches[b * 3 + 2] = slot;
         spriteCutoffs[b] = cutoff;
         spriteScratchVertices += vertexCount;
+        return true;
     }
 
     private boolean growSpriteBatches() {

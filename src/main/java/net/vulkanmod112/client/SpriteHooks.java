@@ -86,11 +86,27 @@ public final class SpriteHooks {
      * caller may begin the next batch. Callers must not also call
      * {@code Tessellator.draw()} — that would close it a second time and throw.
      */
+    /**
+     * Draws a batch the renderer would not take, exactly as the game would.
+     *
+     * The batch cannot be handed back to {@code Tessellator.draw()} — that
+     * calls {@code finishDrawing()} again and the builder is no longer
+     * building, so it throws. The uploader underneath it takes a finished
+     * buffer, which is what this is.
+     */
+    private static final net.minecraft.client.renderer.WorldVertexBufferUploader UPLOADER =
+            new net.minecraft.client.renderer.WorldVertexBufferUploader();
+
     public static void submit(VulkanBridge bridge, BufferBuilder builder, int slot, float cutoff) {
         builder.finishDrawing();
         int vertices = builder.getVertexCount();
-        if (vertices > 0) {
-            bridge.submitSprites(builder.getByteBuffer(), vertices, slot, cutoff);
+        if (vertices > 0
+                && !bridge.submitSprites(builder.getByteBuffer(), vertices, slot, cutoff)) {
+            // Refused, not lost. Whatever will not fit is drawn here rather
+            // than counted and dropped: a rain field is one batch, it does not
+            // fit, and the frame that dropped it had no rain in it at all.
+            UPLOADER.draw(builder);
+            return;
         }
         builder.reset();
     }

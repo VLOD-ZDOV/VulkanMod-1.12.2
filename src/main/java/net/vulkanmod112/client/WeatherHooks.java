@@ -45,11 +45,42 @@ public final class WeatherHooks {
     /**
      * @return true when Vulkan took this batch and the game must not draw it
      */
+    /**
+     * What the weather pass actually handed over, counted where it happens.
+     *
+     * Rain went missing with the sky darkening correctly, which says the
+     * strength reached the shading and stops saying anything after that. The
+     * two possible stories need opposite fixes — the game built no quads, or it
+     * built them and this path lost them — and nothing outside this method can
+     * tell them apart. So both numbers are kept here: how often the game
+     * reached its own draw call, and how many vertices it had by then.
+     */
+    private static long passes;
+    private static long vertices;
+    private static long toVulkan;
+
+    /** Read and reset, for the diagnostics report. */
+    public static String stats() {
+        if (passes == 0) {
+            return "weather: the game drew none since the last report";
+        }
+        String line = String.format(
+                "weather: %d draws, %d vertices, %d of them taken by Vulkan (sheet slot %d)",
+                passes, vertices, toVulkan, slot);
+        passes = 0;
+        vertices = 0;
+        toVulkan = 0;
+        return line;
+    }
+
     public static boolean take(Tessellator tessellator) {
+        passes++;
+        vertices += tessellator.getBuffer().getVertexCount();
         VulkanBridge bridge = SpriteHooks.target(VulkanConfig.isVulkanWeather());
         if (bridge == null) {
             return false;
         }
+        toVulkan++;
         BufferBuilder builder = tessellator.getBuffer();
         try {
             SpriteHooks.submit(bridge, builder, slot, SpriteHooks.WEATHER_CUTOFF);

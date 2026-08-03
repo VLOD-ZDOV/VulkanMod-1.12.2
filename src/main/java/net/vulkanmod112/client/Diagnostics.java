@@ -391,6 +391,7 @@ public final class Diagnostics {
                 VulkanConfig.isOwnVisibilityWalk() ? "on" : "off",
                 VulkanConfig.isFastRebuildNear() ? "on" : "off"));
         out.println("  " + DynamicLights.stats());
+        out.println("  " + WeatherHooks.stats());
         out.println("  " + ChunkBuildStats.stats());
         out.println("  " + MaterialRuns.stats());
         out.println("  " + FrameGraph.stats());

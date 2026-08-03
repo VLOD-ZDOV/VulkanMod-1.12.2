@@ -10,13 +10,21 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 /**
  * Changes what the world says the time and the weather are, on this client.
  *
- * <h2>Why the world and not the sky renderer</h2>
+ * <h2>Why the angle and not the clock</h2>
  *
- * The sky is drawn from the celestial angle, the light level comes from the sun
- * brightness, the fog colour comes from both, and the shadow direction this mod
- * traces comes from the same angle again. All four of them end at
- * {@code World.getWorldTime()}, so answering there moves all four together and
- * answering anywhere else would move some of them and leave the rest.
+ * The sky, the light level, the fog colour and the shadow direction this mod
+ * traces all end at {@code getCelestialAngle}, so answering there moves the
+ * four together and answering further out would move some and leave the rest.
+ *
+ * Answering at {@code getWorldTime()} would look like the tidier place and is
+ * a trap: {@code WorldClient.tick()} runs
+ * {@code setWorldTime(getWorldTime() + 1)} every tick, so the client would
+ * read our invented hour and write it into its own world info — the clock
+ * would really stop, and switching the setting off would leave the world at a
+ * time it was never at. The angle is read and never written back.
+ *
+ * It also leaves the moon phase alone, which is counted from the day number
+ * rather than from the angle, so moving the slider does not move the moon.
  *
  * The same holds for weather: {@code isRaining} and {@code isThundering} are
  * both derived from the two strengths, so those two are the whole of it.
@@ -32,16 +40,15 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 @Mixin(World.class)
 public abstract class WorldDisplayMixin {
 
-    @Inject(method = "getWorldTime", at = @At("HEAD"), cancellable = true)
-    private void vulkanmod112$time(CallbackInfoReturnable<Long> cir) {
+    @Inject(method = "getCelestialAngle", at = @At("HEAD"), cancellable = true)
+    private void vulkanmod112$angle(float partialTicks, CallbackInfoReturnable<Float> cir) {
         World self = (World) (Object) this;
         if (!self.isRemote || !WorldDisplay.overridingTime()) {
             return;
         }
-        // Read from the world info rather than by calling the method this is
-        // injected into, which would be this method calling itself.
-        cir.setReturnValue(Long.valueOf(
-                WorldDisplay.worldTime(self.getWorldInfo().getWorldTime())));
+        long shown = WorldDisplay.worldTime(self.getWorldInfo().getWorldTime());
+        cir.setReturnValue(Float.valueOf(
+                self.provider.calculateCelestialAngle(shown, partialTicks)));
     }
 
     @Inject(method = "getRainStrength", at = @At("HEAD"), cancellable = true)

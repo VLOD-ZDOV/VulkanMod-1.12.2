@@ -285,6 +285,13 @@ public interface VulkanBridge {
      * {@code alphaCutoff} is the game's own alpha test for this batch, and the
      * two values differ: particles cut at one 255th, weather at a tenth.
      */
-    void submitSprites(java.nio.ByteBuffer vertices, int vertexCount, int spriteSlot, float alphaCutoff);
+    /**
+     * @return false when the renderer could not take the batch, so that the
+     *         caller draws it the way the game would have. It used to return
+     *         nothing, drop what would not fit and leave the caller believing
+     *         it had been drawn — which is how a whole rain field could vanish.
+     */
+    boolean submitSprites(java.nio.ByteBuffer vertices, int vertexCount, int spriteSlot,
+                          float alphaCutoff);
 
 }
