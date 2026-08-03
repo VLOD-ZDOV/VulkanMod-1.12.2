@@ -142,6 +142,10 @@ public final class GuiVulkanSettings extends GuiScreen {
     public void drawScreen(int mouseX, int mouseY, float partialTicks) {
         this.drawDefaultBackground();
         this.hovered = null;
+        // Everything drawn from here on rocks, if it rocks at all. The
+        // background stays put on purpose: a moving background reads as the
+        // window itself sliding, and the joke is the page nodding inside it.
+        SixSeven.begin();
 
         this.drawCenteredString(this.fontRenderer, "VulkanMod112", this.width / 2, 12, 0xFFFFFF);
         VulkanBridge bridge = VulkanLoader.bridgeIfReady();
@@ -182,6 +186,7 @@ public final class GuiVulkanSettings extends GuiScreen {
         drawScrollbar();
 
         super.drawScreen(mouseX, mouseY, partialTicks);
+        SixSeven.end();
     }
 
     /**

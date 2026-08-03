@@ -59,8 +59,31 @@ public final class MaterialRuns {
     public static final int GLASS = 3;
     public static final int LAVA = 4;
     public static final int ICE = 5;
-    /** A cross-shaped plant: lit as a volume like foliage, and the only thing that sways. */
+    /** A cross-shaped plant one block high: the top pair of each quad moves. */
     public static final int PLANT = 6;
+    /**
+     * The two halves of a plant two blocks high, told apart.
+     *
+     * A double plant was left still because the rule that moves the top pair of
+     * a quad would have moved the top of the lower block and the bottom of the
+     * upper one differently, and the stem would have come apart at the seam.
+     * Naming the halves is what makes it possible: the lower one leans by one
+     * step, the upper one by one at its foot and two at its head, so the seam
+     * moves as one place and the plant bends along its whole length instead of
+     * hinging in the middle.
+     */
+    public static final int PLANT_TALL_LOWER = 7;
+    public static final int PLANT_TALL_UPPER = 8;
+    /**
+     * Leaves, which move as a whole block and never by their corners.
+     *
+     * A leaf block is a full cube. Moving the top pair of each quad shears its
+     * top face away from its sides and opens a hole in the canopy, which is why
+     * leaves were left out of the wind entirely. Drifting the whole cube costs
+     * nothing in shape — the wave is read once at the block's centre, so all
+     * eight corners take the same offset and the cube stays a cube.
+     */
+    public static final int LEAVES = 9;
     /**
      * The block's own light level, 0 to 15, in the upper four bits.
      *
@@ -361,13 +384,28 @@ public final class MaterialRuns {
                     || block instanceof net.minecraft.block.BlockCocoa
                     || block instanceof net.minecraft.block.BlockChorusPlant
                     || block instanceof net.minecraft.block.BlockChorusFlower;
+            if (block instanceof net.minecraft.block.BlockDoublePlant) {
+                try {
+                    return state.getValue(net.minecraft.block.BlockDoublePlant.HALF)
+                            == net.minecraft.block.BlockDoublePlant.EnumBlockHalf.UPPER
+                            ? PLANT_TALL_UPPER : PLANT_TALL_LOWER;
+                } catch (Throwable ignored) {
+                    // A modded block extending this one without the property.
+                    // Standing still is the answer that cannot look wrong.
+                    return FOLIAGE;
+                }
+            }
             return still ? FOLIAGE : PLANT;
         }
-        // Leaves: lit as a volume like the rest, never moved. A leaf block is a
-        // full cube, so its top face is four corners at one height, and moving
-        // the top pair of each quad would tear that face apart.
+        // Leaves drift as whole cubes rather than by their corners; see LEAVES.
         if (material == Material.LEAVES) {
-            return FOLIAGE;
+            return LEAVES;
+        }
+        // A cobweb is crossed quads fixed at the bottom like any other plant,
+        // and moves by the same rule. It is not Material.PLANTS or VINE, so it
+        // fell through to plain and stood in a draught perfectly still.
+        if (material == Material.WEB) {
+            return PLANT;
         }
         if (material == Material.GLASS) {
             return GLASS;

@@ -96,10 +96,28 @@ const uint MATERIAL_ICE = 5u;
 // thing — and told apart only because it is the one material that may be
 // moved by the wind. See terrain.vert.
 const uint MATERIAL_PLANT = 6u;
+const uint MATERIAL_PLANT_TALL_LOWER = 7u;
+const uint MATERIAL_PLANT_TALL_UPPER = 8u;
+const uint MATERIAL_LEAVES = 9u;
 // The block's own light level lives in the upper four bits, and the material
 // in the lower four. Independent of each other: lava is a material and a
 // light, glowstone is a light and nothing in particular.
 const uint MATERIAL_MASK = 0x0Fu;
+
+/**
+ * Everything lit as a volume rather than as a flat face.
+ *
+ * One place, because the list grew: leaves and the two halves of a tall plant
+ * are new materials only so that the vertex stage can move them differently,
+ * and every one of them wants exactly the lighting foliage always had. Asked
+ * in two places and written out in both, the second would have been forgotten.
+ */
+bool isFoliage(uint material) {
+    return material == MATERIAL_FOLIAGE || material == MATERIAL_PLANT
+            || material == MATERIAL_PLANT_TALL_LOWER
+            || material == MATERIAL_PLANT_TALL_UPPER
+            || material == MATERIAL_LEAVES;
+}
 
 /**
  * How far a fully tilted wave may drag what is under it, in screen widths at
@@ -151,7 +169,7 @@ vec3 materialColor(uint material) {
     if (material == MATERIAL_WATER) {
         return vec3(0.2, 0.4, 1.0);
     }
-    if (material == MATERIAL_FOLIAGE || material == MATERIAL_PLANT) {
+    if (isFoliage(material)) {
         return vec3(0.2, 1.0, 0.2);
     }
     if (material == MATERIAL_GLASS) {
@@ -813,7 +831,7 @@ void main() {
     if (BLEND && material == MATERIAL_PLAIN) {
         material = spriteMaterial(vUV);
     }
-    bool foliage = material == MATERIAL_FOLIAGE || material == MATERIAL_PLANT;
+    bool foliage = isFoliage(material);
     // Both of these come from the frame's uniform buffer, so every fragment in
     // the draw takes the same branch — which is what makes it safe to ask for
     // derivatives inside it.

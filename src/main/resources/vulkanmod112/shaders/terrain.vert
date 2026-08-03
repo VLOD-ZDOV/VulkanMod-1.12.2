@@ -57,6 +57,21 @@ layout(location = 4) out vec3 vRelative;
 layout(location = 5) flat out uint vMaterial;
 
 const uint MATERIAL_PLANT = 6u;
+const uint MATERIAL_PLANT_TALL_LOWER = 7u;
+const uint MATERIAL_PLANT_TALL_UPPER = 8u;
+const uint MATERIAL_LEAVES = 9u;
+
+/**
+ * How far a leaf block drifts, against how far a blade of grass leans.
+ *
+ * Much less, and not for taste: a leaf cube moves as a whole while its
+ * neighbours move by their own reading of the same wave, so whatever they
+ * differ by is a seam opening between them. Small amplitude against a long
+ * wavelength keeps that difference under a pixel, and a canopy that breathes
+ * is the whole of what this is for — a forest that visibly sways is a forest
+ * with holes in it.
+ */
+const float LEAF_REACH = 0.035;
 
 // The same lattice terrain.frag builds its waves on, for the same reason: the
 // phase has to come from a world position, single precision cannot hold one at
@@ -107,12 +122,34 @@ void main() {
     // gl_VertexIndex has the draw's vertexOffset added in and a chunk does not
     // have to begin on a quad boundary, so where this chunk's own count starts
     // is handed over in the origin's spare fourth float.
-    if (frame.water.w > 0.0 && frame.frameInfo.z > 0.5 && inMaterial == MATERIAL_PLANT) {
-        int corner = (gl_VertexIndex - int(chunk.w)) & 3;
-        if (corner == 0 || corner == 3) {
+    if (frame.water.w > 0.0 && frame.frameInfo.z > 0.5) {
+        if (inMaterial == MATERIAL_LEAVES) {
+            // Read at the centre of the block rather than at the vertex, so
+            // every corner of the cube takes the same offset and the cube
+            // stays a cube. The field is already world-aligned — the camera's
+            // own place on the lattice is added into it — so flooring it lands
+            // on block boundaries and not on some offset of the camera.
             vec2 field = relative.xz + frame.water.yz;
-            relative.xz += swayOffset(field, frame.frameInfo.x)
-                    * (SWAY_REACH * frame.water.w);
+            relative.xz += swayOffset(floor(field) + 0.5, frame.frameInfo.x)
+                    * (LEAF_REACH * frame.water.w);
+        } else if (inMaterial == MATERIAL_PLANT
+                || inMaterial == MATERIAL_PLANT_TALL_LOWER
+                || inMaterial == MATERIAL_PLANT_TALL_UPPER) {
+            int corner = (gl_VertexIndex - int(chunk.w)) & 3;
+            bool top = corner == 0 || corner == 3;
+            // How far up the stem this vertex is, in half-block steps. A plant
+            // one block high leans one step at its head and none at its foot;
+            // a plant two blocks high carries on from where its lower half
+            // ended, so the seam is one place moving one amount rather than
+            // two edges pulling apart.
+            float along = inMaterial == MATERIAL_PLANT_TALL_UPPER
+                    ? (top ? 2.0 : 1.0)
+                    : (top ? 1.0 : 0.0);
+            if (along > 0.0) {
+                vec2 field = relative.xz + frame.water.yz;
+                relative.xz += swayOffset(field, frame.frameInfo.x)
+                        * (SWAY_REACH * frame.water.w * along);
+            }
         }
     }
     gl_Position = frame.mvp * vec4(relative, 1.0);
