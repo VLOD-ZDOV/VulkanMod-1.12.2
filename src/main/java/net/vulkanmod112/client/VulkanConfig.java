@@ -371,6 +371,9 @@ public final class VulkanConfig {
     static final String DEF_SKIN_PACK = "";
     /** How much of its square the disc fills, as a percentage of the range. */
     static final int DEF_SUN_SIZE = 50;
+    static final int DEF_TIME_CONTROL = 0;
+    static final int DEF_TIME_OF_DAY = 12;
+    static final int DEF_WEATHER_CONTROL = 0;
     /** How warm the rim goes, 0 = white. */
     static final int DEF_SUN_WARMTH = 60;
     /**
@@ -552,6 +555,9 @@ public final class VulkanConfig {
     private static int waterRefraction = DEF_WATER_REFRACTION;
     private static String skinPack = DEF_SKIN_PACK;
     private static int sunSize = DEF_SUN_SIZE;
+    private static int timeControl = DEF_TIME_CONTROL;
+    private static int timeOfDay = DEF_TIME_OF_DAY;
+    private static int weatherControl = DEF_WEATHER_CONTROL;
     private static int sunWarmth = DEF_SUN_WARMTH;
     private static int lightSoftness = DEF_LIGHT_SOFTNESS;
     private static boolean frameGraph = DEF_FRAME_GRAPH;
@@ -844,6 +850,16 @@ public final class VulkanConfig {
                 "How large the disc is drawn. The quad the game gives the sun cannot be resized "
                         + "from here, but how much of it the disc fills can, which comes to the "
                         + "same thing. The middle of the range is close to where vanilla put it.");
+        timeControl = config.getInt("timeControl", CATEGORY_GENERAL, DEF_TIME_CONTROL, 0, 2,
+                "Whether the time of day you see is the world's own, held where it was, or set "
+                        + "by the slider below. Nothing is sent to the server and nothing is "
+                        + "stored: mobs still burn at dawn whatever this says.");
+        timeOfDay = config.getInt("timeOfDay", CATEGORY_GENERAL, DEF_TIME_OF_DAY, 0, 23,
+                "Which hour to show when the control above is set to Fixed. The day is kept, so "
+                        + "the moon keeps the phase it was going to have.");
+        weatherControl = config.getInt("weatherControl", CATEGORY_GENERAL, DEF_WEATHER_CONTROL, 0, 3,
+                "Whether the weather you see is the world's own or one you pick. Local to this "
+                        + "screen: a storm the server believes in still charges a creeper.");
         sunWarmth = config.getInt("sunWarmth", CATEGORY_GENERAL, DEF_SUN_WARMTH, 0, 100,
                 "How far towards orange the rim of the sun goes. 0 leaves it white. The centre "
                         + "stays bright either way — a sun that is one flat colour looks painted "
@@ -1139,6 +1155,9 @@ public final class VulkanConfig {
         setWaterRefraction(DEF_WATER_REFRACTION);
         setSkinPack(DEF_SKIN_PACK);
         setSunSize(DEF_SUN_SIZE);
+        setTimeControl(DEF_TIME_CONTROL);
+        setTimeOfDay(DEF_TIME_OF_DAY);
+        setWeatherControl(DEF_WEATHER_CONTROL);
         setSunWarmth(DEF_SUN_WARMTH);
         setExtremeRenderDistance(DEF_EXTREME_RENDER_DISTANCE);
         setDirectionalLight(DEF_DIRECTIONAL_LIGHT);
@@ -1384,6 +1403,36 @@ public final class VulkanConfig {
     public static void setRoundSun(boolean value) {
         roundSun = value;
         store(CATEGORY_GENERAL, "roundSun", value);
+    }
+
+    public static int getTimeControl() {
+        return timeControl;
+    }
+
+    public static void setTimeControl(int value) {
+        timeControl = value < 0 ? 0 : (value > 2 ? 2 : value);
+        store(CATEGORY_GENERAL, "timeControl", timeControl);
+        applySystemProperties();
+    }
+
+    public static int getTimeOfDay() {
+        return timeOfDay;
+    }
+
+    public static void setTimeOfDay(int value) {
+        timeOfDay = value < 0 ? 0 : (value > 23 ? 23 : value);
+        store(CATEGORY_GENERAL, "timeOfDay", timeOfDay);
+        applySystemProperties();
+    }
+
+    public static int getWeatherControl() {
+        return weatherControl;
+    }
+
+    public static void setWeatherControl(int value) {
+        weatherControl = value < 0 ? 0 : (value > 3 ? 3 : value);
+        store(CATEGORY_GENERAL, "weatherControl", weatherControl);
+        applySystemProperties();
     }
 
     public static int getSunSize() {
@@ -1913,6 +1962,9 @@ public final class VulkanConfig {
         // that they appear in the one list that says what a session was
         // configured with, and so that the command line can pin them like any
         // other setting.
+        publish("vulkanmod112.timeControl", Integer.toString(timeControl));
+        publish("vulkanmod112.timeOfDay", Integer.toString(timeOfDay));
+        publish("vulkanmod112.weatherControl", Integer.toString(weatherControl));
         publish("vulkanmod112.dynamicLights", Boolean.toString(dynamicLights));
         publish("vulkanmod112.dynamicLightDistance", Integer.toString(dynamicLightDistance));
     }

@@ -1659,6 +1659,62 @@ final class VulkanOptions {
                                         VulkanConfig.setDynamicLightDistance(value);
                                     }
                                 })),
+                new VOptionBlock("Time and Weather",
+                        new VCyclingOption("Time Control",
+                                "Show a different time of day than the world is at. Local to this "
+                                        + "screen and nowhere else: nothing is sent to the server, "
+                                        + "nothing is written to the world, and no other player "
+                                        + "sees it. Mobs still burn at dawn. Frozen holds the hour "
+                                        + "you switched it on at; Fixed uses the slider below.",
+                                Cost.of(Level.NONE, Level.NONE, Level.NONE), null,
+                                new String[]{"Off", "Frozen", "Fixed"},
+                                new VCyclingOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getTimeControl();
+                                    }
+
+                                    @Override
+                                    public void set(int index) {
+                                        VulkanConfig.setTimeControl(index);
+                                    }
+                                }),
+                        new VRangeOption("Time Of Day",
+                                "Which hour to show. The day is kept, so the moon keeps the phase "
+                                        + "it was going to have. Every effect in this mod looks "
+                                        + "different at a different hour, and this is how to see "
+                                        + "two hours without waiting for one.",
+                                Cost.of(Level.NONE, Level.NONE, Level.NONE),
+                                "Needs Time Control set to Fixed.",
+                                0, 23, 1, ":00", null,
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getTimeOfDay();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setTimeOfDay(value);
+                                    }
+                                }),
+                        new VCyclingOption("Weather Control",
+                                "Show weather of your own instead of the world's. Local, like the "
+                                        + "time above: a storm the server believes in still charges "
+                                        + "a creeper, and one you turn on here charges nothing.",
+                                Cost.of(Level.NONE, Level.NONE, Level.NONE), null,
+                                new String[]{"Off", "Clear", "Rain", "Storm"},
+                                new VCyclingOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getWeatherControl();
+                                    }
+
+                                    @Override
+                                    public void set(int index) {
+                                        VulkanConfig.setWeatherControl(index);
+                                    }
+                                })),
                 new VOptionBlock("Sky and Water",
                         new VRangeOption("Water Refraction",
                                 "How much the surface of water bends what is seen through it. "

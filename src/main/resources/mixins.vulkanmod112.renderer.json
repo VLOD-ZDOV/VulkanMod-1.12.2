@@ -39,6 +39,7 @@
     "LightmapCoordMixin",
     "EntityPassMixin",
     "WeatherRenderMixin",
+    "WorldDisplayMixin",
     "HeldItemLightMixin",
     "MaterialTagMixin",
     "SceneBloomMixin"
