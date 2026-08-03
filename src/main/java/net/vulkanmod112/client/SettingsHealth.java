@@ -107,6 +107,7 @@ public final class SettingsHealth {
         add(out, "water refraction", VulkanConfig.getWaterRefraction());
         add(out, "swaying foliage", VulkanConfig.getFoliageSway());
         add(out, "bloom", VulkanConfig.getBloom());
+        add(out, "scene tone", VulkanConfig.getSceneTone());
         add(out, "ambient occlusion", VulkanConfig.getAmbientOcclusion());
         add(out, "directional block light", VulkanConfig.getDirectionalLight());
         add(out, "height fog", VulkanConfig.getHeightFog());

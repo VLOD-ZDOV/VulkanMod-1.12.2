@@ -547,6 +547,9 @@ public final class TerrainHooks {
             return;
         }
         bridge.applySceneBloom(frame.framebufferTexture);
+        // After the glow and not before it: the tone is of the finished
+        // picture, and by this point the glow is part of the picture.
+        bridge.applySceneTone(frame.framebufferTexture);
     }
 
     /**

@@ -160,6 +160,12 @@ public interface VulkanBridge {
      */
     void applySceneBloom(int sceneGlTexture);
 
+    /**
+     * Grades the finished frame — terrain, creatures, particles, weather and
+     * water together — where all of it exists at once. Does nothing at zero.
+     */
+    void applySceneTone(int sceneGlTexture);
+
     /** Tells the Vulkan side which GL texture holds the 16x16 lightmap. */
     void setLightmap(int lightmapGlTextureId);
 

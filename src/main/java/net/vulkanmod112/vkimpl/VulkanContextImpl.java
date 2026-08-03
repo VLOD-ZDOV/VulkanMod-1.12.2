@@ -1077,6 +1077,15 @@ public final class VulkanContextImpl implements VulkanBridge {
     }
 
     @Override
+    public void applySceneTone(int sceneGlTexture) {
+        // Same thread and same reasoning as the pass above.
+        if (!initialized || terrainRenderer == null) {
+            return;
+        }
+        terrainRenderer.applySceneTone(sceneGlTexture);
+    }
+
+    @Override
     public synchronized void updateAtlasRegions(int[] header, int headerCount,
                                                 int[] pixels, int pixelCount) {
         if (!initialized || terrainRenderer == null) {

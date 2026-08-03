@@ -1791,6 +1791,18 @@ final class VkTerrainRenderer {
                 .append(atlasPendingDropped > 0
                         ? ", " + atlasPendingDropped + " backlogs dropped" : "")
                 .append(" (no fence wait on the render thread)\n");
+        sb.append("  scene tone: ");
+        if (toneFailed) {
+            sb.append("off for this session (see the main log)");
+        } else if (toneStrength <= 0.0f) {
+            sb.append("off");
+        } else {
+            sb.append(String.format("%.0f%% at %.0f%% warmth, %d frames graded, target %dx%d",
+                    toneStrength * 100.0f, (toneWarmth + 1.0f) * 50.0f, toneFrames,
+                    toneWidth, toneHeight));
+            toneFrames = 0;
+        }
+        sb.append('\n');
         sb.append("  frame accumulation: ");
         if (accumFailed) {
             sb.append("off for this session (see the main log)");
@@ -3904,6 +3916,182 @@ final class VkTerrainRenderer {
      * still ours to read; reading that target at this point would race the next
      * frame, because the semaphore handing it back has already been signalled.
      */
+    /**
+     * The tone of the whole finished picture, applied where the whole picture
+     * exists.
+     *
+     * <h2>Why here and nowhere else</h2>
+     *
+     * What separates a shader pack's frame from vanilla's, before any single
+     * effect is named, is the tone: contrast lifted, lights warmed, shadows
+     * pressed down. A curve like that has to reach everything or it reads as a
+     * fault — and this renderer's own composite is stitched into the frame
+     * before the game draws its creatures, particles and weather, so anything
+     * applied there would have coloured the blocks and left the cows alone.
+     *
+     * This hook is the other one. It fires on the profiler's "hand" marker,
+     * after the world is finished in full and before the hand and the interface
+     * — so it sees terrain, creatures, particles, weather and water together,
+     * and never touches the inventory or the menus.
+     *
+     * <h2>What it cannot do</h2>
+     *
+     * The game's frame is eight bits a channel, so there is no headroom above
+     * white: this is colour grading, not the film curve with burning highlights
+     * a pack gets from a floating-point buffer. Said plainly rather than
+     * pretended away — the curve below deliberately never pushes anything up
+     * into clipping, because the only thing it could spend there is detail that
+     * is already in the frame.
+     */
+    void applySceneTone(int sceneTexture) {
+        if (toneFailed || toneStrength <= 0.0f || sceneTexture == 0
+                || width <= 0 || height <= 0) {
+            return;
+        }
+        int prevProgram = GL11C.glGetInteger(GL20C.GL_CURRENT_PROGRAM);
+        int prevFbo = GL11C.glGetInteger(GL30C.GL_FRAMEBUFFER_BINDING);
+        int prevTexture = GL11C.glGetInteger(GL11C.GL_TEXTURE_BINDING_2D);
+        if (!ensureToneTargets(prevFbo, prevTexture)) {
+            return;
+        }
+        org.lwjgl.opengl.GL11.glPushAttrib(org.lwjgl.opengl.GL11.GL_ENABLE_BIT
+                | org.lwjgl.opengl.GL11.GL_DEPTH_BUFFER_BIT
+                | org.lwjgl.opengl.GL11.GL_COLOR_BUFFER_BIT
+                | org.lwjgl.opengl.GL11.GL_TEXTURE_BIT
+                | org.lwjgl.opengl.GL11.GL_CURRENT_BIT
+                | org.lwjgl.opengl.GL11.GL_POLYGON_BIT
+                | org.lwjgl.opengl.GL11.GL_VIEWPORT_BIT);
+        GL11C.glDisable(org.lwjgl.opengl.GL11.GL_ALPHA_TEST);
+        GL11C.glDisable(GL11C.GL_CULL_FACE);
+        GL11C.glDisable(GL11C.GL_SCISSOR_TEST);
+        GL11C.glDisable(GL11C.GL_DEPTH_TEST);
+        GL11C.glDisable(GL11C.GL_BLEND);
+        GL11C.glDepthMask(false);
+
+        // A copy first, because a texture cannot be read and written at once,
+        // and the thing being graded is the very image being drawn into. The
+        // hardware blit is cheaper than a pass that only moves pixels.
+        GL30C.glBindFramebuffer(GL30C.GL_READ_FRAMEBUFFER, prevFbo);
+        GL30C.glBindFramebuffer(GL30C.GL_DRAW_FRAMEBUFFER, toneFbo);
+        GL30C.glBlitFramebuffer(0, 0, width, height, 0, 0, width, height,
+                GL11C.GL_COLOR_BUFFER_BIT, GL11C.GL_NEAREST);
+
+        GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo);
+        GL11C.glViewport(0, 0, width, height);
+        GL20C.glUseProgram(toneProgram);
+        GL20C.glUniform2f(toneInvSize, 1.0f / width, 1.0f / height);
+        GL20C.glUniform1f(toneStrengthUniform, toneStrength);
+        GL20C.glUniform1f(toneWarmthUniform, toneWarmth);
+        GL13C.glActiveTexture(GL13C.GL_TEXTURE0);
+        GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, toneTexture);
+        fullscreenQuad();
+        toneFrames++;
+
+        org.lwjgl.opengl.GL11.glPopAttrib();
+        GL20C.glUseProgram(prevProgram);
+        GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo);
+        GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, prevTexture);
+    }
+
+    private int toneTexture;
+    private int toneFbo;
+    private int toneProgram;
+    private int toneInvSize;
+    private int toneStrengthUniform;
+    private int toneWarmthUniform;
+    private int toneWidth;
+    private int toneHeight;
+    private boolean toneFailed;
+    private long toneFrames;
+    private float toneStrength;
+    private float toneWarmth;
+
+    private boolean ensureToneTargets(int prevFbo, int prevTexture) {
+        if (toneTexture != 0 && toneWidth == width && toneHeight == height && toneProgram != 0) {
+            return true;
+        }
+        destroyToneTargets();
+        try {
+            toneTexture = GL11C.glGenTextures();
+            GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, toneTexture);
+            GL11C.glTexImage2D(GL11C.GL_TEXTURE_2D, 0, GL11C.GL_RGBA8, width, height,
+                    0, GL11C.GL_RGBA, GL11C.GL_UNSIGNED_BYTE, (java.nio.ByteBuffer) null);
+            GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_MIN_FILTER, GL11C.GL_LINEAR);
+            GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_MAG_FILTER, GL11C.GL_LINEAR);
+            GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_WRAP_S, GL12C.GL_CLAMP_TO_EDGE);
+            GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_WRAP_T, GL12C.GL_CLAMP_TO_EDGE);
+            toneFbo = GL30C.glGenFramebuffers();
+            GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, toneFbo);
+            GL30C.glFramebufferTexture2D(GL30C.GL_FRAMEBUFFER, GL30C.GL_COLOR_ATTACHMENT0,
+                    GL11C.GL_TEXTURE_2D, toneTexture, 0);
+            if (GL30C.glCheckFramebufferStatus(GL30C.GL_FRAMEBUFFER)
+                    != GL30C.GL_FRAMEBUFFER_COMPLETE) {
+                LOGGER.error("Tone framebuffer incomplete; scene tone is off for this session");
+                toneFailed = true;
+                destroyToneTargets();
+                return false;
+            }
+            if (toneProgram == 0) {
+                toneProgram = buildToneProgram();
+                toneInvSize = GL20C.glGetUniformLocation(toneProgram, "uInvSize");
+                toneStrengthUniform = GL20C.glGetUniformLocation(toneProgram, "uStrength");
+                toneWarmthUniform = GL20C.glGetUniformLocation(toneProgram, "uWarmth");
+            }
+            toneWidth = width;
+            toneHeight = height;
+            return true;
+        } catch (Throwable t) {
+            LOGGER.error("Could not prepare the scene tone pass; it is off for this session", t);
+            toneFailed = true;
+            destroyToneTargets();
+            return false;
+        } finally {
+            GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo);
+            GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, prevTexture);
+        }
+    }
+
+    private void destroyToneTargets() {
+        if (toneFbo != 0) {
+            GL30C.glDeleteFramebuffers(toneFbo);
+            toneFbo = 0;
+        }
+        if (toneTexture != 0) {
+            GL11C.glDeleteTextures(toneTexture);
+            toneTexture = 0;
+        }
+        toneWidth = 0;
+        toneHeight = 0;
+    }
+
+    private int buildToneProgram() {
+        return buildQuadProgram(
+                "uniform sampler2D uSource;\n"
+                        + "uniform vec2 uInvSize;\n"
+                        + "uniform float uStrength;\n"
+                        + "uniform float uWarmth;\n"
+                        + "void main() {\n"
+                        + "    vec3 c = texture2D(uSource, gl_FragCoord.xy * uInvSize).rgb;\n"
+                        // An S curve about the middle grey of the frame. Not a
+                        // film curve: there is no headroom above white in an
+                        // eight bit buffer, so anything that pushed highlights
+                        // up would only be spending detail the frame already
+                        // has. This leaves both ends where they are and steepens
+                        // the middle, which is where a picture's contrast lives.
+                        + "    vec3 s = c * c * (3.0 - 2.0 * c);\n"
+                        // Warmth as a rotation of the balance rather than a
+                        // tint added on top: red gains what blue gives up, so
+                        // the average brightness of the frame does not move and
+                        // a warm scene does not read as a brighter one.
+                        + "    vec3 w = vec3(s.r * (1.0 + 0.10 * uWarmth),\n"
+                        + "                  s.g * (1.0 + 0.02 * uWarmth),\n"
+                        + "                  s.b * (1.0 - 0.10 * uWarmth));\n"
+                        // Mixed rather than replaced, so the slider is a real
+                        // amount and zero is the untouched frame to the bit.
+                        + "    gl_FragColor = vec4(clamp(mix(c, w, uStrength), 0.0, 1.0), 1.0);\n"
+                        + "}\n");
+    }
+
     void applySceneBloom(int sceneTexture) {
         if (!bloomReady || bloomStrength <= 0.0f || bloomFailed
                 || bloomTexture[0] == 0 || sceneTexture == 0) {
@@ -5116,6 +5304,8 @@ final class VkTerrainRenderer {
         waterReflection = clampPercent(intProperty("vulkanmod112.waterReflection", 0));
         waterWaves = clampPercent(intProperty("vulkanmod112.waterWaves", 0));
         foliageSway = clampPercent(intProperty("vulkanmod112.foliageSway", 0));
+        toneStrength = clampPercent(intProperty("vulkanmod112.sceneTone", 0));
+        toneWarmth = clampPercent(intProperty("vulkanmod112.sceneWarmth", 50)) * 2.0f - 1.0f;
         bloomStrength = clampPercent(intProperty("vulkanmod112.bloom", 0));
         aoStrength = clampPercent(intProperty("vulkanmod112.ambientOcclusion", 0));
         aoRadius = Math.max(1, Math.min(6, intProperty("vulkanmod112.aoRadius", 2)));

@@ -4,6 +4,8 @@
 
 ### Added
 
+- **The whole picture is graded, not just the blocks.** Contrast lifted through the middle, warmth put into the balance — the thing that separates a shader pack's frame from the game's before any single effect is named. It could not be done in this mod's own composite, which is stitched into the frame before the game draws its creatures: the blocks would have been graded and the cows left alone. It runs on the marker that fires once the world is finished in full, so it reaches terrain, creatures, particles, weather and water together, and stops before the hand and the interface. The game's frame is eight bits a channel, so this is colour grading and not a film curve — there is no headroom above white, and the curve deliberately never pushes anything into it.
+
 - **The sun glints off water and ice.** The narrow bright spot that slides along the ripples, and the sudden broad flash off a frozen lake. This is not the reflection and could never come from it: the sun is a light rather than a surface a ray can find, so reflecting the sky where it stands gives you its colour and never its shape. Ice had been labelled by the game side all along while nothing in the shader ever read the label.
 
 - **The frame time graph can sit in any of the four corners.** The default is the bottom left, and so is the chat window — a readout over what you are reading is a tool nobody leaves on. The two lines of numbers move to the other side of the graph in the top corners, so nothing runs off the screen.

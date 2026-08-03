@@ -1752,6 +1752,47 @@ final class VulkanOptions {
                                     }
                                 })),
                 new VOptionBlock("Sky and Water",
+                        new VRangeOption("Scene Tone",
+                                "Grades the finished picture: contrast lifted in the middle, "
+                                        + "warmth put into the balance. This is the thing that "
+                                        + "separates a shader pack's frame from the game's before "
+                                        + "any single effect is named. It runs after the world is "
+                                        + "drawn in full, so it reaches creatures, particles and "
+                                        + "weather as well as blocks, and stops before the hand "
+                                        + "and the interface. The game's frame is eight bits a "
+                                        + "channel, so this is colour grading and not a film curve "
+                                        + "— there is no headroom above white to burn.",
+                                Cost.of(Level.NONE, Level.LOW, Level.LOW), null,
+                                0, 100, 5, "%", "OFF",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getSceneTone();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setSceneTone(value);
+                                    }
+                                }),
+                        new VRangeOption("Scene Warmth",
+                                "Which way the grading leans. The middle is neutral, above it "
+                                        + "warm, below it cold. Red gains exactly what blue gives "
+                                        + "up, so a warm scene does not read as a brighter one.",
+                                Cost.of(Level.NONE, Level.NONE, Level.NONE),
+                                "Needs Scene Tone above zero.",
+                                0, 100, 5, "%", null,
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getSceneWarmth();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setSceneWarmth(value);
+                                    }
+                                }),
                         new VRangeOption("Sun Glint",
                                 "How brightly the sun glints off water and ice — the narrow bright "
                                         + "spot that slides along the ripples, and the sudden flash "

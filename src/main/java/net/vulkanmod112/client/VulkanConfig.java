@@ -370,6 +370,8 @@ public final class VulkanConfig {
     static final String DEF_SKIN_PACK = "";
     /** How much of its square the disc fills, as a percentage of the range. */
     static final int DEF_SUN_SIZE = 50;
+    static final int DEF_SCENE_TONE = 0;
+    static final int DEF_SCENE_WARMTH = 50;
     static final int DEF_WATER_GLINT = 0;
     static final int DEF_FRAME_GRAPH_CORNER = 0;
     static final boolean DEF_CACHE_BLOCK_ENTITY_MODELS = true;
@@ -557,6 +559,8 @@ public final class VulkanConfig {
     private static int waterRefraction = DEF_WATER_REFRACTION;
     private static String skinPack = DEF_SKIN_PACK;
     private static int sunSize = DEF_SUN_SIZE;
+    private static int sceneTone = DEF_SCENE_TONE;
+    private static int sceneWarmth = DEF_SCENE_WARMTH;
     private static int waterGlint = DEF_WATER_GLINT;
     private static int frameGraphCorner = DEF_FRAME_GRAPH_CORNER;
     private static boolean cacheBlockEntityModels = DEF_CACHE_BLOCK_ENTITY_MODELS;
@@ -849,6 +853,13 @@ public final class VulkanConfig {
                 "How large the disc is drawn. The quad the game gives the sun cannot be resized "
                         + "from here, but how much of it the disc fills can, which comes to the "
                         + "same thing. The middle of the range is close to where vanilla put it.");
+        sceneTone = config.getInt("sceneTone", CATEGORY_GENERAL, DEF_SCENE_TONE, 0, 100,
+                "How strongly the finished picture is graded — contrast in the middle, warmth in "
+                        + "the balance. Applied after the whole world is drawn, so it reaches "
+                        + "creatures and particles as well as blocks, and never the interface.");
+        sceneWarmth = config.getInt("sceneWarmth", CATEGORY_GENERAL, DEF_SCENE_WARMTH, 0, 100,
+                "Which way the grading leans. The middle is neutral, above it warm, below it "
+                        + "cold. Red gains what blue gives up, so the frame does not get brighter.");
         waterGlint = config.getInt("waterGlint", CATEGORY_GENERAL, DEF_WATER_GLINT, 0, 100,
                 "How brightly the sun glints off water and ice. Not the reflection: the sun is a "
                         + "light rather than a surface a ray can find, so reflecting the sky where "
@@ -1172,6 +1183,8 @@ public final class VulkanConfig {
         setWaterRefraction(DEF_WATER_REFRACTION);
         setSkinPack(DEF_SKIN_PACK);
         setSunSize(DEF_SUN_SIZE);
+        setSceneTone(DEF_SCENE_TONE);
+        setSceneWarmth(DEF_SCENE_WARMTH);
         setWaterGlint(DEF_WATER_GLINT);
         setFrameGraphCorner(DEF_FRAME_GRAPH_CORNER);
         setCacheBlockEntityModels(DEF_CACHE_BLOCK_ENTITY_MODELS);
@@ -1417,6 +1430,26 @@ public final class VulkanConfig {
     public static void setRoundSun(boolean value) {
         roundSun = value;
         store(CATEGORY_GENERAL, "roundSun", value);
+    }
+
+    public static int getSceneTone() {
+        return sceneTone;
+    }
+
+    public static void setSceneTone(int value) {
+        sceneTone = value < 0 ? 0 : (value > 100 ? 100 : value);
+        store(CATEGORY_GENERAL, "sceneTone", sceneTone);
+        applySystemProperties();
+    }
+
+    public static int getSceneWarmth() {
+        return sceneWarmth;
+    }
+
+    public static void setSceneWarmth(int value) {
+        sceneWarmth = value < 0 ? 0 : (value > 100 ? 100 : value);
+        store(CATEGORY_GENERAL, "sceneWarmth", sceneWarmth);
+        applySystemProperties();
     }
 
     public static int getWaterGlint() {
@@ -2016,6 +2049,8 @@ public final class VulkanConfig {
         // that they appear in the one list that says what a session was
         // configured with, and so that the command line can pin them like any
         // other setting.
+        publish("vulkanmod112.sceneTone", Integer.toString(sceneTone));
+        publish("vulkanmod112.sceneWarmth", Integer.toString(sceneWarmth));
         publish("vulkanmod112.waterGlint", Integer.toString(waterGlint));
         publish("vulkanmod112.frameGraphCorner", Integer.toString(frameGraphCorner));
         publish("vulkanmod112.cacheBlockEntityModels", Boolean.toString(cacheBlockEntityModels));
