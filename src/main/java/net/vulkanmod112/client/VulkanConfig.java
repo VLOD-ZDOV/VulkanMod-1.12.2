@@ -371,6 +371,7 @@ public final class VulkanConfig {
     static final String DEF_SKIN_PACK = "";
     /** How much of its square the disc fills, as a percentage of the range. */
     static final int DEF_SUN_SIZE = 50;
+    static final int DEF_EXPLOSION_PARTICLES = 0;
     static final int DEF_TIME_CONTROL = 0;
     static final int DEF_TIME_OF_DAY = 12;
     static final int DEF_WEATHER_CONTROL = 0;
@@ -555,6 +556,7 @@ public final class VulkanConfig {
     private static int waterRefraction = DEF_WATER_REFRACTION;
     private static String skinPack = DEF_SKIN_PACK;
     private static int sunSize = DEF_SUN_SIZE;
+    private static int explosionParticles = DEF_EXPLOSION_PARTICLES;
     private static int timeControl = DEF_TIME_CONTROL;
     private static int timeOfDay = DEF_TIME_OF_DAY;
     private static int weatherControl = DEF_WEATHER_CONTROL;
@@ -850,6 +852,12 @@ public final class VulkanConfig {
                 "How large the disc is drawn. The quad the game gives the sun cannot be resized "
                         + "from here, but how much of it the disc fills can, which comes to the "
                         + "same thing. The middle of the range is close to where vanilla put it.");
+        explosionParticles = config.getInt("explosionParticles", CATEGORY_OPTIMIZATION,
+                DEF_EXPLOSION_PARTICLES, 0, 20000,
+                "How many particles one tick's explosions may spawn before they are thinned. "
+                        + "The client is sent the list of blocks an explosion destroyed and asks "
+                        + "for two particles at each one, so a large charge of TNT is tens of "
+                        + "thousands of them born in a single tick. 0 leaves it to the game.");
         timeControl = config.getInt("timeControl", CATEGORY_GENERAL, DEF_TIME_CONTROL, 0, 2,
                 "Whether the time of day you see is the world's own, held where it was, or set "
                         + "by the slider below. Nothing is sent to the server and nothing is "
@@ -1155,6 +1163,7 @@ public final class VulkanConfig {
         setWaterRefraction(DEF_WATER_REFRACTION);
         setSkinPack(DEF_SKIN_PACK);
         setSunSize(DEF_SUN_SIZE);
+        setExplosionParticles(DEF_EXPLOSION_PARTICLES);
         setTimeControl(DEF_TIME_CONTROL);
         setTimeOfDay(DEF_TIME_OF_DAY);
         setWeatherControl(DEF_WEATHER_CONTROL);
@@ -1403,6 +1412,16 @@ public final class VulkanConfig {
     public static void setRoundSun(boolean value) {
         roundSun = value;
         store(CATEGORY_GENERAL, "roundSun", value);
+    }
+
+    public static int getExplosionParticles() {
+        return explosionParticles;
+    }
+
+    public static void setExplosionParticles(int value) {
+        explosionParticles = value < 0 ? 0 : (value > 20000 ? 20000 : value);
+        store(CATEGORY_OPTIMIZATION, "explosionParticles", explosionParticles);
+        applySystemProperties();
     }
 
     public static int getTimeControl() {
@@ -1962,6 +1981,7 @@ public final class VulkanConfig {
         // that they appear in the one list that says what a session was
         // configured with, and so that the command line can pin them like any
         // other setting.
+        publish("vulkanmod112.explosionParticles", Integer.toString(explosionParticles));
         publish("vulkanmod112.timeControl", Integer.toString(timeControl));
         publish("vulkanmod112.timeOfDay", Integer.toString(timeOfDay));
         publish("vulkanmod112.weatherControl", Integer.toString(weatherControl));

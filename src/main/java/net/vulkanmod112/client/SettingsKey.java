@@ -54,6 +54,8 @@ public final class SettingsKey {
             // on with a screen open, and this is the moment it becomes worth
             // saying that it will not do anything.
             SettingsHealth.check();
+            // The budget is per tick, so it is cleared where ticks are counted.
+            ExplosionParticles.newTick();
             if (mc.currentScreen != null || mc.world == null) {
                 return;
             }

@@ -774,6 +774,29 @@ final class VulkanOptions {
                                     }
                                 })),
                 new VOptionBlock("Effects",
+                        new VRangeOption("Explosion Particles",
+                                "How many particles one tick's explosions may spawn before the "
+                                        + "rest are thinned out. The server sends the client the "
+                                        + "list of blocks an explosion destroyed and the client "
+                                        + "asks for two particles at every one of them, so a large "
+                                        + "charge of TNT is tens of thousands of them born in a "
+                                        + "single tick — each an object to tick, sort and draw. "
+                                        + "Past the limit one in eight is kept rather than none, "
+                                        + "because cutting off leaves a hole where the blast was "
+                                        + "biggest. Nothing about what breaks or drops changes.",
+                                Cost.of(Level.MEDIUM, Level.LOW, Level.NONE), null,
+                                0, 20000, 250, " per tick", "OFF",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getExplosionParticles();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setExplosionParticles(value);
+                                    }
+                                }),
                         new VCyclingOption("Particles",
                                 "How many particles the game spawns. Minimal is a large win near "
                                         + "fire, potions and redstone.",
