@@ -242,6 +242,25 @@ final class VulkanOptions {
                                         VulkanConfig.setFrameGraph(value);
                                     }
                                 }),
+                        new VCyclingOption("Graph Corner",
+                                "Which corner the frame time graph sits in. The default is the "
+                                        + "bottom left, and so is the chat window — a readout over "
+                                        + "what you are reading is a tool nobody leaves on. The two "
+                                        + "lines of numbers move to the other side of the graph in "
+                                        + "the top corners, so nothing runs off the screen.",
+                                Cost.of(Level.NONE, Level.NONE, Level.NONE), null,
+                                new String[]{"Bottom Left", "Bottom Right", "Top Left", "Top Right"},
+                                new VCyclingOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getFrameGraphCorner();
+                                    }
+
+                                    @Override
+                                    public void set(int index) {
+                                        VulkanConfig.setFrameGraphCorner(index);
+                                    }
+                                }),
                         new VRangeOption("Graph Refresh",
                                 "How often the numbers above the frame graph are recomputed. The "
                                         + "trace itself always moves every frame — this is only the "

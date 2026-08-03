@@ -54,6 +54,13 @@ public final class FrameGraph {
     private static final int WIDTH = SAMPLES;
     private static final int HEIGHT = 40;
     private static final int MARGIN = 4;
+    /** Room the two lines of text need, so a top corner leaves space for them. */
+    private static final int TEXT_BAND = 22;
+
+    public static final int CORNER_BOTTOM_LEFT = 0;
+    public static final int CORNER_BOTTOM_RIGHT = 1;
+    public static final int CORNER_TOP_LEFT = 2;
+    public static final int CORNER_TOP_RIGHT = 3;
 
     private static final int COLOUR_MIN = 0x55C355;
     private static final int COLOUR_MAX = 0xE0A040;
@@ -124,9 +131,20 @@ public final class FrameGraph {
 
         refreshStats(started);
 
-        int left = MARGIN;
-        int bottom = resolution.getScaledHeight() - MARGIN;
-        int top = bottom - HEIGHT;
+        // Which corner, and where the two lines of text go relative to the
+        // graph. The default corner is the one the chat window uses, and a
+        // frame-time readout sitting on top of what someone is reading is a
+        // tool nobody leaves on. Text goes above the graph at the bottom of
+        // the screen and below it at the top, so neither runs off the edge.
+        int corner = VulkanConfig.getFrameGraphCorner();
+        boolean right = corner == CORNER_BOTTOM_RIGHT || corner == CORNER_TOP_RIGHT;
+        boolean atTop = corner == CORNER_TOP_LEFT || corner == CORNER_TOP_RIGHT;
+
+        int left = right ? resolution.getScaledWidth() - MARGIN - WIDTH : MARGIN;
+        int top = atTop ? MARGIN + TEXT_BAND : resolution.getScaledHeight() - MARGIN - HEIGHT;
+        int bottom = top + HEIGHT;
+        int textNear = atTop ? bottom + 3 : top - 21;
+        int textFar = atTop ? bottom + 14 : top - 10;
 
         // Drawn as deviation from the middle rather than as bars standing on
         // the floor. A frame quicker than the window's average goes down, a
@@ -171,9 +189,9 @@ public final class FrameGraph {
         // line of grey text where neither stands out.
         String min = String.format("min: %.1f ms", statMin / 1000.0);
         String max = String.format("max: %.1f ms", statMax / 1000.0);
-        mc.fontRenderer.drawStringWithShadow(min, left, top - 10, COLOUR_MIN);
+        mc.fontRenderer.drawStringWithShadow(min, left, textFar, COLOUR_MIN);
         mc.fontRenderer.drawStringWithShadow(max,
-                left + WIDTH - mc.fontRenderer.getStringWidth(max), top - 10, COLOUR_MAX);
+                left + WIDTH - mc.fontRenderer.getStringWidth(max), textFar, COLOUR_MAX);
 
         // The average is what every framerate counter already shows. The 1% low
         // is the one that separates a steady 120 from a 240 that stalls, so it
@@ -181,9 +199,9 @@ public final class FrameGraph {
         String rate = String.format("%d fps", statAverage == 0 ? 0 : 1_000_000 / statAverage);
         String low = String.format("1%% low: %d fps",
                 statOnePercentLow == 0 ? 0 : 1_000_000 / statOnePercentLow);
-        mc.fontRenderer.drawStringWithShadow(rate, left, top - 21, 0xFFFFFF);
+        mc.fontRenderer.drawStringWithShadow(rate, left, textNear, 0xFFFFFF);
         mc.fontRenderer.drawStringWithShadow(low,
-                left + WIDTH - mc.fontRenderer.getStringWidth(low), top - 21, 0xB0B0B0);
+                left + WIDTH - mc.fontRenderer.getStringWidth(low), textNear, 0xB0B0B0);
 
         textNanos += System.nanoTime() - textStarted;
         drawNanos += System.nanoTime() - started;

@@ -371,6 +371,7 @@ public final class VulkanConfig {
     static final String DEF_SKIN_PACK = "";
     /** How much of its square the disc fills, as a percentage of the range. */
     static final int DEF_SUN_SIZE = 50;
+    static final int DEF_FRAME_GRAPH_CORNER = 0;
     static final boolean DEF_CACHE_BLOCK_ENTITY_MODELS = true;
     static final int DEF_EXPLOSION_PARTICLES = 0;
     static final int DEF_TIME_CONTROL = 0;
@@ -557,6 +558,7 @@ public final class VulkanConfig {
     private static int waterRefraction = DEF_WATER_REFRACTION;
     private static String skinPack = DEF_SKIN_PACK;
     private static int sunSize = DEF_SUN_SIZE;
+    private static int frameGraphCorner = DEF_FRAME_GRAPH_CORNER;
     private static boolean cacheBlockEntityModels = DEF_CACHE_BLOCK_ENTITY_MODELS;
     private static int explosionParticles = DEF_EXPLOSION_PARTICLES;
     private static int timeControl = DEF_TIME_CONTROL;
@@ -854,6 +856,10 @@ public final class VulkanConfig {
                 "How large the disc is drawn. The quad the game gives the sun cannot be resized "
                         + "from here, but how much of it the disc fills can, which comes to the "
                         + "same thing. The middle of the range is close to where vanilla put it.");
+        frameGraphCorner = config.getInt("frameGraphCorner", CATEGORY_ADVANCED,
+                DEF_FRAME_GRAPH_CORNER, 0, 3,
+                "Which corner the frame time graph sits in. The default is the bottom left, "
+                        + "which is where the chat window is.");
         cacheBlockEntityModels = config.getBoolean("cacheBlockEntityModels", CATEGORY_OPTIMIZATION,
                 DEF_CACHE_BLOCK_ENTITY_MODELS,
                 "Record the primed TNT cube once and replay it, instead of looking the model up "
@@ -1170,6 +1176,7 @@ public final class VulkanConfig {
         setWaterRefraction(DEF_WATER_REFRACTION);
         setSkinPack(DEF_SKIN_PACK);
         setSunSize(DEF_SUN_SIZE);
+        setFrameGraphCorner(DEF_FRAME_GRAPH_CORNER);
         setCacheBlockEntityModels(DEF_CACHE_BLOCK_ENTITY_MODELS);
         setExplosionParticles(DEF_EXPLOSION_PARTICLES);
         setTimeControl(DEF_TIME_CONTROL);
@@ -1420,6 +1427,16 @@ public final class VulkanConfig {
     public static void setRoundSun(boolean value) {
         roundSun = value;
         store(CATEGORY_GENERAL, "roundSun", value);
+    }
+
+    public static int getFrameGraphCorner() {
+        return frameGraphCorner;
+    }
+
+    public static void setFrameGraphCorner(int value) {
+        frameGraphCorner = value < 0 ? 0 : (value > 3 ? 3 : value);
+        store(CATEGORY_ADVANCED, "frameGraphCorner", frameGraphCorner);
+        applySystemProperties();
     }
 
     public static boolean isCacheBlockEntityModels() {
@@ -1999,6 +2016,7 @@ public final class VulkanConfig {
         // that they appear in the one list that says what a session was
         // configured with, and so that the command line can pin them like any
         // other setting.
+        publish("vulkanmod112.frameGraphCorner", Integer.toString(frameGraphCorner));
         publish("vulkanmod112.cacheBlockEntityModels", Boolean.toString(cacheBlockEntityModels));
         publish("vulkanmod112.explosionParticles", Integer.toString(explosionParticles));
         publish("vulkanmod112.timeControl", Integer.toString(timeControl));
