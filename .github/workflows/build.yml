@@ -43,8 +43,20 @@ jobs:
           distribution: 'zulu'
           cache: gradle
 
+      # `build` runs the tests as part of itself; this is here so that a
+      # failure says "tests" in the step name rather than being read as a
+      # compilation break, and so the report below is uploaded either way.
       - name: Build
         run: ./gradlew build --stacktrace
+
+      - name: Upload the test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ github.sha }}
+          path: build/reports/tests/test
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Upload the JAR
         uses: actions/upload-artifact@v4

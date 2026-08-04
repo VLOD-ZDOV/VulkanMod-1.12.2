@@ -500,26 +500,8 @@ public final class TerrainHooks {
         GL11.glGetFloat(GL11.GL_PROJECTION_MATRIX, PROJECTION);
         MODELVIEW.get(MV).clear();
         PROJECTION.get(PROJ).clear();
-        multiply(PROJ, MV, MVP);
-        // z' = 0.5*z + 0.5*w, applied to the combined matrix rows (column-major)
-        for (int col = 0; col < 4; col++) {
-            float z = MVP[col * 4 + 2];
-            float w = MVP[col * 4 + 3];
-            MVP[col * 4 + 2] = 0.5f * z + 0.5f * w;
-        }
-    }
-
-    /** Column-major 4x4 multiply: out = a * b. */
-    private static void multiply(float[] a, float[] b, float[] out) {
-        for (int col = 0; col < 4; col++) {
-            for (int row = 0; row < 4; row++) {
-                float sum = 0.0f;
-                for (int k = 0; k < 4; k++) {
-                    sum += a[k * 4 + row] * b[col * 4 + k];
-                }
-                out[col * 4 + row] = sum;
-            }
-        }
+        Matrices.multiply(PROJ, MV, MVP);
+        Matrices.toVulkanDepth(MVP);
     }
 
     /**

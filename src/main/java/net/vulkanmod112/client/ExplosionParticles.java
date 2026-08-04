@@ -46,16 +46,31 @@ public final class ExplosionParticles {
      */
     public static boolean allow() {
         asked++;
-        int limit = VulkanConfig.getExplosionParticles();
+        boolean allowed = keep(asked, VulkanConfig.getExplosionParticles());
+        if (allowed) {
+            kept++;
+        }
+        return allowed;
+    }
+
+    /**
+     * The rule itself, with the counting and the settings taken away.
+     *
+     * Separate so it can be checked against its own description without a
+     * client: that a limit of zero keeps everything, that the first
+     * {@code limit} of a tick are kept whole, and that past the limit exactly
+     * one in eight survives. The last of those is the part that decides
+     * whether a blast looks thinned or looks holed, and it is one bitwise and
+     * away from being wrong in a way nobody would see until a screenshot.
+     *
+     * @param askedSoFar which request this is within the tick, counting from 1
+     * @param limit      how many are kept whole; 0 or less is no limit at all
+     */
+    static boolean keep(int askedSoFar, int limit) {
         if (limit <= 0) {
-            kept++;
             return true;
         }
-        if (asked <= limit || (asked & 7) == 0) {
-            kept++;
-            return true;
-        }
-        return false;
+        return askedSoFar <= limit || (askedSoFar & 7) == 0;
     }
 
     /** Called once per client tick, before anything can explode in it. */
