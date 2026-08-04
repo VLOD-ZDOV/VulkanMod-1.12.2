@@ -558,18 +558,25 @@ final class VkTerrainRenderer {
     private void readProjectionPlanes() {
         projectionMatrix.clear();
         GL11C.glGetFloatv(org.lwjgl.opengl.GL11.GL_PROJECTION_MATRIX, projectionMatrix);
-        float m10 = projectionMatrix.get(10);
-        float m14 = projectionMatrix.get(14);
-        if (m10 == 1.0f || m10 == -1.0f) {
-            return;
-        }
-        float n = m14 / (m10 - 1.0f);
-        float f = m14 / (m10 + 1.0f);
+        projectionMatrix.get(projectionValues).clear();
+        // The two divisions live in Matrices, where they can be run against
+        // known answers without a client. They were written out here as well,
+        // which is two copies of a formula that decides whether a reflection
+        // believes it crossed a surface — and the copy nothing tests is the
+        // one that would be quietly edited.
+        float n = net.vulkanmod112.client.Matrices.nearPlane(projectionValues);
+        float f = net.vulkanmod112.client.Matrices.farPlane(projectionValues);
+        // Left at the last good pair for anything that is not a perspective
+        // projection, which is what the menu background is: nearPlane returns
+        // zero there rather than inventing a number, and zero fails this test.
         if (n > 0.0f && f > n) {
             nearPlane = n;
             farPlane = f;
         }
     }
+
+    /** The projection as a plain array, for the arithmetic above. */
+    private final float[] projectionValues = new float[16];
     /** How far the water surface is tilted by the wave pattern; 0 is off. */
     private float waterWaves;
     /** How far the top of a plant leans in the wind; 0 is off. */

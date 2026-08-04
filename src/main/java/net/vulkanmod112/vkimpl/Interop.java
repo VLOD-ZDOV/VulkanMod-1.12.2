@@ -588,10 +588,16 @@ final class Interop {
      */
     static String handleSummary() {
         int held;
+        long ever;
         synchronized (RETAINED) {
             held = RETAINED.size();
+            // Read under the same lock it is written under. A long read
+            // outside it is not even guaranteed to be one read, and the whole
+            // point of this line is to be trusted when it says a number is
+            // climbing.
+            ever = retainedEver;
         }
-        return held + " held, " + retainedEver + " retained since start"
+        return held + " held, " + ever + " retained since start"
                 + (CLOSE_EARLY ? " (closing early, for the Windows/AMD experiment)" : "");
     }
 
