@@ -37,6 +37,7 @@ public class VulkanMod112 {
         // diagnosed, so the shortcut to it has to exist on exactly the machines
         // where the renderer did not come up.
         net.vulkanmod112.client.SettingsKey.register();
+        net.vulkanmod112.client.ProfileKey.register();
         net.minecraftforge.common.MinecraftForge.EVENT_BUS.register(
                 new net.vulkanmod112.client.SettingsKey.Handler());
         // Unbound by default: it answers one question, three complaints have

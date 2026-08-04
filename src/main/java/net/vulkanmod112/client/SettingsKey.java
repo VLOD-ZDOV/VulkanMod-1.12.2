@@ -62,6 +62,12 @@ public final class SettingsKey {
             if (KEY.isPressed()) {
                 mc.displayGuiScreen(new GuiVulkanSettings(null));
             }
+            // Drained here rather than in a handler of its own: isPressed
+            // consumes one queued press, and two handlers asking about two
+            // keys under the same conditions is one place, not two.
+            if (ProfileKey.keyBinding().isPressed()) {
+                ProfileKey.step(mc);
+            }
         }
     }
 }

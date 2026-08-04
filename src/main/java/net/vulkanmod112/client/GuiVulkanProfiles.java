@@ -135,6 +135,10 @@ public final class GuiVulkanProfiles extends GuiScreen {
                 break;
             case LOAD:
                 if (VulkanProfiles.load(this.selected, this.mc)) {
+                    // So the key that steps through profiles knows where the
+                    // list stands. Without this, loading one here and then
+                    // pressing that key starts again from the top.
+                    ProfileKey.loaded(this.selected);
                     this.status = Lang.tr(Lang.UI, "Loaded") + ": " + this.selected;
                 } else {
                     this.status = Lang.tr(Lang.UI, "Could not read that profile");
