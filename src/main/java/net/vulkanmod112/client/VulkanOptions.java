@@ -30,7 +30,8 @@ final class VulkanOptions {
 
     /** Order matches the labels below; 0 means "work it out from the GPU". */
     private static final int[] BUDGET_VALUES = {0, 256, 512, 1024, 2048, 4096};
-    private static final String[] BUDGET_LABELS = {"Auto", "256 MiB", "512 MiB", "1 GiB", "2 GiB", "4 GiB"};
+    private static final VCyclingOption.Choices BUDGET_LABELS = VCyclingOption.Choices.of(
+            "Auto", "256 MiB", "512 MiB", "1 GiB", "2 GiB", "4 GiB");
 
     private VulkanOptions() {
     }
@@ -249,7 +250,7 @@ final class VulkanOptions {
                                         + "lines of numbers move to the other side of the graph in "
                                         + "the top corners, so nothing runs off the screen.",
                                 Cost.of(Level.NONE, Level.NONE, Level.NONE), null,
-                                new String[]{"Bottom Left", "Bottom Right", "Top Left", "Top Right"},
+                                VCyclingOption.Choices.of("Bottom Left", "Bottom Right", "Top Left", "Top Right"),
                                 new VCyclingOption.Access() {
                                     @Override
                                     public int get() {
@@ -814,7 +815,7 @@ final class VulkanOptions {
                                 "How many particles the game spawns. Minimal is a large win near "
                                         + "fire, potions and redstone.",
                                 Cost.of(Level.HIGH, Level.MEDIUM, Level.NONE), null,
-                                new String[]{"All", "Decreased", "Minimal"},
+                                VCyclingOption.Choices.of("All", "Decreased", "Minimal"),
                                 new VCyclingOption.Access() {
                                     @Override
                                     public int get() {
@@ -837,7 +838,7 @@ final class VulkanOptions {
                                         + "and chunk-build win, since it removes geometry — which is "
                                         + "also why it frees a little video memory.",
                                 Cost.of(Level.MEDIUM, Level.MEDIUM, Level.LOW), null,
-                                new String[]{"Fast", "Fancy"},
+                                VCyclingOption.Choices.of("Fast", "Fancy"),
                                 new VCyclingOption.Access() {
                                     @Override
                                     public int get() {
@@ -856,7 +857,7 @@ final class VulkanOptions {
                                         + "time, not frame time — so it shows up as stutter while the "
                                         + "world loads, not as a lower framerate standing still.",
                                 Cost.cpu(Level.MEDIUM), null,
-                                new String[]{"Off", "Minimum", "Maximum"},
+                                VCyclingOption.Choices.of("Off", "Minimum", "Maximum"),
                                 new VCyclingOption.Access() {
                                     @Override
                                     public int get() {
@@ -1703,7 +1704,7 @@ final class VulkanOptions {
                                         + "sees it. Mobs still burn at dawn. Frozen holds the hour "
                                         + "you switched it on at; Fixed uses the slider below.",
                                 Cost.of(Level.NONE, Level.NONE, Level.NONE), null,
-                                new String[]{"Off", "Frozen", "Fixed"},
+                                VCyclingOption.Choices.of("Off", "Frozen", "Fixed"),
                                 new VCyclingOption.Access() {
                                     @Override
                                     public int get() {
@@ -1739,7 +1740,7 @@ final class VulkanOptions {
                                         + "time above: a storm the server believes in still charges "
                                         + "a creeper, and one you turn on here charges nothing.",
                                 Cost.of(Level.NONE, Level.NONE, Level.NONE), null,
-                                new String[]{"Off", "Clear", "Rain", "Storm"},
+                                VCyclingOption.Choices.of("Off", "Clear", "Rain", "Storm"),
                                 new VCyclingOption.Access() {
                                     @Override
                                     public int get() {
@@ -1921,7 +1922,8 @@ final class VulkanOptions {
                                         + "none to lend, and the game's own is used instead — the "
                                         + "log says which happened.",
                                 Cost.FREE, null,
-                                net.vulkanmod112.client.ShaderPackSkins.names(),
+                                VCyclingOption.Choices.fromMachine(
+                                        net.vulkanmod112.client.ShaderPackSkins.names()),
                                 new VCyclingOption.Access() {
                                     @Override
                                     public int get() {
@@ -1935,7 +1937,7 @@ final class VulkanOptions {
                                                 net.vulkanmod112.client.ShaderPackSkins
                                                         .nameAt(index));
                                     }
-                                }, true)));
+                                })));
     }
 
     private static VOptionPage rayTracingPage(final Minecraft mc) {

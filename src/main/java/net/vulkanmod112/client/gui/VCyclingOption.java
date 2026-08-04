@@ -9,49 +9,82 @@ public final class VCyclingOption extends VOption {
         void set(int index);
     }
 
-    private final String[] values;
-    private final Access access;
     /**
-     * True when the choices are found on the machine rather than written here.
+     * The choices, and where they came from.
      *
-     * The pack picker lists whatever is in your folders, and those names are
-     * not English text: they are filenames, they differ on every machine, and
-     * they must not be translated or written into the language files. Two
-     * hundred of them reached all eight of those files once, from a folder of
-     * test packs on a development machine, before this existed.
+     * <h2>Why this is a type and not a boolean</h2>
+     *
+     * Some of these lists are English written in the source, which has to be
+     * translated and has to appear in the language files. Others are found on
+     * the machine — the names of the packs in your folders — which are
+     * filenames, differ on every machine, and must never be translated or
+     * written into a language file. Two hundred of them reached all eight of
+     * those files once, from a folder of test packs on a development machine.
+     *
+     * <p>That was fixed with a trailing boolean, which fixes the instance and
+     * not the class of mistake: the next list built from the filesystem is one
+     * forgotten argument away from doing it again, and the argument is at the
+     * end of a seven-parameter call. Here the question is asked where the
+     * array is made, by whoever knows the answer, and there is no way to
+     * construct the option without answering it.
      */
-    private final boolean dynamic;
+    public static final class Choices {
+        private final String[] values;
+        private final boolean translatable;
 
-    public VCyclingOption(String name, String tooltip, Cost cost, String appliesWhen,
-                          String[] values, Access access) {
-        this(name, tooltip, cost, appliesWhen, values, access, false);
+        private Choices(String[] values, boolean translatable) {
+            this.values = values;
+            this.translatable = translatable;
+        }
+
+        /** English written in the source: translated, and dumped for translators. */
+        public static Choices of(String... english) {
+            return new Choices(english, true);
+        }
+
+        /**
+         * Names read off this machine: shown as they are, and never dumped.
+         *
+         * @param found whatever was there when the screen was built
+         */
+        public static Choices fromMachine(String[] found) {
+            return new Choices(found, false);
+        }
     }
 
+    private final Choices choices;
+    private final Access access;
+
     public VCyclingOption(String name, String tooltip, Cost cost, String appliesWhen,
-                          String[] values, Access access, boolean dynamic) {
+                          Choices choices, Access access) {
         super(name, tooltip, cost, appliesWhen);
-        this.values = values;
+        this.choices = choices;
         this.access = access;
-        this.dynamic = dynamic;
     }
 
     @Override
     public String valueText() {
         int index = access.get();
-        if (index < 0 || index >= values.length) {
+        if (index < 0 || index >= choices.values.length) {
             return "?";
         }
-        return dynamic ? values[index] : Lang.tr(Lang.VALUE, values[index]);
+        return choices.translatable
+                ? Lang.tr(Lang.VALUE, choices.values[index])
+                : choices.values[index];
     }
 
     @Override
     public void activate(int direction, float fraction) {
-        int next = (access.get() + direction + values.length) % values.length;
+        int length = choices.values.length;
+        if (length == 0) {
+            return;
+        }
+        int next = (access.get() + direction + length) % length;
         access.set(next);
     }
 
     /** Nothing, when the choices came off the machine rather than out of the source. */
     public String[] englishValues() {
-        return dynamic ? new String[0] : values;
+        return choices.translatable ? choices.values : new String[0];
     }
 }
