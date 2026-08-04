@@ -5396,17 +5396,39 @@ final class VkTerrainRenderer {
             vkDeviceWaitIdle(device());
             vkDestroySampler(device(), atlasSampler, null);
             atlasSampler = createAtlasSampler(stack);
-            updateDescriptors();
+            // The device is already stopped by the line above, and nothing has
+            // been submitted since. Calling the waiting version here stopped it
+            // a second time in a row for no work in between — the heaviest
+            // synchronisation Vulkan has, twice, on one flick of a switch.
+            writeDescriptors();
             LOGGER.info("Block texture sampling switched to {}",
                     flatBlockColours() ? "one flat colour per face" : "the full atlas");
         }
     }
 
+    /**
+     * Points the descriptor sets at the current images, stopping the device
+     * first.
+     *
+     * The wait is not optional in general: a set being rewritten while a frame
+     * in flight is reading it is undefined, and the frames in flight are
+     * exactly what makes that likely rather than theoretical. It is separated
+     * from the writing itself only so that a caller which has already stopped
+     * the device does not stop it again.
+     */
     private void updateDescriptors() {
         if (descriptorSet == 0 || atlasImage == 0 || lightmapImage == 0) {
             return;
         }
         vkDeviceWaitIdle(device());
+        writeDescriptors();
+    }
+
+    /** The writing, with no wait. Only safe where the device is already idle. */
+    private void writeDescriptors() {
+        if (descriptorSet == 0 || atlasImage == 0 || lightmapImage == 0) {
+            return;
+        }
         try (MemoryStack stack = stackPush()) {
             VkDescriptorImageInfo.Buffer atlasInfo = VkDescriptorImageInfo.calloc(1, stack);
             atlasInfo.get(0)

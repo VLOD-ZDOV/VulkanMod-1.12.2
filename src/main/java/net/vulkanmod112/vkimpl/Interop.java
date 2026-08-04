@@ -568,7 +568,31 @@ final class Interop {
         }
         synchronized (RETAINED) {
             RETAINED.add(Long.valueOf(handle));
+            retainedEver++;
         }
+    }
+
+    /** How many handles were ever retained, so growth can be seen from a log. */
+    private static long retainedEver;
+
+    /**
+     * What this side of the interop is holding, for the diagnostics report.
+     *
+     * The open question this answers is whether a long session grows the
+     * process's handle count. These are the handles the driver was given and
+     * we deliberately did not close, so if the number climbs while nothing is
+     * being created, something is re-importing per frame and every one of them
+     * is a handle held until the game exits. A number that sits still is the
+     * answer; a number that climbs is the bug, and it is not visible any other
+     * way from inside the process.
+     */
+    static String handleSummary() {
+        int held;
+        synchronized (RETAINED) {
+            held = RETAINED.size();
+        }
+        return held + " held, " + retainedEver + " retained since start"
+                + (CLOSE_EARLY ? " (closing early, for the Windows/AMD experiment)" : "");
     }
 
     /** Closes everything {@link #retainHandle} kept. Called at device teardown. */

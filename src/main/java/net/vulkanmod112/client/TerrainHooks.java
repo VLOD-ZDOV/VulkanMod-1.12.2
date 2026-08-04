@@ -318,6 +318,7 @@ public final class TerrainHooks {
                 captureSun(mc);
                 bridge.updateSun(SUN);
                 if (lightmapColors != null) {
+                    checkLightmapStillOurs();
                     bridge.updateLightmapData(lightmapColors);
                 }
             }
@@ -599,6 +600,67 @@ public final class TerrainHooks {
         }
         AtlasAnimations.flush(bridge);
     }
+
+    /**
+     * Whether the light map this renderer copies is still the one the game uses.
+     *
+     * <h2>The thing being watched for</h2>
+     *
+     * Terrain lighting here is the game's own 16x16 light map, read once as a
+     * live array and copied to the GPU whenever it changes. That works with a
+     * lighting mod for the same reason it works with the seasons: whatever
+     * writes into that array, this renderer follows.
+     *
+     * What it does not follow is a mod that replaces the texture rather than
+     * the array — uploading its own colours straight to GL, or swapping in a
+     * different {@code DynamicTexture} altogether. Then vanilla's array stays
+     * as it was, the terrain is lit by it, and everything the game draws is lit
+     * by the mod. The world would be lit two different ways in one frame, with
+     * nothing in any log to say so.
+     *
+     * <h2>Why a check and not a fix</h2>
+     *
+     * There is no fix from here: if the colours never pass through an array we
+     * can see, the only way to follow them is to read the texture back off the
+     * GPU every time it changes, which is a stall per tick for a case that may
+     * not exist. What can be done is to notice, name the number, and say it
+     * once — so a report of "the ground is lit wrong with mod X" is one line in
+     * a log rather than a week.
+     *
+     * <p>Cheap: two identity comparisons on the frame that draws SOLID.
+     */
+    private static void checkLightmapStillOurs() {
+        if (lightmapWarned) {
+            return;
+        }
+        Minecraft mc = Minecraft.getMinecraft();
+        try {
+            DynamicTexture live = ReflectionHelper.getPrivateValue(
+                    net.minecraft.client.renderer.EntityRenderer.class, mc.entityRenderer,
+                    "lightmapTexture", "field_78513_d");
+            if (live == null) {
+                return;
+            }
+            // Identity, not contents: the array is meant to change every tick,
+            // and what matters is whether it is still the same array.
+            if (live.getTextureData() == lightmapColors) {
+                return;
+            }
+            lightmapWarned = true;
+            LOGGER.warn("The light map was replaced by something else — terrain lighting is "
+                    + "copied from the array this mod took at startup, and that is no longer "
+                    + "the one the game is drawing from. Blocks and creatures may be lit "
+                    + "differently. Naming the other lighting mod in a report is enough to "
+                    + "act on this.");
+        } catch (Throwable t) {
+            // A loader where the field is not where it was. Not worth a second
+            // failure on top of whatever is already wrong.
+            lightmapWarned = true;
+        }
+    }
+
+    /** Said once; a lighting mod does not become less installed over time. */
+    private static boolean lightmapWarned;
 
     private static boolean ensureTextures(VulkanBridge bridge) {
         if (atlasUploaded) {

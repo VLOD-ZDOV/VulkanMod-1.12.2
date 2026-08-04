@@ -955,7 +955,8 @@ public final class VulkanContextImpl implements VulkanBridge {
                 .append(System.getProperty("vulkanmod112.framesInFlight", "2")).append('\n');
         appendMemoryBudget(sb);
         sb.append("  interop: ").append(interopCapable ? "external memory/semaphores enabled" : "UNAVAILABLE")
-                .append(", handles: ").append(Interop.WINDOWS ? "win32" : "fd").append('\n');
+                .append(", handles: ").append(Interop.WINDOWS ? "win32" : "fd")
+                .append(", ").append(Interop.handleSummary()).append('\n');
         sb.append("  mirror: ").append(chunkMirror != null ? chunkMirror.stats() : "not created").append('\n');
         if (terrainRenderer != null) {
             terrainRenderer.appendDiagnostics(sb);
