@@ -372,7 +372,6 @@ public final class VulkanConfig {
     static final int DEF_SUN_SIZE = 50;
     static final int DEF_SCENE_TONE = 0;
     static final int DEF_SCENE_WARMTH = 50;
-    static final int DEF_WATER_GLINT = 0;
     static final int DEF_FRAME_GRAPH_CORNER = 0;
     static final boolean DEF_CACHE_BLOCK_ENTITY_MODELS = true;
     static final int DEF_EXPLOSION_PARTICLES = 0;
@@ -561,7 +560,6 @@ public final class VulkanConfig {
     private static int sunSize = DEF_SUN_SIZE;
     private static int sceneTone = DEF_SCENE_TONE;
     private static int sceneWarmth = DEF_SCENE_WARMTH;
-    private static int waterGlint = DEF_WATER_GLINT;
     private static int frameGraphCorner = DEF_FRAME_GRAPH_CORNER;
     private static boolean cacheBlockEntityModels = DEF_CACHE_BLOCK_ENTITY_MODELS;
     private static int explosionParticles = DEF_EXPLOSION_PARTICLES;
@@ -860,10 +858,6 @@ public final class VulkanConfig {
         sceneWarmth = config.getInt("sceneWarmth", CATEGORY_GENERAL, DEF_SCENE_WARMTH, 0, 100,
                 "Which way the grading leans. The middle is neutral, above it warm, below it "
                         + "cold. Red gains what blue gives up, so the frame does not get brighter.");
-        waterGlint = config.getInt("waterGlint", CATEGORY_GENERAL, DEF_WATER_GLINT, 0, 100,
-                "How brightly the sun glints off water and ice. Not the reflection: the sun is a "
-                        + "light rather than a surface a ray can find, so reflecting the sky where "
-                        + "it stands gives its colour and never its shape.");
         frameGraphCorner = config.getInt("frameGraphCorner", CATEGORY_ADVANCED,
                 DEF_FRAME_GRAPH_CORNER, 0, 3,
                 "Which corner the frame time graph sits in. The default is the bottom left, "
@@ -1185,7 +1179,6 @@ public final class VulkanConfig {
         setSunSize(DEF_SUN_SIZE);
         setSceneTone(DEF_SCENE_TONE);
         setSceneWarmth(DEF_SCENE_WARMTH);
-        setWaterGlint(DEF_WATER_GLINT);
         setFrameGraphCorner(DEF_FRAME_GRAPH_CORNER);
         setCacheBlockEntityModels(DEF_CACHE_BLOCK_ENTITY_MODELS);
         setExplosionParticles(DEF_EXPLOSION_PARTICLES);
@@ -1452,15 +1445,7 @@ public final class VulkanConfig {
         applySystemProperties();
     }
 
-    public static int getWaterGlint() {
-        return waterGlint;
-    }
 
-    public static void setWaterGlint(int value) {
-        waterGlint = value < 0 ? 0 : (value > 100 ? 100 : value);
-        store(CATEGORY_GENERAL, "waterGlint", waterGlint);
-        applySystemProperties();
-    }
 
     public static int getFrameGraphCorner() {
         return frameGraphCorner;
@@ -2051,7 +2036,6 @@ public final class VulkanConfig {
         // other setting.
         publish("vulkanmod112.sceneTone", Integer.toString(sceneTone));
         publish("vulkanmod112.sceneWarmth", Integer.toString(sceneWarmth));
-        publish("vulkanmod112.waterGlint", Integer.toString(waterGlint));
         publish("vulkanmod112.frameGraphCorner", Integer.toString(frameGraphCorner));
         publish("vulkanmod112.cacheBlockEntityModels", Boolean.toString(cacheBlockEntityModels));
         publish("vulkanmod112.explosionParticles", Integer.toString(explosionParticles));

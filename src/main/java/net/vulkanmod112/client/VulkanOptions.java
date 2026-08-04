@@ -1793,28 +1793,6 @@ final class VulkanOptions {
                                         VulkanConfig.setSceneWarmth(value);
                                     }
                                 }),
-                        new VRangeOption("Sun Glint",
-                                "How brightly the sun glints off water and ice — the narrow bright "
-                                        + "spot that slides along the ripples, and the sudden flash "
-                                        + "off a frozen lake. Not the reflection: the sun is a "
-                                        + "light rather than a surface a ray can find, so "
-                                        + "reflecting the sky where it stands gives you its colour "
-                                        + "and never its shape. Costs nothing measurable — the "
-                                        + "direction of the sun and the shape of the surface are "
-                                        + "both worked out already.",
-                                Cost.of(Level.NONE, Level.LOW, Level.NONE), null,
-                                0, 100, 5, "%", "OFF",
-                                new VRangeOption.Access() {
-                                    @Override
-                                    public int get() {
-                                        return VulkanConfig.getWaterGlint();
-                                    }
-
-                                    @Override
-                                    public void set(int value) {
-                                        VulkanConfig.setWaterGlint(value);
-                                    }
-                                }),
                         new VRangeOption("Water Refraction",
                                 "How much the surface of water bends what is seen through it. "
                                         + "Reflection and refraction are two halves of one thing "

@@ -4010,7 +4010,6 @@ final class VkTerrainRenderer {
     private int toneHeight;
     private boolean toneFailed;
     private long toneFrames;
-    private float waterGlint;
     private float toneStrength;
     private float toneWarmth;
 
@@ -5069,11 +5068,7 @@ final class VkTerrainRenderer {
         }
         // vec4 lightInfo at 96: x is how many of the array below to read.
         MemoryUtil.memPutFloat(base + 96, dynamicLightCount);
-        // y: how strongly the sun glints off water and ice. The rest of this
-        // vec4 was spare, so the setting cost no change to the layout — and the
-        // zeroing of the spare part is why the value goes here and not one line
-        // earlier, which is exactly where it went the first time.
-        MemoryUtil.memPutFloat(base + 100, waterGlint);
+        MemoryUtil.memPutFloat(base + 100, 0.0f);
         MemoryUtil.memPutFloat(base + 104, 0.0f);
         MemoryUtil.memPutFloat(base + 108, 0.0f);
         for (int i = 0; i < dynamicLightCount * 4; i++) {
@@ -5312,7 +5307,6 @@ final class VkTerrainRenderer {
         waterReflection = clampPercent(intProperty("vulkanmod112.waterReflection", 0));
         waterWaves = clampPercent(intProperty("vulkanmod112.waterWaves", 0));
         foliageSway = clampPercent(intProperty("vulkanmod112.foliageSway", 0));
-        waterGlint = clampPercent(intProperty("vulkanmod112.waterGlint", 0));
         toneStrength = clampPercent(intProperty("vulkanmod112.sceneTone", 0));
         toneWarmth = clampPercent(intProperty("vulkanmod112.sceneWarmth", 50)) * 2.0f - 1.0f;
         bloomStrength = clampPercent(intProperty("vulkanmod112.bloom", 0));
