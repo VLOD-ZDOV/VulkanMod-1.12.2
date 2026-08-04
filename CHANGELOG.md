@@ -4,6 +4,22 @@
 
 ### Added
 
+- **Ice gathers the sky.** The game draws ice as a flat blue pane. What makes it the most recognisable surface in a shader pack is the one thing water already had here — it looks along itself the way a polished floor does, dark from overhead and bright at a grazing angle. Cheaper than water, because ice does not ripple: no waves to shade and no ray to march.
+
+- **Light gathers into bands on the bed of shallow water.** Real caustics are the surface working as a lens on the light going through it, and the light collects where the surface is flat and thins where it is steeply tilted — which means the pattern is already in the slope this renderer computed for the waves, and needs no second field of noise, no new texture and no trigonometry at all. It brightens what refraction is already fetching, so it costs a handful of instructions on a path that was already being walked.
+
+- **Rain wets what it can land on.** A wet surface darkens, because the film of water carries light down into the material instead of scattering it back, and it catches the sky at a grazing angle, because the film is smooth where the block is rough. Both, or it reads as a dusting of snow rather than as rain. Only upward faces, and only in proportion to the sky light a surface already receives — there is no test for what is over a particular block, so a lit cave mouth dampens a little, which is wrong and looks like weather rather than like an error.
+
+- **The fog leans towards the sun.** The game fogs everything to one colour whichever way you are facing, and the sky it hangs under does not: air scatters short wavelengths sideways and long ones forwards, so haze into the sun is bright and warm and haze behind you is cool. This tilts the colour the game already chose rather than replacing it, so it cannot disagree with the sky above it, and it is exactly neutral when you are looking across the sun rather than at it.
+
+- **The clouds take the colour of the sky they hang in.** Vanilla clouds are white at noon and white at sunset, in an orange sky. Two colours the game has already worked out for this exact moment are mixed in — the sky colour, which carries the biome and the weather, and the sunrise and sunset band, which exists only while there is one to have. Nothing is invented, which is why it cannot disagree with the horizon behind it. The volumetric clouds of a shader pack are a different and much larger thing; this is the half of that look which is free.
+
+- **Vines and sugar cane move in the wind.** Both were left standing still because the rule that moves the top of a plant cannot be applied to them: a vine hangs from above, so it is the top that must stay put, and a cane is up to three blocks of one stem where the head of each and the foot of the one over it would move by different amounts. They now drift as whole blocks, the way leaves do, which sidesteps the question instead of answering it — a cane leans rather than curving, and there is no seam anywhere in it to come apart.
+
+- **A key that steps through the saved settings profiles**, without opening anything. Profiles exist to be compared, and the comparison needs the world visible at the moment it is made rather than a menu over it. Unbound by default and rebindable like any other.
+
+- **Two sliders for the offscreen chunk preloader** — how many chunks it keeps queued, and how much of the grid it looks through each frame. These decided the whole shape of that trade and were constants in the source, so the only way to match them to a machine was to rebuild the mod.
+
 - **The whole picture is graded, not just the blocks.** Contrast lifted through the middle, warmth put into the balance — the thing that separates a shader pack's frame from the game's before any single effect is named. It could not be done in this mod's own composite, which is stitched into the frame before the game draws its creatures: the blocks would have been graded and the cows left alone. It runs on the marker that fires once the world is finished in full, so it reaches terrain, creatures, particles, weather and water together, and stops before the hand and the interface. The game's frame is eight bits a channel, so this is colour grading and not a film curve — there is no headroom above white, and the curve deliberately never pushes anything into it.
 
 - **The frame time graph can sit in any of the four corners.** The default is the bottom left, and so is the chat window — a readout over what you are reading is a tool nobody leaves on. The two lines of numbers move to the other side of the graph in the top corners, so nothing runs off the screen.
@@ -31,6 +47,14 @@
 - **Shaders have a page of their own**, and the sun, the moon, sky pictures and water refraction moved onto it out of the diagnostics block they had been sitting in.
 
 - **Turning on ray tracing mid-game now says, in chat, that the game has to restart.** The line under the switch said so already; somebody who has just pressed four switches and gone looking for shadows is not reading it.
+
+- **The mod now says when an effect is switched on and cannot act because rays are being traced.** Two of the effects above are deliberately left out of the traced version of the terrain shader: a specular term of the same shape, in the same branch, lost the graphics device outright while tracing was on, and that branch has no headroom left in it. Being told beats a slider that appears to do nothing.
+
+- **A lighting mod that replaces the light map rather than writing into it is now named in the log.** Terrain lighting here follows the game's own light map, so a mod that writes into it is followed for free; one that replaces the texture is not, and the world would then be lit two different ways in one frame with nothing anywhere to say so.
+
+- **The device is no longer stopped twice in a row** when the flat-colour setting is switched. Both the sampler and the descriptor sets waited for the card to go completely idle, one immediately after the other, with no work in between.
+
+- **The interop handles this mod is holding are counted in the diagnostics report**, which is the only way from inside the process to answer whether a long session grows them.
 
 ## [0.8.1]
 
