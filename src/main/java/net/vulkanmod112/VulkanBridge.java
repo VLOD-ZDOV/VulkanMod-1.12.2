@@ -239,6 +239,16 @@ public interface VulkanBridge {
      */
     void updateSun(float[] sun);
 
+    /**
+     * How hard it is raining where the camera is, from 0 to 1.
+     *
+     * Kept apart from the fog state even though both arrive per frame and both
+     * describe the weather: fog is read out of OpenGL, where the game has
+     * already put it, and this is not in OpenGL at all. It is here because the
+     * shader cannot ask the world anything.
+     */
+    void updateWeather(float rainStrength);
+
     boolean drawsSprites();
 
     /**

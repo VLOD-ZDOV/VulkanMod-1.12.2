@@ -365,15 +365,38 @@ public final class MaterialRuns {
         // flowers beside it moved. What the shape is has to come from the block.
         if (material == Material.PLANTS || material == Material.VINE) {
             Block block = state.getBlock();
+            // Vines and sugar cane drift as whole blocks, exactly as leaves do.
+            //
+            // Both were left standing still because the rule that moves the top
+            // pair of a quad cannot be applied to them: a vine hangs from above,
+            // so it is the top that must stay put, and a cane is up to three
+            // blocks of one stem, where the head of each block and the foot of
+            // the one over it are the same height and would move by different
+            // amounts. Naming the halves solved that for a two-block flower
+            // because there are exactly two of them and four bits of material
+            // to say which is which; a cane can be three, and its blocks are
+            // identical states with nothing to tell them apart by.
+            //
+            // Drifting the whole block sidesteps the question rather than
+            // answering it. Every block takes the offset read at its own
+            // centre, neighbouring centres are a sixteenth of the wave apart,
+            // and so a column of vine or a cane moves as one piece with no
+            // seam anywhere in it — there is no seam to have, because nothing
+            // inside a block moves relative to anything else in it. What it
+            // does not do is bend: a cane leans, it does not curve, and it
+            // parts from the wall or the ground it stands on by the width of
+            // the drift. At the amplitude leaves use that is a third of a
+            // pixel and the thing nobody notices; at a large one it would be
+            // the thing everybody notices, which is why they share a reach.
+            if (block instanceof net.minecraft.block.BlockVine
+                    || block instanceof net.minecraft.block.BlockReed) {
+                return LEAVES;
+            }
             boolean still =
-                    // Hangs from above, so the end that must stay put is the
-                    // top one — the opposite rule to everything else here.
-                    block instanceof net.minecraft.block.BlockVine
                     // Taller than one block: the top of the lower half and the
                     // bottom of the upper half are at the same height, so only
                     // the first would move and the stem would come apart.
-                    || block instanceof net.minecraft.block.BlockDoublePlant
-                    || block instanceof net.minecraft.block.BlockReed
+                    block instanceof net.minecraft.block.BlockDoublePlant
                     // Flat on the water: all four of its corners are level, and
                     // the rule that moves the top pair would tear it in half.
                     || block instanceof net.minecraft.block.BlockLilyPad

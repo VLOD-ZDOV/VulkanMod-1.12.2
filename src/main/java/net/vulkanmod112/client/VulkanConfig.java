@@ -366,6 +366,20 @@ public final class VulkanConfig {
     static final int DEF_MOON_SIZE = 40;
     /** How much water bends what is seen through it. */
     static final int DEF_WATER_REFRACTION = 0;
+    /** How much sky ice gathers on its surface. */
+    static final int DEF_ICE_SHINE = 0;
+    /** How much light gathers into bands on a shallow bed. */
+    static final int DEF_WATER_CAUSTICS = 0;
+    /** How much rain makes an upward face gather the sky. */
+    static final int DEF_WET_SURFACES = 0;
+    /** How much fog warms towards the sun and cools away from it. */
+    static final int DEF_SUN_HAZE = 0;
+    /** How much of the sky's colour the clouds take. */
+    static final int DEF_CLOUD_TINT = 0;
+    /** How many chunks the offscreen preloader keeps queued. */
+    static final int DEF_PRELOAD_QUEUE = 16;
+    /** How much of the chunk grid the preloader looks at per frame. */
+    static final int DEF_PRELOAD_SCAN = 4096;
     /** Which shader pack to borrow sky pictures from; empty is none. */
     static final String DEF_SKIN_PACK = "";
     /** How much of its square the disc fills, as a percentage of the range. */
@@ -556,6 +570,13 @@ public final class VulkanConfig {
     private static boolean roundMoon = DEF_ROUND_MOON;
     private static int moonSize = DEF_MOON_SIZE;
     private static int waterRefraction = DEF_WATER_REFRACTION;
+    private static volatile int iceShine = DEF_ICE_SHINE;
+    private static volatile int waterCaustics = DEF_WATER_CAUSTICS;
+    private static volatile int wetSurfaces = DEF_WET_SURFACES;
+    private static volatile int sunHaze = DEF_SUN_HAZE;
+    private static volatile int cloudTint = DEF_CLOUD_TINT;
+    private static volatile int preloadQueue = DEF_PRELOAD_QUEUE;
+    private static volatile int preloadScan = DEF_PRELOAD_SCAN;
     private static String skinPack = DEF_SKIN_PACK;
     private static int sunSize = DEF_SUN_SIZE;
     private static int sceneTone = DEF_SCENE_TONE;
@@ -832,6 +853,48 @@ public final class VulkanConfig {
                         + "over a photograph. What is behind the water is fetched from the same "
                         + "picture the reflection searches, so it shows the world but not "
                         + "creatures, which this renderer does not draw.");
+        iceShine = config.getInt("iceShine", CATEGORY_GENERAL, DEF_ICE_SHINE, 0, 100,
+                "How much of the sky ice gathers on its surface. The game draws ice as a flat "
+                        + "blue pane; every shader pack makes it the most recognisable surface in "
+                        + "the world by giving it the one thing water already has here - a "
+                        + "fresnel term, so it looks along itself the way a polished floor does. "
+                        + "Cheaper than water: ice does not ripple, so there are no waves to "
+                        + "shade and no ray to march.");
+        waterCaustics = config.getInt("waterCaustics", CATEGORY_GENERAL, DEF_WATER_CAUSTICS, 0, 100,
+                "How much light gathers into moving bands on the bed of shallow water. Real "
+                        + "caustics are the surface acting as a lens on the light going through "
+                        + "it; this brightens what is already being fetched from under the water "
+                        + "in the same pattern the waves are shaded by, which is the same picture "
+                        + "for a fraction of the price. Needs Water Refraction, because that is "
+                        + "what fetches the bed in the first place.");
+        wetSurfaces = config.getInt("wetSurfaces", CATEGORY_GENERAL, DEF_WET_SURFACES, 0, 100,
+                "How much rain makes upward-facing surfaces gather the sky. Only faces pointing "
+                        + "up, and only in proportion to how much sky light they already receive "
+                        + "- there is no test for whether this particular block is under a roof, "
+                        + "so a lit cave mouth will damp a little too. A mood rather than a "
+                        + "simulation, like the height fog.");
+        sunHaze = config.getInt("sunHaze", CATEGORY_GENERAL, DEF_SUN_HAZE, 0, 100,
+                "How much the fog warms towards the sun and cools away from it. The game fogs "
+                        + "everything to one colour whichever way you face; the sky it hangs "
+                        + "under does not. Needs the game to have fog of its own to tint, so it "
+                        + "does nothing where fog is switched off, and nothing at night.");
+        cloudTint = config.getInt("cloudTint", CATEGORY_GENERAL, DEF_CLOUD_TINT, 0, 100,
+                "How much of the sky's own colour the clouds take. Vanilla clouds are white at "
+                        + "noon and white at sunset, hanging in an orange sky. This mixes the "
+                        + "colour the game has already worked out for the horizon into them, "
+                        + "which is the cheap half of what a shader pack does to a sky - the "
+                        + "expensive half is drawing the clouds again as volumes.");
+        preloadQueue = config.getInt("preloadQueue", CATEGORY_GENERAL, DEF_PRELOAD_QUEUE, 4, 128,
+                "How many chunks Offscreen Chunk Preload keeps queued for building at once. "
+                        + "Higher fills the world in faster and takes more of the frame while it "
+                        + "does. Does nothing unless that setting is on.");
+        preloadScan = config.getInt("preloadScan", CATEGORY_GENERAL, DEF_PRELOAD_SCAN, 512, 32768,
+                "How much of the chunk grid Offscreen Chunk Preload looks through each frame "
+                        + "while hunting for something to build. The whole grid at a render "
+                        + "distance of 64 is a quarter of a million cells, so scanning all of it "
+                        + "in one frame would trade a slow fill for a stutter; this is how much "
+                        + "of that walk is paid for per frame. Does nothing unless that setting "
+                        + "is on.");
         moonSize = config.getInt("moonSize", CATEGORY_GENERAL, DEF_MOON_SIZE, 0, 100,
                 "How large the moon is drawn. Same trick as the sun: the quad the game gives it "
                         + "cannot be resized from here, but how much of its picture the disc "
@@ -1175,6 +1238,13 @@ public final class VulkanConfig {
         setRoundMoon(DEF_ROUND_MOON);
         setMoonSize(DEF_MOON_SIZE);
         setWaterRefraction(DEF_WATER_REFRACTION);
+        setIceShine(DEF_ICE_SHINE);
+        setWaterCaustics(DEF_WATER_CAUSTICS);
+        setWetSurfaces(DEF_WET_SURFACES);
+        setSunHaze(DEF_SUN_HAZE);
+        setCloudTint(DEF_CLOUD_TINT);
+        setPreloadQueue(DEF_PRELOAD_QUEUE);
+        setPreloadScan(DEF_PRELOAD_SCAN);
         setSkinPack(DEF_SKIN_PACK);
         setSunSize(DEF_SUN_SIZE);
         setSceneTone(DEF_SCENE_TONE);
@@ -1396,6 +1466,86 @@ public final class VulkanConfig {
         waterRefraction = value < 0 ? 0 : (value > 100 ? 100 : value);
         store(CATEGORY_GENERAL, "waterRefraction", waterRefraction);
         applySystemProperties();
+    }
+
+    public static int getIceShine() {
+        return iceShine;
+    }
+
+    public static void setIceShine(int value) {
+        iceShine = clamp(value, 0, 100);
+        store(CATEGORY_GENERAL, "iceShine", iceShine);
+        applySystemProperties();
+    }
+
+    public static int getWaterCaustics() {
+        return waterCaustics;
+    }
+
+    public static void setWaterCaustics(int value) {
+        waterCaustics = clamp(value, 0, 100);
+        store(CATEGORY_GENERAL, "waterCaustics", waterCaustics);
+        applySystemProperties();
+    }
+
+    public static int getWetSurfaces() {
+        return wetSurfaces;
+    }
+
+    public static void setWetSurfaces(int value) {
+        wetSurfaces = clamp(value, 0, 100);
+        store(CATEGORY_GENERAL, "wetSurfaces", wetSurfaces);
+        applySystemProperties();
+    }
+
+    public static int getSunHaze() {
+        return sunHaze;
+    }
+
+    public static void setSunHaze(int value) {
+        sunHaze = clamp(value, 0, 100);
+        store(CATEGORY_GENERAL, "sunHaze", sunHaze);
+        applySystemProperties();
+    }
+
+    public static int getCloudTint() {
+        return cloudTint;
+    }
+
+    public static void setCloudTint(int value) {
+        cloudTint = clamp(value, 0, 100);
+        store(CATEGORY_GENERAL, "cloudTint", cloudTint);
+        applySystemProperties();
+    }
+
+    public static int getPreloadQueue() {
+        return preloadQueue;
+    }
+
+    public static void setPreloadQueue(int value) {
+        preloadQueue = clamp(value, 4, 128);
+        store(CATEGORY_GENERAL, "preloadQueue", preloadQueue);
+        applySystemProperties();
+    }
+
+    public static int getPreloadScan() {
+        return preloadScan;
+    }
+
+    public static void setPreloadScan(int value) {
+        preloadScan = clamp(value, 512, 32768);
+        store(CATEGORY_GENERAL, "preloadScan", preloadScan);
+        applySystemProperties();
+    }
+
+    /**
+     * The bounds check every setter above was writing out by hand.
+     *
+     * Two of them once disagreed with the range the settings screen offered,
+     * which is a setting that snaps back to a value the slider cannot show.
+     */
+    private static int clamp(int value, int low, int high) {
+        return value < low ? low : (value > high ? high : value);
     }
 
     public static int getMoonSize() {
@@ -2022,6 +2172,13 @@ public final class VulkanConfig {
         publish("vulkanmod112.ambientOcclusion", Integer.toString(ambientOcclusion));
         publish("vulkanmod112.screenReflections", Integer.toString(screenReflections));
         publish("vulkanmod112.waterRefraction", Integer.toString(waterRefraction));
+        publish("vulkanmod112.iceShine", Integer.toString(iceShine));
+        publish("vulkanmod112.waterCaustics", Integer.toString(waterCaustics));
+        publish("vulkanmod112.wetSurfaces", Integer.toString(wetSurfaces));
+        publish("vulkanmod112.sunHaze", Integer.toString(sunHaze));
+        publish("vulkanmod112.cloudTint", Integer.toString(cloudTint));
+        publish("vulkanmod112.preloadQueue", Integer.toString(preloadQueue));
+        publish("vulkanmod112.preloadScan", Integer.toString(preloadScan));
         publish("vulkanmod112.aoRadius", Integer.toString(aoRadius));
         publish("vulkanmod112.showMaterials", Boolean.toString(showMaterials));
         publish("vulkanmod112.showOcclusion", Boolean.toString(showOcclusion));

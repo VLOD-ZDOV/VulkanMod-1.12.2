@@ -76,7 +76,24 @@ public final class SettingsHealth {
             if (names.length() > 0) {
                 out.append(names).append(" — ").append(why);
             }
-        } else if (!tracingActive()) {
+        } else if (tracingActive()) {
+            // The other way round from everything else here: these two are
+            // switched on, the renderer is drawing, and they still do nothing
+            // — because tracing is on. They are compiled out of the tracing
+            // variant of the terrain shader deliberately, after a specular
+            // term of the same shape in the same branch lost the graphics
+            // device outright. The reasoning is written at WHY_NOT_WITH_RAY_QUERY
+            // in terrain.frag; what matters here is that a player who turns
+            // ice shine on and sees nothing is told why by the game rather
+            // than by a document.
+            StringBuilder names = new StringBuilder();
+            add(names, "ice shine", VulkanConfig.getIceShine());
+            add(names, "water caustics", VulkanConfig.getWaterCaustics());
+            if (names.length() > 0) {
+                out.append(names).append(" — these are left out of the traced "
+                        + "terrain shader on purpose, and ray tracing is on");
+            }
+        } else {
             // Said in the chat as well, once, and only for the case the player
             // can actually do something about: they asked for tracing, the
             // device has not got it, and one restart is the whole of the fix.
@@ -105,6 +122,10 @@ public final class SettingsHealth {
         add(out, "screen reflections", VulkanConfig.getScreenReflections());
         add(out, "water refraction", VulkanConfig.getWaterRefraction());
         add(out, "swaying foliage", VulkanConfig.getFoliageSway());
+        add(out, "ice shine", VulkanConfig.getIceShine());
+        add(out, "water caustics", VulkanConfig.getWaterCaustics());
+        add(out, "wet surfaces", VulkanConfig.getWetSurfaces());
+        add(out, "sun haze", VulkanConfig.getSunHaze());
         add(out, "bloom", VulkanConfig.getBloom());
         add(out, "scene tone", VulkanConfig.getSceneTone());
         add(out, "ambient occlusion", VulkanConfig.getAmbientOcclusion());

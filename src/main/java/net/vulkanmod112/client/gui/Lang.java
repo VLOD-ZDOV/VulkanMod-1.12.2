@@ -123,6 +123,7 @@ public final class Lang {
             "key.vulkanmod112.zoom", "Zoom",
             "key.vulkanmod112.settings", "VulkanMod112 Settings",
             "key.vulkanmod112.probe", "VulkanMod112 Chunk Probe",
+            "key.vulkanmod112.nextProfile", "VulkanMod112 Next Settings Profile",
     };
 
     /** Chrome that belongs to no option. */

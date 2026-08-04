@@ -72,6 +72,15 @@ layout(set = 0, binding = 3, std140) uniform Frame {
     //     ditherValue.
     // w = how much the surface of water bends what is seen through it. 0 off.
     vec4 lightShadow;
+    // x = how much sky a sheet of ice gathers on itself. 0 off.
+    // y = how hard the bed under water is banded by the surface above it.
+    //     Zero unless refraction is fetching that bed — there is no other
+    //     picture of it to brighten.
+    // z = how wet an upward face is: the setting and the weather already
+    //     multiplied together, because neither is any use here without the
+    //     other.
+    // w = how far the fog leans towards the sun's own colour. 0 off.
+    vec4 surface;
 } frame;
 
 layout(push_constant) uniform Draw {
@@ -130,6 +139,88 @@ bool isFoliage(uint material) {
  * moves with the wave and stays recognisably itself.
  */
 const float REFRACT_REACH = 1.6;
+
+/*
+ * WHY_NOT_WITH_RAY_QUERY
+ *
+ * Two effects below — the shine on ice and the caustics on a riverbed — are
+ * compiled out of the tracing variant of this shader, and that is not tidiness.
+ *
+ * The translucent pipeline is the one with no room left in it. It carries an
+ * unconditional shadow ray per fragment, up to eight more towards moving
+ * lights, and a marched reflection of up to forty dependent samples. All of
+ * that is latency-bound work, which does not scale with how much arithmetic is
+ * added to it — it scales with how many waves the card can keep in flight to
+ * hide the waiting, and that is decided by registers.
+ *
+ * This was measured, once, expensively. A specular glint on water — a
+ * normalize, a dot and a pow, under ten operations — was added, and the card
+ * was lost outright (Xid 109, a context switch timeout) reproducibly, over
+ * open water, with tracing on. Three arms of the experiment: tracing and
+ * glint together lost the device, tracing alone was clean, glint alone was
+ * clean. The one measured fact was that the glint grew this shader's tracing
+ * variant by 7.4%.
+ *
+ * Both effects here are translucent-only, so gating them on BLEND would not
+ * help — the translucent pipeline is exactly where they would land. Compiled
+ * out of the tracing variant, they cost that pipeline nothing at all, and the
+ * settings screen says out loud that they are switched on and inert when rays
+ * are being traced. See SettingsHealth on the game side.
+ *
+ * What would let them back in is not a smaller version of them: it is making
+ * the water branch itself cheaper, at which point this can be measured again.
+ * The full account is in docs/CRASH-GLINT.md.
+ */
+
+/**
+ * How much darker a fully wet surface gets, and how much sky it gathers.
+ *
+ * A film of water carries light down into the material rather than scattering
+ * it straight back, so wet stone is darker than dry stone — and it is smooth
+ * where the stone is rough, so it catches the sky at a grazing angle. Both, or
+ * the effect reads as a dusting of snow. The darkening is the larger of the
+ * two on purpose: it is the half people recognise without being told.
+ */
+const float WET_DARKEN = 0.30;
+const float WET_SHEEN = 0.55;
+
+/**
+ * Which way the haze leans, per unit of leaning towards the sun.
+ *
+ * Added to one rather than being a colour of its own, so this tilts whatever
+ * the sky is already doing instead of replacing it: the same numbers give a
+ * warm haze at noon and a warmer one under an overcast sky, and neither is a
+ * colour nobody in this world has seen. Positive towards the sun, negative
+ * away from it, and the same three numbers do both — the sky opposite the sun
+ * is the same air seen from the other side.
+ */
+const vec3 HAZE_LEAN = vec3(0.32, 0.13, -0.17);
+
+/**
+ * How much of the sky a sheet of ice may gather, at most.
+ *
+ * Less than water's, and deliberately: water reaches nearly all of it at a
+ * grazing angle because water really is a mirror there, and ice in this game
+ * is a translucent pane with a texture that has to stay legible. Past about a
+ * half the block stops looking like ice and starts looking like a hole in the
+ * world with the sky behind it.
+ */
+const float ICE_MIRROR_MAX = 0.55;
+
+/**
+ * How steep the surface has to be before a caustic band is fully dark, and how
+ * much brighter the flat parts get.
+ *
+ * Caustics are the surface acting as a lens on the light coming through it,
+ * and the light gathers where the surface is flat and thins where it is
+ * steeply tilted — so the pattern is already in the slope this shader computed
+ * for the waves, and no second field of noise is needed for it. Squared to
+ * pull the bright parts into cells with dark lines between them, which is what
+ * the eye recognises; the alternative is a smooth mottling that reads as dirty
+ * water.
+ */
+const float CAUSTIC_EDGE = 2.6;
+const float CAUSTIC_GAIN = 0.85;
 
 /**
  * The material of a surface read off the atlas rather than off the vertex.
@@ -841,8 +932,10 @@ void main() {
     // same for every fragment of the draw, which is what makes the derivatives
     // inside it legal. The translucent pipeline always needs the normal: water
     // is in it, and water is asked which way it faces even in the dark.
+    // frame.surface.z is in this list because rain only wets a face that
+    // points up, and which way this one points is the whole question.
     vec3 normal = (BLEND || (lightCount > 0 && directional > 0.0) || SUN_SHADOWS_WANTED
-            || (lightCount > 0 && frame.sunParams.w > 0.0))
+            || (lightCount > 0 && frame.sunParams.w > 0.0) || frame.surface.z > 0.0)
             ? faceNormal() : vec3(0.0, 1.0, 0.0);
     // After the derivatives and outside their branch: this is arithmetic on the
     // answer, not another question about the neighbourhood.
@@ -966,6 +1059,44 @@ void main() {
         shaded = materialColor(material) * light;
     }
 
+    // Rain, on the faces it can land on.
+    //
+    // A wet surface does two things at once and both are needed for it to read
+    // as wet rather than as pale: it darkens, because the water film carries
+    // light down into the material instead of scattering it straight back, and
+    // it gathers the sky at a grazing angle, because the film is smooth where
+    // the block is rough. Doing only the second makes stone look dusted with
+    // snow.
+    //
+    // Only upward faces, and only in proportion to the sky light the surface
+    // already receives. There is no test for whether this particular block has
+    // anything over it — that would be a ray, and this is meant to cost almost
+    // nothing — so sky light stands in for one: a floor deep in a cave has none
+    // and stays dry, a cave mouth has some and dampens a little, which is
+    // wrong and looks like weather rather than like an error.
+    //
+    // !BLEND is not a tidying-up: it is what keeps this out of the translucent
+    // pipeline altogether. BLEND is a specialisation constant, so the driver
+    // folds this whole block away when it compiles that pipeline — and that
+    // pipeline is the one carrying the traced shadows, the traced lights and
+    // the marched reflection, the one path in this shader with no headroom
+    // left. Water and ice live only in that pass anyway and are excluded here
+    // by their own nature rather than by a test.
+    if (!BLEND && frame.surface.z > 0.0 && normal.y > 0.9
+            && material != MATERIAL_LAVA) {
+        float wet = frame.surface.z * vLight.y;
+        shaded *= 1.0 - WET_DARKEN * wet;
+        // The same Fresnel the water uses, against the same fog colour that
+        // stands in for the sky everywhere else in this shader — but only
+        // where the game has fog of its own, because that colour is only
+        // refreshed while it does. With fog off it holds whatever was last
+        // captured, possibly in another dimension, and a floor sheened with a
+        // remembered sky is worse than a floor that only darkens.
+        if (frame.fogColor.a > 0.5) {
+            shaded = mix(shaded, frame.fogColor.rgb, fresnel(normal) * wet * WET_SHEEN);
+        }
+    }
+
     // Rounded, not truncated, and the sprite shader does the same. Both read
     // this one field of this one buffer, and a particle taking a different fog
     // mode from the terrain behind it would be a hard thing to see and a
@@ -973,6 +1104,34 @@ void main() {
     // either reading gives the same answer; agreeing costs nothing and stops
     // that from being load-bearing.
     int mode = int(frame.fogColor.a + 0.5);
+    // The fog, leaning towards the sun.
+    //
+    // The game fogs everything to one colour whichever way you are facing, and
+    // the sky it hangs under does not: air scatters short wavelengths sideways
+    // and long ones forwards, so haze towards the sun is warm and bright and
+    // haze away from it is cool. This is that, and only that — one colour
+    // mixed by how squarely you are looking at the sun, with no scattering
+    // integral anywhere near it.
+    //
+    // Read from the eye rather than from the surface: what is being tinted is
+    // the air between the two, and the air does not care which block is at the
+    // far end of it.
+    vec3 fogRgb = frame.fogColor.rgb;
+    if (frame.surface.w > 0.0 && mode != 0 && frame.sun.y > 0.0) {
+        float facing = dot(normalize(vRelative), frame.sun.xyz);
+        // Squared with its sign kept: -1 looking away from the sun, 0 across
+        // it, +1 into it, and the square narrows both ends without a second
+        // curve or a pow. One signed number covers warm and cool, which is
+        // what they are — one lean, not two effects.
+        float lean = facing * abs(facing);
+        // Nothing while the sun is on the horizon or under it: the game's own
+        // fog is already doing the sunset, and a second warmth over it turns
+        // the whole sky orange.
+        float risen = min(frame.sun.y * 4.0, 1.0);
+        // Exactly neutral at lean = 0, so a player facing across the sun sees
+        // the fog the game chose and nothing added to it.
+        fogRgb *= 1.0 + HAZE_LEAN * (lean * frame.surface.w * risen);
+    }
     // Kept for the emissive mask below: how much of this surface survived the
     // fog. Light that the fog swallowed must not glow either — inside lava,
     // where the fog is thick enough to hide the world, the silhouettes of
@@ -981,7 +1140,7 @@ void main() {
     float fogKeep = 1.0;
     if (mode != 0) {
         fogKeep = clamp(fogFactor(mode), 0.0, 1.0);
-        shaded = mix(frame.fogColor.rgb, shaded, fogKeep);
+        shaded = mix(fogRgb, shaded, fogKeep);
     }
     // After the distance fog and only where the game already has fog of its
     // own: with fog switched off there is no colour to thicken towards, and
@@ -989,7 +1148,7 @@ void main() {
     // something the sky never does.
     if (mode != 0 && frame.heightFog.x > 0.0) {
         float thickened = clamp(heightFogAmount(), 0.0, 1.0);
-        shaded = mix(shaded, frame.fogColor.rgb, thickened);
+        shaded = mix(shaded, fogRgb, thickened);
         fogKeep *= 1.0 - thickened;
     }
     if (BLEND) {
@@ -1040,19 +1199,75 @@ void main() {
                     shifted = uv;
                 }
                 vec3 behind = textureLod(sceneColor, shifted, 0.0).rgb;
+                // The bed, banded by the surface above it.
+                //
+                // Not a second pattern: `normal` is the wave normal by this
+                // point, so its horizontal part is the slope of the surface,
+                // and light passing through gathers where that slope is small
+                // and thins where it is large. Costs a dot, a couple of
+                // multiplies and no trigonometry at all — the waves were
+                // already evaluated for the shading above.
+                //
+                // It brightens rather than redistributing: the light taken out
+                // of the dark lines is not put back into the bright cells, so
+                // a bed with this on is a little brighter overall. That is the
+                // honest simplification here, and the reason the gain is under
+                // one.
+                //
+                // Not built into the tracing variant of this shader. See
+                // WHY_NOT_WITH_RAY_QUERY.
+#ifndef RAY_QUERY
+                if (frame.surface.y > 0.0) {
+                    float tilted = clamp(dot(normal.xz, normal.xz)
+                            * (CAUSTIC_EDGE * CAUSTIC_EDGE), 0.0, 1.0);
+                    // Not named "flat": that is a storage qualifier here, and
+                    // the error it gives names the line after the one it is on.
+                    float level = 1.0 - tilted;
+                    behind *= 1.0 + frame.surface.y * CAUSTIC_GAIN * level * level;
+                }
+#endif
                 // Exactly what the blend would have done, done here: the frame
                 // times what the water lets through, plus the water itself.
                 shaded = shaded * alpha + behind * (1.0 - alpha);
                 alpha = 1.0;
             }
         }
+        // Ice, which has carried a material tag since this pass was written
+        // and never had a line of shading to go with it.
+        //
+        // The same Fresnel water uses and nothing else: no waves, because ice
+        // does not ripple, and no ray, because a marched reflection on a
+        // surface this small is a smear and the sky is what is above it
+        // anyway. That leaves an effect that is cheap in the one branch of
+        // this shader where cheap matters — the translucent pass is the
+        // expensive one, and a sheet of ice is not a reason to make it more
+        // so.
+        //
+        // Sky light gates it: ice in a cave is not lit by a sky it cannot see,
+        // and vanilla's own lighting is the only thing here that knows the
+        // difference.
+        //
+        // Not built into the tracing variant of this shader. See
+        // WHY_NOT_WITH_RAY_QUERY.
+#ifndef RAY_QUERY
+        if (frame.surface.x > 0.0 && material == MATERIAL_ICE
+                && frame.fogColor.a > 0.5) {
+            float sheen = fresnel(normal) * frame.surface.x * ICE_MIRROR_MAX
+                    * vLight.y;
+            shaded = mix(shaded, fogRgb, sheen);
+            // Where it turns into sky it stops being see-through, exactly as
+            // the water above does — a mirror that lets the riverbed through
+            // is a colour laid over the surface rather than the surface.
+            alpha = mix(alpha, 1.0, sheen);
+        }
+#endif
         // frame.heightFog.w: how much of the Fresnel term to believe, 0 off.
         float water = frame.heightFog.w;
         if (water > 0.0 && material == MATERIAL_WATER) {
             float mirror = fresnel(mirrorNormal) * water;
             // What the surface shows: the horizon by default, and whatever is
             // actually standing there when the ray finds it.
-            vec3 mirrored = frame.fogColor.rgb;
+            vec3 mirrored = fogRgb;
             // How much of what is being mixed in is really there, as against
             // being the sky colour standing in for it.
             float confidence = 0.0;

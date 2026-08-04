@@ -34,6 +34,7 @@
     "ModelBaseMixin",
     "GlMatrixMixin",
     "SkySunMixin",
+    "CloudTintMixin",
     "RenderGlobalAccessor",
     "RenderChunkAccessor",
     "LightmapCoordMixin",

@@ -45,10 +45,23 @@ import java.util.Set;
 @Mixin(RenderGlobal.class)
 public abstract class ChunkPreloadMixin {
 
+    /*
+     * Both of these were constants here, which meant the only way to match them
+     * to a machine was to rebuild the mod. They decide the whole shape of the
+     * trade: a processor with room to spare would rather fill the world faster
+     * than hold a frame rate on a scene that is not moving, and one without it
+     * would rather not be asked. The defaults are what they were.
+     */
+
     /** Leave the queue alone above this; visible chunks have first claim. */
-    private static final int QUEUE_TARGET = 16;
+    private static int vulkanmod112$queueTarget() {
+        return VulkanConfig.getPreloadQueue();
+    }
+
     /** Grid entries examined per frame. */
-    private static final int SCAN_PER_FRAME = 4096;
+    private static int vulkanmod112$scanPerFrame() {
+        return VulkanConfig.getPreloadScan();
+    }
 
     @Shadow
     private ViewFrustum viewFrustum;
@@ -78,13 +91,14 @@ public abstract class ChunkPreloadMixin {
         if (!chunksToUpdate.isEmpty()) {
             return;
         }
-        int room = QUEUE_TARGET;
+        int room = vulkanmod112$queueTarget();
         int cursor = vulkanmod112$scanCursor;
         if (cursor >= grid.length) {
             cursor = 0;
         }
         int scanned = 0;
-        while (scanned < SCAN_PER_FRAME && room > 0) {
+        int scanBudget = vulkanmod112$scanPerFrame();
+        while (scanned < scanBudget && room > 0) {
             RenderChunk chunk = grid[cursor];
             cursor++;
             scanned++;

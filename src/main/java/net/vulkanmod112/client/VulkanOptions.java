@@ -731,6 +731,51 @@ final class VulkanOptions {
                                     public void set(boolean value) {
                                         VulkanConfig.setChunkPreloadEnabled(value);
                                     }
+                                }),
+                        new VRangeOption("Preload Queue",
+                                "How many chunks the preloader keeps waiting to be built. This is "
+                                        + "the size of the trade above: more of them fills the "
+                                        + "world in faster and takes more of the frame while it "
+                                        + "does. The measurement that made preloading off by "
+                                        + "default was taken at 16, so that is where a machine "
+                                        + "with processor to spare should start looking rather "
+                                        + "than where it should stay.",
+                                Cost.of(Level.HIGH, Level.NONE, Level.MEDIUM),
+                                "Needs Preload Offscreen Chunks on.",
+                                4, 128, 4, "", null,
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getPreloadQueue();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setPreloadQueue(value);
+                                    }
+                                }),
+                        new VRangeOption("Preload Scan",
+                                "How much of the chunk grid the preloader looks through each "
+                                        + "frame while hunting for something to build. The grid at "
+                                        + "render distance 64 is a quarter of a million cells, so "
+                                        + "sweeping all of it in one frame would trade a slow fill "
+                                        + "for a stutter; this is how much of that walk is paid "
+                                        + "for per frame, resuming where it stopped. Raising it "
+                                        + "finds work sooner in a world that is mostly built "
+                                        + "already, where most of what is scanned needs nothing.",
+                                Cost.of(Level.MEDIUM, Level.NONE, Level.NONE),
+                                "Needs Preload Offscreen Chunks on.",
+                                512, 32768, 512, "", null,
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getPreloadScan();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setPreloadScan(value);
+                                    }
                                 })),
                 new VOptionBlock("Window",
                         new VRangeOption("Background FPS Limit",
@@ -1817,6 +1862,128 @@ final class VulkanOptions {
                                     @Override
                                     public void set(int value) {
                                         VulkanConfig.setWaterRefraction(value);
+                                    }
+                                }),
+                        new VRangeOption("Water Caustics",
+                                "The bands of light that gather on the bed of shallow water. "
+                                        + "Real ones are the surface working as a lens on the "
+                                        + "light going through it; this brightens the bed in the "
+                                        + "same pattern the waves are already shaded by, which "
+                                        + "costs a handful of instructions instead of a second "
+                                        + "pass. Left out of the traced shader on purpose — see "
+                                        + "the note on Ice Shine.",
+                                Cost.of(Level.NONE, Level.LOW, Level.NONE),
+                                "Needs Water Refraction above zero, which is what fetches the "
+                                        + "bed. Does nothing while ray tracing is on.",
+                                0, 100, 5, "%", "Off",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getWaterCaustics();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setWaterCaustics(value);
+                                    }
+                                }),
+                        new VRangeOption("Ice Shine",
+                                "How much of the sky a sheet of ice gathers on itself. The game "
+                                        + "draws ice as a flat blue pane; the one thing that makes "
+                                        + "it the most recognisable surface in a shader pack is "
+                                        + "what water already has here — it looks along itself the "
+                                        + "way a polished floor does. Cheaper than water: ice does "
+                                        + "not ripple, so there are no waves to shade and no ray "
+                                        + "to march.\n\nNot built into the traced version of the "
+                                        + "terrain shader. A specular term of this shape, in this "
+                                        + "branch, lost the graphics device outright while rays "
+                                        + "were being traced, and that pass has no room left in "
+                                        + "it. With ray tracing on this says so rather than "
+                                        + "quietly doing nothing.",
+                                Cost.of(Level.NONE, Level.LOW, Level.NONE),
+                                "Needs Vulkan Water and Glass on, and Material Tags. Does nothing "
+                                        + "while ray tracing is on.",
+                                0, 100, 5, "%", "Off",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getIceShine();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setIceShine(value);
+                                    }
+                                }),
+                        new VRangeOption("Wet Surfaces",
+                                "How much rain makes the ground gather the sky. A wet surface "
+                                        + "does two things and needs both: it darkens, because the "
+                                        + "film of water carries light down into the material "
+                                        + "instead of scattering it back, and it catches the sky "
+                                        + "at a grazing angle, because the film is smooth where "
+                                        + "the block is rough. Only faces pointing up, and only in "
+                                        + "proportion to the sky light they already receive — "
+                                        + "there is no test for what is over a particular block, "
+                                        + "so a lit cave mouth dampens a little. Weather rather "
+                                        + "than simulation.",
+                                Cost.of(Level.NONE, Level.LOW, Level.NONE),
+                                "Only while it is raining.",
+                                0, 100, 5, "%", "Off",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getWetSurfaces();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setWetSurfaces(value);
+                                    }
+                                }),
+                        new VRangeOption("Sun Haze",
+                                "Warms the fog towards the sun and cools it away from it. The "
+                                        + "game fogs everything to one colour whichever way you "
+                                        + "are facing, and the sky it hangs under does not: air "
+                                        + "scatters short wavelengths sideways and long ones "
+                                        + "forwards, so haze into the sun is bright and warm and "
+                                        + "haze behind you is cool. This leans the colour the game "
+                                        + "already chose rather than replacing it, so it cannot "
+                                        + "disagree with the sky.",
+                                Cost.of(Level.NONE, Level.LOW, Level.NONE),
+                                "Needs the game to have fog of its own to lean, and daylight.",
+                                0, 100, 5, "%", "Off",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getSunHaze();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setSunHaze(value);
+                                    }
+                                }),
+                        new VRangeOption("Cloud Tint",
+                                "How much of the sky's colour the clouds take. Vanilla clouds are "
+                                        + "white at noon and white at sunset, hanging in an orange "
+                                        + "sky. This mixes in two colours the game has already "
+                                        + "worked out for the moment — the sky colour, and the "
+                                        + "sunrise and sunset band, which exists only while there "
+                                        + "is one. Nothing is invented, so it cannot disagree with "
+                                        + "the sky behind it. The volumetric clouds of a shader "
+                                        + "pack are a different and much larger thing; this is the "
+                                        + "half of that look which is free.",
+                                Cost.of(Level.NONE, Level.NONE, Level.NONE), null,
+                                0, 100, 5, "%", "Off",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getCloudTint();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setCloudTint(value);
                                     }
                                 }),
                         new VSwitchOption("Round Sun",

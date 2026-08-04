@@ -1162,6 +1162,14 @@ public final class VulkanContextImpl implements VulkanBridge {
     }
 
     @Override
+    public synchronized void updateWeather(float rainStrength) {
+        if (!initialized || !interopCapable) {
+            return;
+        }
+        terrainRenderer().setRainStrength(rainStrength);
+    }
+
+    @Override
     public synchronized boolean drawsSprites() {
         if (!initialized || !interopCapable || terrainRenderer == null) {
             return false;

@@ -492,7 +492,17 @@ final class VkTerrainRenderer {
      * so there is room here for a good deal more than this holds.
      */
     private static final int MAX_DYNAMIC_LIGHTS = 32;
-    private static final int FRAME_UNIFORM_BYTES = 1024;
+    /**
+     * How much room the frame's uniform block gets.
+     *
+     * Grown from 1024, which had one vec4 left in it and five new fields
+     * wanting a home. Vulkan guarantees at least sixteen kilobytes for a
+     * uniform buffer, so this is a constant and not a budget — the reason to
+     * keep it tight is that it is written every frame, not that it is scarce.
+     * The layout itself is documented in {@code SHADERS.md}, and the shader's
+     * own declaration is what has to agree with it.
+     */
+    private static final int FRAME_UNIFORM_BYTES = 1152;
     private final float[] dynamicLights = new float[MAX_DYNAMIC_LIGHTS * 4];
     private int dynamicLightCount;
 
@@ -5168,6 +5178,31 @@ final class VkTerrainRenderer {
         // the block atlas, and a riverbed made of atlas is worse than a
         // riverbed that does not move.
         MemoryUtil.memPutFloat(base + 988, sceneWanted() ? waterRefraction : 0.0f);
+        // vec4 surface at 992.
+        //
+        // x: how much sky a sheet of ice gathers. Ice is drawn in the same
+        // translucent pass as water and has carried a material tag of its own
+        // since that pass was written, which nothing ever read.
+        MemoryUtil.memPutFloat(base + 992, iceShine);
+        // y: how much the bed under shallow water is banded by the surface
+        // above it. Nothing at all unless refraction is fetching that bed —
+        // there is no other picture of it to brighten.
+        MemoryUtil.memPutFloat(base + 996,
+                sceneWanted() && waterRefraction > 0.0f ? waterCaustics : 0.0f);
+        // z: how wet an upward face is, which is the setting and the weather
+        // multiplied. One number rather than two, because neither is any use
+        // to the shader without the other, and a fragment should not have to
+        // ask twice.
+        MemoryUtil.memPutFloat(base + 1000, wetSurfaces * rainStrength);
+        // w: how far the fog leans towards the sun's colour.
+        MemoryUtil.memPutFloat(base + 1004, sunHaze);
+    }
+
+    /** How hard it is raining, 0 to 1; see VulkanBridge.updateWeather. */
+    private volatile float rainStrength;
+
+    synchronized void setRainStrength(float value) {
+        rainStrength = value < 0.0f ? 0.0f : (value > 1.0f ? 1.0f : value);
     }
 
     /**
@@ -5312,6 +5347,10 @@ final class VkTerrainRenderer {
         bloomStrength = clampPercent(intProperty("vulkanmod112.bloom", 0));
         aoStrength = clampPercent(intProperty("vulkanmod112.ambientOcclusion", 0));
         aoRadius = Math.max(1, Math.min(6, intProperty("vulkanmod112.aoRadius", 2)));
+        iceShine = clampPercent(intProperty("vulkanmod112.iceShine", 0));
+        waterCaustics = clampPercent(intProperty("vulkanmod112.waterCaustics", 0));
+        wetSurfaces = clampPercent(intProperty("vulkanmod112.wetSurfaces", 0));
+        sunHaze = clampPercent(intProperty("vulkanmod112.sunHaze", 0));
         float wantedRefraction = clampPercent(intProperty("vulkanmod112.waterRefraction", 0));
         float wantedReflections = clampPercent(intProperty("vulkanmod112.screenReflections", 0));
         // Both are read, then both are stored, and only then is the question
@@ -5346,6 +5385,18 @@ final class VkTerrainRenderer {
 
     /** How much the water bends what is seen through it; 0 = off. */
     private float waterRefraction;
+
+    /** How much sky a sheet of ice gathers; 0 = off. */
+    private float iceShine;
+
+    /** How hard the bed under water is banded by the surface; 0 = off. */
+    private float waterCaustics;
+
+    /** How much rain wets an upward face; 0 = off. Multiplied by the weather. */
+    private float wetSurfaces;
+
+    /** How far the fog leans towards the sun's colour; 0 = off. */
+    private float sunHaze;
 
     private static float clampPercent(int value) {
         return Math.max(0, Math.min(100, value)) / 100.0f;

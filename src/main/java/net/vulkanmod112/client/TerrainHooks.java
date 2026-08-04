@@ -317,6 +317,7 @@ public final class TerrainHooks {
                 bridge.updateDynamicLights(DynamicLights.lights(), DynamicLights.count());
                 captureSun(mc);
                 bridge.updateSun(SUN);
+                bridge.updateWeather(rainStrength(mc));
                 if (lightmapColors != null) {
                     checkLightmapStillOurs();
                     bridge.updateLightmapData(lightmapColors);
@@ -455,6 +456,23 @@ public final class TerrainHooks {
         SUN[0] = -(float) Math.sin(angle);
         SUN[1] = (float) Math.cos(angle);
         SUN[2] = 0.0f;
+    }
+
+    /**
+     * How hard it is raining, as the client sees it.
+     *
+     * Asked of the world rather than of the server's weather, because
+     * {@code WorldDisplayMixin} may be answering this question with the
+     * player's own choice — and a surface that stays dry while rain falls on it
+     * would be the one place that choice leaked. The same call the game's own
+     * rain uses, so the two cannot disagree.
+     */
+    private static float rainStrength(Minecraft mc) {
+        if (mc.world == null) {
+            return 0.0f;
+        }
+        float rain = mc.world.getRainStrength(mc.getRenderPartialTicks());
+        return rain < 0.0f ? 0.0f : (rain > 1.0f ? 1.0f : rain);
     }
 
     /**
