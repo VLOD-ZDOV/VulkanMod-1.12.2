@@ -222,6 +222,72 @@ const float ICE_MIRROR_MAX = 0.55;
 const float CAUSTIC_EDGE = 2.6;
 const float CAUSTIC_GAIN = 0.85;
 
+/** How tight the glint is: water ripples broadly, a sheet of ice sharply. */
+const float WATER_GLINT_SHARPNESS = 48.0;
+const float ICE_GLINT_SHARPNESS = 96.0;
+/** Full strength at the setting's maximum. Above this the sun becomes a lamp. */
+const float GLINT_MAX = 2.5;
+/** Not white: sunlight is warm, and a neutral glint reads as a specular bug. */
+const vec3 SUN_TINT = vec3(1.0, 0.96, 0.88);
+/** Moonlight is the same sunlight twice reflected: cooler, and far dimmer. */
+const vec3 MOON_TINT = vec3(0.62, 0.70, 0.95);
+const float MOON_SHARE = 0.30;
+/**
+ * How far out the glint is allowed to reach, in blocks.
+ *
+ * This is the fix for the one thing everybody noticed about the first version:
+ * flying up over an ocean made the sun on the water grow until it filled the
+ * view. That is not a bug in the highlight, it is what a specular lobe does —
+ * the higher the eye, the more of the sea is at an angle that returns the sun,
+ * so the glitter path widens towards the horizon exactly as it does in a
+ * photograph. Physically right, and wrong for this game: nothing else in this
+ * world grows when you climb, and a light that does reads as an error.
+ *
+ * Faded with distance instead, squared, so what grows on the way up is what
+ * disappears. It also bounds how much of the screen the effect can ever cover,
+ * which is the quantity that was rising when the graphics device was lost.
+ */
+const float GLINT_REACH = 72.0;
+
+/**
+ * The sun or the moon itself on a surface, rather than the sky it reflects.
+ *
+ * Water in the open shows two different things at once. One is the horizon,
+ * which the fresnel term mixes in and the screen reflection sharpens — that is
+ * the surface acting as a mirror. The other is a narrow bright glint sliding
+ * along the ripples, and no reflection can ever produce it: the sun is a
+ * light, not a surface that was drawn into the scene for a ray to find.
+ * Reflecting the sky where the sun is gives its colour, not its shape.
+ *
+ * @param n         the normal to measure against
+ * @param sharpness how tight the lobe is
+ * @param toLight   direction to the sun, or to the moon at night
+ * @param up        how far above the horizon that light is, 0 at it
+ */
+float celestialGlint(vec3 n, float sharpness, vec3 toLight, float up) {
+    if (up <= 0.0) {
+        return 0.0;
+    }
+    vec3 sum = normalize(-vRelative) + toLight;
+    // Guarded, and not because it was ever seen to fail. The two are unit
+    // vectors, so their sum is zero exactly when they oppose — which happens
+    // on one point of the screen, the one directly away from the sun, and over
+    // open water from a height that point is on the water. normalize of zero
+    // is NaN across the whole surface rather than a wrong shade on one pixel
+    // of it, and this shader already carries the same guard on foliage normals
+    // for the same reason. One comparison closes it whether or not it was ever
+    // the cause of anything.
+    float length2 = dot(sum, sum);
+    if (length2 < 1.0e-8) {
+        return 0.0;
+    }
+    vec3 h = sum * inversesqrt(length2);
+    float lobe = pow(max(dot(n, h), 0.0), sharpness) * min(up * 4.0, 1.0);
+    // See GLINT_REACH: this is what stops it growing as you climb.
+    float near = clamp(1.0 - vDistance / GLINT_REACH, 0.0, 1.0);
+    return lobe * near * near;
+}
+
 /**
  * The material of a surface read off the atlas rather than off the vertex.
  *
@@ -1328,6 +1394,41 @@ void main() {
             shaded = mix(shaded, mirrored, mirror);
             alpha = mix(alpha, 1.0, mirror);
         }
+        // The sun, or the moon, on the surface itself.
+        //
+        // Not built into the tracing variant, and this one is measured rather
+        // than assumed: the glint costs the traced translucent pipeline 7.7%
+        // more code, which is more than every other effect on this pass put
+        // together, and that pipeline is where the graphics device was lost.
+        // Without tracing the same glint ran clean in every arm of the
+        // experiment. See WHY_NOT_WITH_RAY_QUERY.
+#ifndef RAY_QUERY
+        float glintStrength = frame.lightInfo.y;
+        if (glintStrength > 0.0
+                && (material == MATERIAL_WATER || material == MATERIAL_ICE)) {
+            // Day and night are the same highlight from opposite ends of the
+            // same axis: the game hangs the moon exactly across the sky from
+            // the sun, so one direction answers for both.
+            bool byDay = frame.sun.y > 0.0;
+            vec3 toLight = byDay ? frame.sun.xyz : -frame.sun.xyz;
+            float above = byDay ? frame.sun.y : -frame.sun.y;
+            // The flat face for ice, the calmed ripple for water: a sheet of
+            // ice has no ripple, and its highlight is broad and sudden rather
+            // than scattered, which is what makes it read as ice.
+            float g = material == MATERIAL_WATER
+                    ? celestialGlint(mirrorNormal, WATER_GLINT_SHARPNESS, toLight, above)
+                    : celestialGlint(normal, ICE_GLINT_SHARPNESS, toLight, above);
+            g *= glintStrength * GLINT_MAX * (byDay ? 1.0 : MOON_SHARE);
+            if (g > 0.0) {
+                shaded += (byDay ? SUN_TINT : MOON_TINT) * g;
+                // Raised with it, because the frame is premultiplied below: a
+                // glint added to a surface that lets most light through would
+                // otherwise be scaled down by exactly the amount that makes it
+                // worth having.
+                alpha = mix(alpha, 1.0, clamp(g, 0.0, 1.0));
+            }
+        }
+#endif
         outColor = vec4(shaded * alpha, alpha);
     } else {
         // The alpha of an opaque pixel was the constant 1.0 and nothing else,

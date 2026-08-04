@@ -5085,7 +5085,11 @@ final class VkTerrainRenderer {
         }
         // vec4 lightInfo at 96: x is how many of the array below to read.
         MemoryUtil.memPutFloat(base + 96, dynamicLightCount);
-        MemoryUtil.memPutFloat(base + 100, 0.0f);
+        // y: the sun's own highlight on water and ice. Written once — the
+        // first version of this wrote it here and then zeroed the padding a
+        // line below, which made the whole effect unreachable while looking
+        // exactly like a setting that did nothing.
+        MemoryUtil.memPutFloat(base + 100, celestialGlint);
         MemoryUtil.memPutFloat(base + 104, 0.0f);
         MemoryUtil.memPutFloat(base + 108, 0.0f);
         for (int i = 0; i < dynamicLightCount * 4; i++) {
@@ -5358,6 +5362,7 @@ final class VkTerrainRenderer {
         waterCaustics = clampPercent(intProperty("vulkanmod112.waterCaustics", 0));
         wetSurfaces = clampPercent(intProperty("vulkanmod112.wetSurfaces", 0));
         sunHaze = clampPercent(intProperty("vulkanmod112.sunHaze", 0));
+        celestialGlint = clampPercent(intProperty("vulkanmod112.celestialGlint", 0));
         float wantedRefraction = clampPercent(intProperty("vulkanmod112.waterRefraction", 0));
         float wantedReflections = clampPercent(intProperty("vulkanmod112.screenReflections", 0));
         // Both are read, then both are stored, and only then is the question
@@ -5404,6 +5409,9 @@ final class VkTerrainRenderer {
 
     /** How far the fog leans towards the sun's colour; 0 = off. */
     private float sunHaze;
+
+    /** The sun's or moon's own highlight on water and ice; 0 = off. */
+    private float celestialGlint;
 
     private static float clampPercent(int value) {
         return Math.max(0, Math.min(100, value)) / 100.0f;

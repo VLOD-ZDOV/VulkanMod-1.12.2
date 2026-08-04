@@ -366,6 +366,8 @@ public final class VulkanConfig {
     static final int DEF_MOON_SIZE = 40;
     /** How much water bends what is seen through it. */
     static final int DEF_WATER_REFRACTION = 0;
+    /** The sun's or moon's own highlight on water and ice. */
+    static final int DEF_CELESTIAL_GLINT = 0;
     /** How much sky ice gathers on its surface. */
     static final int DEF_ICE_SHINE = 0;
     /** How much light gathers into bands on a shallow bed. */
@@ -570,6 +572,7 @@ public final class VulkanConfig {
     private static boolean roundMoon = DEF_ROUND_MOON;
     private static int moonSize = DEF_MOON_SIZE;
     private static int waterRefraction = DEF_WATER_REFRACTION;
+    private static volatile int celestialGlint = DEF_CELESTIAL_GLINT;
     private static volatile int iceShine = DEF_ICE_SHINE;
     private static volatile int waterCaustics = DEF_WATER_CAUSTICS;
     private static volatile int wetSurfaces = DEF_WET_SURFACES;
@@ -853,6 +856,15 @@ public final class VulkanConfig {
                         + "over a photograph. What is behind the water is fetched from the same "
                         + "picture the reflection searches, so it shows the world but not "
                         + "creatures, which this renderer does not draw.");
+        celestialGlint = config.getInt("celestialGlint", CATEGORY_GENERAL,
+                DEF_CELESTIAL_GLINT, 0, 100,
+                "The sun itself sliding along the ripples, and the moon doing the same at "
+                        + "night. A reflection cannot produce this: the sun is a light rather "
+                        + "than a surface that was drawn for a ray to find, so reflecting the sky "
+                        + "where it is gives its colour and not its shape. Fades with distance, "
+                        + "which is deliberate - a specular highlight physically widens towards "
+                        + "the horizon as the eye rises, and a sun that grows when you fly up "
+                        + "reads as an error however correct it is.");
         iceShine = config.getInt("iceShine", CATEGORY_GENERAL, DEF_ICE_SHINE, 0, 100,
                 "How much of the sky ice gathers on its surface. The game draws ice as a flat "
                         + "blue pane; every shader pack makes it the most recognisable surface in "
@@ -1238,6 +1250,7 @@ public final class VulkanConfig {
         setRoundMoon(DEF_ROUND_MOON);
         setMoonSize(DEF_MOON_SIZE);
         setWaterRefraction(DEF_WATER_REFRACTION);
+        setCelestialGlint(DEF_CELESTIAL_GLINT);
         setIceShine(DEF_ICE_SHINE);
         setWaterCaustics(DEF_WATER_CAUSTICS);
         setWetSurfaces(DEF_WET_SURFACES);
@@ -1465,6 +1478,16 @@ public final class VulkanConfig {
     public static void setWaterRefraction(int value) {
         waterRefraction = value < 0 ? 0 : (value > 100 ? 100 : value);
         store(CATEGORY_GENERAL, "waterRefraction", waterRefraction);
+        applySystemProperties();
+    }
+
+    public static int getCelestialGlint() {
+        return celestialGlint;
+    }
+
+    public static void setCelestialGlint(int value) {
+        celestialGlint = clamp(value, 0, 100);
+        store(CATEGORY_GENERAL, "celestialGlint", celestialGlint);
         applySystemProperties();
     }
 
@@ -2172,6 +2195,7 @@ public final class VulkanConfig {
         publish("vulkanmod112.ambientOcclusion", Integer.toString(ambientOcclusion));
         publish("vulkanmod112.screenReflections", Integer.toString(screenReflections));
         publish("vulkanmod112.waterRefraction", Integer.toString(waterRefraction));
+        publish("vulkanmod112.celestialGlint", Integer.toString(celestialGlint));
         publish("vulkanmod112.iceShine", Integer.toString(iceShine));
         publish("vulkanmod112.waterCaustics", Integer.toString(waterCaustics));
         publish("vulkanmod112.wetSurfaces", Integer.toString(wetSurfaces));

@@ -87,6 +87,7 @@ public final class SettingsHealth {
             // ice shine on and sees nothing is told why by the game rather
             // than by a document.
             StringBuilder names = new StringBuilder();
+            add(names, "sun and moon glint", VulkanConfig.getCelestialGlint());
             add(names, "ice shine", VulkanConfig.getIceShine());
             add(names, "water caustics", VulkanConfig.getWaterCaustics());
             if (names.length() > 0) {
@@ -122,6 +123,7 @@ public final class SettingsHealth {
         add(out, "screen reflections", VulkanConfig.getScreenReflections());
         add(out, "water refraction", VulkanConfig.getWaterRefraction());
         add(out, "swaying foliage", VulkanConfig.getFoliageSway());
+        add(out, "sun and moon glint", VulkanConfig.getCelestialGlint());
         add(out, "ice shine", VulkanConfig.getIceShine());
         add(out, "water caustics", VulkanConfig.getWaterCaustics());
         add(out, "wet surfaces", VulkanConfig.getWetSurfaces());

@@ -1887,6 +1887,37 @@ final class VulkanOptions {
                                         VulkanConfig.setWaterCaustics(value);
                                     }
                                 }),
+                        new VRangeOption("Sun and Moon Glint",
+                                "The sun itself sliding along the ripples, and the moon doing "
+                                        + "the same at night. This is not the reflection and no "
+                                        + "reflection can produce it: the sun is a light rather "
+                                        + "than a surface drawn into the scene for a ray to find, "
+                                        + "so mirroring the sky where it stands gives its colour "
+                                        + "and not its shape. One of the plainest marks of a "
+                                        + "shader pack on open water.\n\nIt fades with distance "
+                                        + "on purpose. A specular highlight physically widens "
+                                        + "towards the horizon as the eye rises, which is why the "
+                                        + "first version of this grew until it filled the view "
+                                        + "when you flew up over an ocean — correct, and wrong "
+                                        + "for a world where nothing else grows when you climb."
+                                        + "\n\nNot built into the traced terrain shader, where it "
+                                        + "costs more than every other effect on that pass "
+                                        + "together and once lost the graphics device.",
+                                Cost.of(Level.NONE, Level.LOW, Level.NONE),
+                                "Needs Vulkan Water and Glass on. Does nothing while ray tracing "
+                                        + "is on.",
+                                0, 100, 5, "%", "Off",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getCelestialGlint();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setCelestialGlint(value);
+                                    }
+                                }),
                         new VRangeOption("Ice Shine",
                                 "How much of the sky a sheet of ice gathers on itself. The game "
                                         + "draws ice as a flat blue pane; the one thing that makes "
