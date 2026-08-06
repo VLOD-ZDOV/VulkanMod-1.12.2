@@ -37,23 +37,51 @@ public final class VulkanLoader {
     }
 
     /**
-     * Highest Java feature release the bundled LWJGL 3.3 understands.
+     * Highest Java feature release this mod has been shown to survive.
      *
-     * LWJGL installs its GL function tables by patching the JVM's JNI function
-     * table, and it recognises the layout only for JVMs it knows. On a newer
-     * one it warns and carries on with a corrupted table: OpenGL calls then
-     * return nonsense — the device UUID query answers with its own arguments —
-     * and the JVM segfaults soon after, in our observation inside a JIT
-     * compiler thread, far from anything this mod wrote. Vulkan is unaffected,
-     * because its entry points hang off the instance and device objects rather
-     * than that table, so the failure looks like a driver problem rather than
-     * what it is.
+     * <h2>What the danger actually is</h2>
      *
-     * Minecraft 1.12.2 runs on Java 8, so this only ever triggers on a
-     * modernised platform such as Cleanroom, where we decline cleanly and the
-     * game keeps its own renderer.
+     * LWJGL installs its function tables by patching the JVM's JNI function
+     * table, and it can only do that for a layout it knows. On one it does not
+     * it warns and carries on with a corrupted table: OpenGL calls then return
+     * nonsense — the device UUID query answers with its own arguments — and the
+     * JVM segfaults soon after, in our observation inside a JIT compiler
+     * thread, far from anything this mod wrote. Vulkan is unaffected, because
+     * its entry points hang off the instance and device objects rather than
+     * that table, so the failure looks like a driver problem rather than what
+     * it is. That is worth declining cleanly for.
+     *
+     * <h2>Why the number is not a Java version</h2>
+     *
+     * It reads like one and it is not. What LWJGL switches on is the <b>JNI</b>
+     * version the JVM reports, and that only moves when the JNI specification
+     * does — which is far less often than Java releases. The bundled LWJGL
+     * knows JNI up to 24; Java 25 and Java 26 both still report 24, so both are
+     * fine, and the ceiling that used to sit at 21 was refusing platforms that
+     * were never in danger. It cost this mod every Cleanroom instance on a
+     * modern JVM: the renderer simply never started, and the line explaining
+     * why named a limit that was not real.
+     *
+     * <h2>What this number now means</h2>
+     *
+     * The newest Java this has been run on and seen to work, which is a fact
+     * rather than an inference: on Java 26 the bundled LWJGL reports JNI 24,
+     * warns about nothing, creates a Vulkan instance, enumerates the device and
+     * reads its 280 extensions. A release past this one is refused not because
+     * it is known to break but because it is not known to work — and
+     * {@code -Dvulkanmod112.javaCeiling=NN} moves the line for anyone willing
+     * to find out. The JNI version is written to the log at startup, so the
+     * next person to raise this has the number in front of them.
+     *
+     * Minecraft 1.12.2 itself runs on Java 8, so none of this arises outside a
+     * modernised platform such as Cleanroom.
      */
-    private static final int MAX_SUPPORTED_JAVA = 21;
+    private static final int DEFAULT_JAVA_CEILING = 26;
+
+    private static int maxSupportedJava() {
+        Integer override = Integer.getInteger("vulkanmod112.javaCeiling");
+        return override == null || override <= 0 ? DEFAULT_JAVA_CEILING : override;
+    }
 
     /** LWJGL's own name for the setting, read whenever its Configuration first initializes. */
     private static final String LWJGL_STACK_PROPERTY = "org.lwjgl.system.stackSize";
@@ -122,11 +150,15 @@ public final class VulkanLoader {
                 throw new VulkanUnavailableException("Vulkan renderer switched off by vulkanmod112.forceFallback");
             }
             int java = javaFeatureVersion();
-            if (java > MAX_SUPPORTED_JAVA) {
-                throw new VulkanUnavailableException("Java " + java + " is newer than the bundled LWJGL 3.3 supports"
-                        + " (up to " + MAX_SUPPORTED_JAVA + "). Loading it here would corrupt the JVM's JNI"
-                        + " function table and crash the process, so the Vulkan renderer stays off and the"
-                        + " game renders on OpenGL.");
+            int ceiling = maxSupportedJava();
+            if (java > ceiling) {
+                throw new VulkanUnavailableException("Java " + java + " is past the newest release this mod"
+                        + " has been run on (" + ceiling + "). The bundled LWJGL patches the JVM's JNI"
+                        + " function table and can only do that for a layout it knows, so rather than risk"
+                        + " a corrupted table the Vulkan renderer stays off and the game renders on OpenGL."
+                        + " If you want to try it anyway, start the game with"
+                        + " -Dvulkanmod112.javaCeiling=" + java + " — what decides this is the JNI version"
+                        + " rather than the Java one, and it moves far more rarely.");
             }
             reserveStackSpace();
             try {

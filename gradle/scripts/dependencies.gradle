@@ -108,4 +108,29 @@ tasks.shadowJar {
     enabled = !project.configurations.shade.dependencies.empty
     archiveClassifier = 'uberdev'
     configurations = [ project.configurations.shade ]
+
+    // Move the bundled LWJGL natives off the paths LWJGL itself searches.
+    //
+    // LWJGL looks its shared libraries up on the classpath at exactly
+    // "<os>/<arch>/org/lwjgl/...", with a checksum beside them under META-INF.
+    // Shading them in at those paths puts a second, older LWJGL's natives in
+    // front of any host that has its own — and Cleanroom does: it runs on
+    // LWJGL 3.4.1, found this mod's 3.3.6 checksums first, and printed
+    // "Incompatible Java and native library versions detected" twice a session
+    // in a game this mod was not even rendering. Someone else's error message,
+    // caused by us, in a file people are asked to send when something breaks.
+    //
+    // Nothing needs them there. They are extracted by hand into a temporary
+    // directory at startup (see Lwjgl3Natives), so a private prefix serves
+    // exactly as well and is invisible to anybody else's loader.
+    eachFile { file ->
+        if (file.path ==~ /^(linux|windows|macos|freebsd)\/.+\.(so|dll|dylib)$/) {
+            file.path = NATIVES_PREFIX + file.path
+        } else if (file.path ==~ /^META-INF\/(linux|windows|macos|freebsd)\/.+\.sha1$/) {
+            file.path = 'META-INF/' + NATIVES_PREFIX + file.path.substring('META-INF/'.length())
+        }
+    }
 }
+
+/** Kept in step with Lwjgl3Natives.PRIVATE_PREFIX on the Java side. */
+ext.NATIVES_PREFIX = 'vulkanmod112-lwjgl/'

@@ -92,6 +92,19 @@ final class Lwjgl3Natives {
         // never mattered, and the full path names the person running the game.
         LOGGER.info("LWJGL 3 natives extracted to {} (stack budget {} KiB, in effect {} KiB)",
                 dir.getFileName(), stackSizeKb(), actualKb);
+        // The number that actually decides whether this mod is safe on a given
+        // JVM, printed where the next person to ask will find it.
+        //
+        // LWJGL patches the JNI function table and switches on the JNI version
+        // to know its layout — not on the Java version, which is what the
+        // startup check has to guess from because it runs before any of this
+        // exists. The two move at completely different rates: the ceiling sat
+        // at Java 21 for a year while the bundled LWJGL knew everything up to
+        // JNI 24, which Java 25 and 26 both still report. Every Cleanroom
+        // instance on a modern JVM was refused over that gap.
+        LOGGER.info("JNI version reported by this JVM: {} (LWJGL {})",
+                org.lwjgl.system.jni.JNINativeInterface.GetVersion() >>> 16,
+                org.lwjgl.Version.getVersion());
         if (actualKb < stackSizeKb()) {
             // Both numbers, because they answer different questions: what LWJGL
             // holds as the setting, and what it built before reading it.
@@ -100,8 +113,30 @@ final class Lwjgl3Natives {
         }
     }
 
+    /**
+     * Where the bundled natives live inside this jar.
+     *
+     * Not the path LWJGL searches. Shipping them at "<os>/<arch>/org/lwjgl/..."
+     * — which is where they arrive from their own jars — puts an older LWJGL's
+     * libraries on the classpath in front of any host that has its own, and a
+     * host that does prints an error about it: Cleanroom runs LWJGL 3.4.1,
+     * found this mod's 3.3.6 checksums, and said so twice a session in a game
+     * this mod was not rendering. These are private to this mod and are
+     * extracted by hand, so they are kept somewhere nobody else looks. Set in
+     * the shadowJar task; the two have to agree.
+     */
+    private static final String PRIVATE_PREFIX = "vulkanmod112-lwjgl/";
+
     private static void extract(String resource, Path target) throws IOException {
-        try (InputStream in = Lwjgl3Natives.class.getClassLoader().getResourceAsStream(resource)) {
+        ClassLoader loader = Lwjgl3Natives.class.getClassLoader();
+        // The private location first, then the plain one — so a jar built
+        // before the natives were moved still works, and so does the
+        // development classpath, where they come straight from LWJGL's own
+        // jars and are not relocated at all.
+        if (loader.getResource(PRIVATE_PREFIX + resource) != null) {
+            resource = PRIVATE_PREFIX + resource;
+        }
+        try (InputStream in = loader.getResourceAsStream(resource)) {
             if (in == null) {
                 throw new IOException("Bundled native " + resource + " not found on classpath");
             }
