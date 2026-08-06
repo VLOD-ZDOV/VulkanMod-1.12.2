@@ -81,6 +81,10 @@ layout(set = 0, binding = 3, std140) uniform Frame {
     //     other.
     // w = how far the fog leans towards the sun's own colour. 0 off.
     vec4 surface;
+    // x = how far the camera is above this world's sea level, in blocks.
+    //     Adding vRelative.y to it gives the fragment's own height above the
+    //     sea, which is what the height fog is measured from.
+    vec4 world;
 } frame;
 
 layout(push_constant) uniform Draw {
@@ -958,7 +962,23 @@ vec2 waveGradient(vec2 p, float t) {
  * whatever distance fog already decided.
  */
 float heightFogAmount() {
-    float below = max(0.0, -vRelative.y);
+    // How far below the sea this fragment is — not how far below the eye.
+    //
+    // It used to be measured from the camera, which reads as the same thing
+    // while you are standing on the ground and is not the same thing at all
+    // once you leave it. Flying at a height of three hundred puts the whole
+    // world "far below", the exponential saturates everywhere at once, and the
+    // effect stops being fog and becomes a flat wash of the fog colour over
+    // every block on screen. With Distant Horizons installed that wash had a
+    // visible edge, because the far terrain is drawn by that mod and never saw
+    // it: a coloured disc exactly the size of the vanilla render distance,
+    // centred on the player, following them about.
+    //
+    // Measured from the sea it means what it says. Fog gathers in ravines,
+    // canyons and the deep parts of the ocean floor, hills stay clear, and how
+    // high the camera happens to be does not change what the ground looks
+    // like — which is the whole idea of fog that depends on height.
+    float below = max(0.0, -(vRelative.y + frame.world.x));
     return frame.heightFog.x * (1.0 - exp(-below * frame.heightFog.y));
 }
 

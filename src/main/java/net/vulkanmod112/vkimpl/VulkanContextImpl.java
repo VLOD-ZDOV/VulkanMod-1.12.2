@@ -1162,11 +1162,12 @@ public final class VulkanContextImpl implements VulkanBridge {
     }
 
     @Override
-    public synchronized void updateWeather(float rainStrength) {
+    public synchronized void updateWeather(float rainStrength, int seaLevel) {
         if (!initialized || !interopCapable) {
             return;
         }
         terrainRenderer().setRainStrength(rainStrength);
+        terrainRenderer().setSeaLevel(seaLevel);
     }
 
     @Override

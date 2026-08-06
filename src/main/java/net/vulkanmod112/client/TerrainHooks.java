@@ -333,7 +333,8 @@ public final class TerrainHooks {
                 bridge.updateDynamicLights(DynamicLights.lights(), DynamicLights.count());
                 captureSun(mc);
                 bridge.updateSun(SUN);
-                bridge.updateWeather(rainStrength(mc));
+                bridge.updateWeather(rainStrength(mc),
+                        mc.world == null ? 63 : mc.world.getSeaLevel());
                 if (lightmapColors != null) {
                     checkLightmapStillOurs();
                     bridge.updateLightmapData(lightmapColors);

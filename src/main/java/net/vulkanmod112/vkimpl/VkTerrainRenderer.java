@@ -5207,6 +5207,14 @@ final class VkTerrainRenderer {
         MemoryUtil.memPutFloat(base + 1000, wetSurfaces * rainStrength);
         // w: how far the fog leans towards the sun's colour.
         MemoryUtil.memPutFloat(base + 1004, sunHaze);
+        // vec4 world at 1008.
+        //
+        // x: how far the camera is above this world's sea level. The height fog
+        // needs the fragment's own height, and a fragment only knows where it
+        // is relative to the eye — this one number turns the second into the
+        // first, and it is a number rather than a coordinate, so it stays exact
+        // however far out the world runs.
+        MemoryUtil.memPutFloat(base + 1008, (float) (viewWorldY - seaLevel));
     }
 
     /** How hard it is raining, 0 to 1; see VulkanBridge.updateWeather. */
@@ -5214,6 +5222,19 @@ final class VkTerrainRenderer {
 
     synchronized void setRainStrength(float value) {
         rainStrength = value < 0.0f ? 0.0f : (value > 1.0f ? 1.0f : value);
+    }
+
+    /**
+     * Where this world puts the sea, which is what the height fog measures from.
+     *
+     * Sixty-three in the overworld and whatever a dimension mod says elsewhere,
+     * so the fog pools at the bottom of that world rather than at the bottom of
+     * the overworld's.
+     */
+    private volatile float seaLevel = 63.0f;
+
+    synchronized void setSeaLevel(int level) {
+        seaLevel = level;
     }
 
     /**

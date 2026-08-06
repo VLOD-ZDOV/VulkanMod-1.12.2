@@ -247,7 +247,7 @@ public interface VulkanBridge {
      * already put it, and this is not in OpenGL at all. It is here because the
      * shader cannot ask the world anything.
      */
-    void updateWeather(float rainStrength);
+    void updateWeather(float rainStrength, int seaLevel);
 
     boolean drawsSprites();
 
