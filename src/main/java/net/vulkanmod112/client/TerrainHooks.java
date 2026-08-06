@@ -81,7 +81,19 @@ public final class TerrainHooks {
     private static int[] chunkData = new int[1024];
 
     private static long framesDrawn;
-    private static int lastChunksDrawn;
+    /**
+     * Chunks drawn in the opaque layer, and chunk-layers drawn across all four.
+     *
+     * Two numbers because they answer two questions, and for a while they were
+     * one. The line printed "11018 of 4020 chunks vanilla listed" on a real
+     * machine: the first was the sum over every layer, the second was the list
+     * for the opaque layer alone, and the sentence between them claimed they
+     * were comparable. A count that exceeds the total it is quoted against
+     * reads as a broken renderer — and this is the first line anyone is asked
+     * to look at when the world does not appear.
+     */
+    private static int lastSolidDrawn;
+    private static int lastLayerDraws;
     /** Size of the list vanilla handed us for the opaque layer, before we touched it. */
     private static int lastVanillaChunks;
 
@@ -218,8 +230,12 @@ public final class TerrainHooks {
         // A world that is missing with the two far apart is ours to fix; with
         // the two equal and both small, vanilla decided that before we saw it,
         // and the search to look at is the visibility walk.
-        return "terrain: Vulkan, " + lastChunksDrawn + " of " + lastVanillaChunks
-                + " chunks vanilla listed, frame " + framesDrawn;
+        // The comparable pair first — drawn against listed, both for the opaque
+        // layer — and the four-layer total named as what it is rather than
+        // left to be read as the same kind of thing.
+        return "terrain: Vulkan, " + lastSolidDrawn + " of " + lastVanillaChunks
+                + " solid chunks drawn, " + lastLayerDraws
+                + " chunk-layers across all four, frame " + framesDrawn;
     }
 
     /**
@@ -422,9 +438,10 @@ public final class TerrainHooks {
             chunkData[i++] = pos.getZ();
         }
         if (layer == BlockRenderLayer.SOLID) {
-            lastChunksDrawn = i / 4;
+            lastSolidDrawn = i / 4;
+            lastLayerDraws = i / 4;
         } else {
-            lastChunksDrawn += i / 4;
+            lastLayerDraws += i / 4;
         }
         return i / 4;
     }
