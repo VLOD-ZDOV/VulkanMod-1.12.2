@@ -12,7 +12,15 @@ Experimental Vulkan terrain renderer for Minecraft Forge 1.12.2. Minecraft still
 - Particles, rain and snow drawn in Vulkan, riding the translucent pass rather than opening one of their own.
 - Optional ray-traced shadows from the sun, from carried lights, from burning creatures and from the light-emitting blocks already in the world, with frame averaging to turn one ray per pixel into a soft edge. Needs `VK_KHR_acceleration_structure` and `VK_KHR_ray_query`; without them the settings do nothing and say so.
 - Optional water refraction, and a round sun and moon drawn at runtime rather than shipped as files.
-- Vanilla OpenGL remains responsible for entities, tile entities, the sky and the GUI.
+- Optional surface effects, each off by default: ice that gathers the sky, caustics on the bed of shallow water, rain that darkens and wets upward faces, fog that leans towards the sun, vanilla clouds tinted with the sky they hang in, and a sun and moon glint on water that fades out with distance. The glint, the ice and the caustics are deliberately absent from the traced shader and say so rather than doing nothing.
+- Optional grading of the finished frame, applied on the marker the game raises once the world is complete, so it reaches entities, particles and weather as well as terrain and stops before the hand and the interface.
+- Optional client-side time of day and weather, affecting what is drawn and nothing else.
+- Optional Vulkan drawing of living creatures, in a subpass of their own so they hide one another by depth rather than by draw order, shaded with the same two directional lights the game uses. Tile entities, the sky and the GUI stay with vanilla OpenGL.
+- Optional ray-traced shadows shaped like the creature casting them, replacing vanilla's round blur — and only while there is really something in the acceleration structure to cast one.
+- Optional effects over the finished frame, which reach whatever drew into it, this mod's terrain and other mods' content alike: occlusion in the corners of the whole scene, and grading.
+- Optional light through a canopy, where a leaf lets a shadow ray past in proportion to how much of the quad is holes, rather than stopping it like stone.
+- Optional depth in water — absorption along the path light travelled, so red goes first and a puddle stops looking like an ocean — with foam where the water is thinnest.
+- Optional sixteen bits a channel on this renderer's own targets, behind a switch, with the driver asked first.
 - If Vulkan, required driver extensions, or terrain rendering fail, the game falls back to vanilla OpenGL rather than crashing.
 - Video Settings includes a **VulkanMod112 Settings...** page with presets, a geometry budget, per-setting CPU/GPU/VRAM costs and a render-distance slider up to 64 chunks, or 128 with Extreme Render Distance turned on.
 - Hold-to-zoom on **C** (rebindable under Controls), with mouse sensitivity scaled to match.
@@ -23,7 +31,8 @@ This is not yet a complete replacement for the modern VulkanMod renderer.
 
 - The world's geometry exists twice by default: once in the game's own OpenGL buffers and once in the Vulkan mirror. On a card with little memory to spare that is what caps the usable render distance, and it depends on how much geometry is actually in view rather than on the distance setting alone. **Drop Vanilla Chunk Buffers** removes the duplicate and is on by default; switching it either way rebuilds the world. The settings header shows the memory the GPU reports, and the diagnostics log shows what the mirror is using.
 - Chunk building and uploading dominate the frame while the camera moves at high render distances. Every chunk is still uploaded twice — once by the game to OpenGL, once here to Vulkan — but this mod's copy now happens on the thread that built the chunk rather than on the thread that draws, so it no longer competes for the per-frame upload budget the game runs on the render thread.
-- Entities, the sky and the GUI are still drawn by vanilla OpenGL, so no effect here reaches them: a burning creature does not glow, casts nothing into the corner it stands in, and appears in no reflection. Drawing entities in Vulkan is started and switched off — the pass they would go in cannot write depth, and the switch says so.
+- Tile entities, the sky and the GUI are still drawn by vanilla OpenGL. Living creatures can be drawn here instead, which is what gives them a shadow of their own and puts them in the depth the water reflects against — but a mod that builds its models its own way rather than out of the game's model parts is invisible to that path and stays with vanilla. A burning creature still does not glow: what glows is recorded per block while a chunk is built, and a creature is not a block. The effects that run over the finished frame — occlusion and grading — do reach everything, because they read the picture rather than the geometry.
+- The red flash when something is hurt and the shimmer on enchanted armour are missing from the Vulkan creature path, and the switch says so.
 - The item model held in first person is not lit by dynamic lights, only what it lights is.
 
 ## Requirements
@@ -59,6 +68,8 @@ Useful JVM properties:
 - `-Dvulkanmod112.rayTracing=true` — build acceleration structures over the terrain without opening the menu.
 - `-Dvulkanmod112.noAtlasAnimations=true` — stop uploading animated block textures, to tell that path apart from another when something goes wrong.
 - `-Dvulkanmod112.slowChunkMs=N` — how long a chunk build has to take before it is named in the log. 100 by default.
+- `-Dvulkanmod112.rayTracingFoliage=false` — keep leaves out of the acceleration structures, so a canopy casts no shadow. Halves what the structures hold, for a machine where building them costs more than the shadow is worth.
+- `-Dvulkanmod112.javaCeiling=NN` — the newest Java version the bundled LWJGL is allowed to run on. What actually decides is the JNI version the JVM reports, which is written into the log at startup; this exists for trying a JVM newer than any that has been checked here.
 
 ## In-game settings
 
@@ -85,6 +96,8 @@ every active renderer path, the frame cost breakdown and resource counts.
 OptiFine, legacy shader mods and Sodium-derived renderers for 1.12.2 — Celeritas, and Actinium which ships it — replace the same renderer classes this mod rewrites. When one of them is installed, the terrain mixins are not registered at all, so the game boots on that renderer while this mod's settings screen and game-side optimisations stay active. Sharing terrain rendering between the two is not possible: the vertex format and pass order differ, and with a shader pack loaded the format changes again.
 
 Any Forge build for 1.12.2 works; the only hard dependency is MixinBooter 10.7 or newer, which Forge now reports itself if missing.
+
+Cleanroom is supported and tested: the renderer starts, draws, and its mod list picks up this mod's logo, licence and issue tracker from `mcmod.info`. That loader runs a modern JVM and an LWJGL of its own, which is what `-Dvulkanmod112.javaCeiling` and the private prefix the native libraries are unpacked under exist for.
 
 A renderer replacement this build has not heard of can be named without waiting for a release: `-Dvulkanmod112.extraRendererMarkers=part-of-its-jar-name` makes this mod stand aside for it.
 

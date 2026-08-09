@@ -8,6 +8,50 @@ rather than crashing.
 
 ## Done
 
+### 0.9.0
+
+- **The whole picture is graded**, not only the blocks. It runs on the marker the game raises once
+  the world is finished in full, so it reaches terrain, creatures, particles, weather and water
+  together and stops before the hand and the interface.
+- **Effects on the surfaces of the world**, each off by default: ice that gathers the sky, light
+  banding on the bed of shallow water, rain that darkens and wets what it lands on, fog that leans
+  warm towards the sun, clouds that take the colour of the sky they hang in, and the sun — and at
+  night the moon — glinting off water. The glint fades out with distance rather than growing as
+  you climb, and is left out of the traced shader, where a term of its shape once cost the
+  graphics device.
+- **Tall plants, leaves, cobwebs, vines and sugar cane move in the wind.** Each was standing still
+  for a reason of its own, and each needed a different answer than the rule that moves the top of
+  a plant.
+- **A time of day and a weather of your own**, on this screen only. Nothing is sent to a server,
+  nothing is written to the world, and a storm the server believes in still charges a creeper.
+- **A budget for explosion particles**, and the primed TNT cube recorded once instead of rebuilt
+  per charge per frame.
+- **Ray tracing and shaders have pages of their own**, a key that steps through the saved settings
+  profiles, the frame time graph in any of the four corners, and two sliders for the offscreen
+  chunk preloader that used to be constants in the source.
+- **Living creatures can be drawn by Vulkan**, in a subpass of their own — which is what was
+  missing, rather than anything about the drawing: the pass they used to go in declares its depth
+  read-only, because the water shader samples that same image. They hide one another properly
+  now, and they are lit the way the game lights them. Experimental, and the switch names what is
+  still missing.
+- **A creature casts a shadow of its own shape** instead of the same round blur vanilla puts
+  under a chicken and a horse alike. The circle only goes when there is really something in the
+  structure to replace it.
+- **Light comes through a canopy.** A ray reads no textures, so a leaf used to stop a shadow the
+  way stone does and a tree threw a solid slab of shade. A quad is asked how much of it is holes
+  instead of where they are, and light passes with that probability.
+- **Water has a depth**, so a puddle and an ocean stop looking alike — red is absorbed within a
+  block or two and blue survives — with foam where the water is thinnest.
+- **The whole scene gets its corners darkened**, not only the blocks: the pass reads the depth of
+  the finished frame, so a chest, a mob and another mod's machine are all shaded by it.
+- **The sky is shaded by where you are actually looking** rather than by the height of the pixel
+  on the screen, and warms towards the sun near the horizon.
+- Fixed: the renderer refused to start on any modern Java, over a limit that was not real; this
+  mod's copy of LWJGL collided with a loader shipping its own; height fog was measured from the
+  camera rather than from the sea; the mouse wheel did not scroll these screens on Cleanroom; a
+  settings change could invalidate the frame being recorded; the Beautiful preset named eight
+  effects out of eighteen and none of what they all stand on.
+
 ### 0.8.0
 
 - **Ray-traced shadows** from the sun, from a torch in your hand, from a creature that is on fire
@@ -121,11 +165,13 @@ rather than crashing.
 
 In the order they are likely to be worth doing.
 
-- **Ray tracing**, for 0.8.0. The obstacle is named under "Not planned" below and has not gone
-  away — it is a question of paying for it deliberately rather than of whether it can be done.
-- **Entities and block entities.** The largest part of the frame now that the visibility search
-  has been dealt with, and the one change that would improve every effect above at once: the
-  glow, the occlusion and the reflections all stop at the edge of what this renderer draws.
+- **Finishing the creatures.** They are drawn here now, and two things they had under vanilla are
+  not back yet: the red flash when something is hurt, and the shimmer on enchanted armour.
+- **Block entities**, which are still vanilla's — chests, signs and every mod's machine. They are
+  drawn by code of their own rather than out of model parts, which is the wall this path reaches
+  rather than a matter of effort.
+- **Contact shadows and volumetric light**, both over the finished frame like the occlusion
+  above, so they reach whatever drew into it rather than only this renderer's blocks.
 - **Smart animated textures** — updating only the animated blocks actually in view, instead of
   the all-or-nothing switch that exists today.
 - **Connected glass textures.**
@@ -134,10 +180,13 @@ In the order they are likely to be worth doing.
 
 ## Not planned
 
-- **Ray tracing in 0.7.** Moved to 0.8.0 rather than dropped. Not for want of hardware — the obstacle is that a chunk's acceleration
-  structure has to be rebuilt whenever the chunk is, which is constantly, and chunk rebuilding is
-  already the largest cost in a moving frame. The rays would also not see entities, particles or
-  the sky, because this renderer does not draw them, so shadows would ignore every mob.
+- **Ray-traced reflections and global illumination.** Shadows shipped in 0.8.0; these do not
+  follow from them. A chunk's acceleration structure has to be rebuilt whenever the chunk is,
+  which is constantly, and chunk rebuilding is already the largest cost in a moving frame — the
+  shadows pay that price for one ray, and a reflection asks for many. The rays also do not see
+  entities, particles or the sky, because this renderer does not draw them, so a world reflected
+  without a single mob in it reads as a fault rather than as an effect. Reflections wait on
+  entities; entities are above.
 - **Shader packs.** A different project rather than a feature — the vertex format, the passes
   and the whole pipeline change with a pack loaded.
 - **Replacing the entire renderer.** Entities, particles, the sky and the interface stay on the
