@@ -388,15 +388,25 @@ public final class MaterialRuns {
             // the drift. At the amplitude leaves use that is a third of a
             // pixel and the thing nobody notices; at a large one it would be
             // the thing everybody notices, which is why they share a reach.
-            if (block instanceof net.minecraft.block.BlockVine
-                    || block instanceof net.minecraft.block.BlockReed) {
+            //
+            // Reeds were given this and are taken back out of it, from
+            // looking at them: a vine is a mat hanging on a wall and drifts
+            // like a leaf, but a cane is a rigid stick, and a rigid stick
+            // sliding sideways as a whole reads as the stick being moved
+            // rather than as the stick bending. What would look right is the
+            // bend, and the bend is exactly what a column of identical block
+            // states cannot express — so standing still is the honest answer
+            // here, not a smaller amplitude.
+            if (block instanceof net.minecraft.block.BlockVine) {
                 return LEAVES;
             }
             boolean still =
+                    // A stick, not a mat: see above.
+                    block instanceof net.minecraft.block.BlockReed
                     // Taller than one block: the top of the lower half and the
                     // bottom of the upper half are at the same height, so only
                     // the first would move and the stem would come apart.
-                    block instanceof net.minecraft.block.BlockDoublePlant
+                    || block instanceof net.minecraft.block.BlockDoublePlant
                     // Flat on the water: all four of its corners are level, and
                     // the rule that moves the top pair would tear it in half.
                     || block instanceof net.minecraft.block.BlockLilyPad
