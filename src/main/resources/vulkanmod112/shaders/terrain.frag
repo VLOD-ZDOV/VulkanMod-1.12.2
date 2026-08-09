@@ -222,15 +222,44 @@ const float ICE_MIRROR_MAX = 0.55;
  * pull the bright parts into cells with dark lines between them, which is what
  * the eye recognises; the alternative is a smooth mottling that reads as dirty
  * water.
+ *
+ * The edge is a fraction of the steepest slope the current wave setting can
+ * produce rather than an absolute tilt — at 2.6 a band is fully dark by the
+ * time the surface reaches about four tenths of that. Absolute is what the
+ * first version used, and at any wave strength anyone plays with, the water
+ * never got near it.
  */
+/**
+ * What a block of water takes out of the light passing through it.
+ *
+ * Red first, then green, then blue, which is why deep water is blue and why a
+ * red thing a few blocks down looks grey. The numbers are chosen for a game
+ * whose seas are a handful of blocks deep rather than from any table: the real
+ * coefficients would do nothing visible over five blocks.
+ */
+const vec3 WATER_ABSORB = vec3(0.42, 0.16, 0.09);
+/** What is left when the bed is too far down to contribute anything at all. */
+const vec3 WATER_DEEP = vec3(0.05, 0.16, 0.24);
+/** How thin the water has to be for foam, in blocks, and how white it gets. */
+const float FOAM_REACH = 1.6;
+const float FOAM_MAX = 0.55;
+
 const float CAUSTIC_EDGE = 2.6;
 const float CAUSTIC_GAIN = 0.85;
 
 /** How tight the glint is: water ripples broadly, a sheet of ice sharply. */
 const float WATER_GLINT_SHARPNESS = 48.0;
 const float ICE_GLINT_SHARPNESS = 96.0;
-/** Full strength at the setting's maximum. Above this the sun becomes a lamp. */
-const float GLINT_MAX = 2.5;
+/**
+ * Full strength at the setting's maximum. Above this the sun becomes a lamp.
+ *
+ * Brought down from 2.5, which put the core of the highlight far enough over
+ * white that it clipped to a flat sheet of it: this frame is eight bits a
+ * channel with no headroom above one, so everything spent past that buys
+ * nothing and costs the shape of the thing. What is wanted is a bright core
+ * that still has ripple visible inside it.
+ */
+const float GLINT_MAX = 1.8;
 /** Not white: sunlight is warm, and a neutral glint reads as a specular bug. */
 const vec3 SUN_TINT = vec3(1.0, 0.96, 0.88);
 /** Moonlight is the same sunlight twice reflected: cooler, and far dimmer. */
@@ -415,6 +444,111 @@ float ditherValue(vec2 pixel) {
 #define SUN_SHADOWS_WANTED false
 #endif
 
+#ifdef RAY_QUERY
+/**
+ * What a structure is made of, matching the kinds the Java side writes into
+ * each instance's custom index.
+ */
+const int KIND_SOLID = 0;
+const int KIND_FOLIAGE = 1;
+const int KIND_CUTOUT = 2;
+
+/**
+ * How much of the light a quad of each kind stops, as a probability.
+ *
+ * A ray cannot read a texture — not without carrying the atlas, the UVs and a
+ * buffer address into every shadow test, which is a great deal of machinery on
+ * the one path in this shader with no headroom left. So a leaf quad is not
+ * asked *where* its holes are; it is asked *how much* of it is holes, and light
+ * passes with that probability. Averaged over the frames the accumulation pass
+ * already blends, a canopy comes out dappled rather than solid, which is the
+ * thing that was missing.
+ *
+ * The numbers are what the textures look like: a leaf block is mostly leaf with
+ * gaps, a tuft of grass is mostly gap with a few blades in it.
+ */
+const float FOLIAGE_STOPS = 0.72;
+const float CUTOUT_STOPS = 0.34;
+
+/**
+ * A number that belongs to this quad and this pixel, and moves between frames.
+ *
+ * Per primitive, so the speckle sits on the leaf rather than swimming across
+ * it when the camera turns. Per pixel, so neighbouring pixels do not all decide
+ * the same way and turn the dapple into a hard edge. And offset by the dither
+ * rotation, which is nonzero exactly when the accumulation pass is running —
+ * so where the frames are being averaged this varies and dissolves into shade,
+ * and where they are not it holds still instead of boiling.
+ */
+float leafChance(uint primitive, vec2 pixel) {
+    vec3 seed = vec3(float(primitive & 0xFFFFu), pixel);
+    return fract(sin(dot(seed, vec3(12.9898, 78.233, 37.719))) * 43758.5453
+            + frame.lightShadow.x);
+}
+
+/**
+ * Whether anything stops a ray between two points.
+ *
+ * The loop is what makes see-through geometry possible at all. With everything
+ * opaque the traversal commits the first thing it meets and never comes back to
+ * ask — which is correct for stone and wrong for every leaf in the world. Now
+ * anything that is not solid arrives as a candidate this shader may refuse, and
+ * the refusal is what light coming through a canopy is.
+ *
+ * Solid geometry never reaches the loop: it is marked opaque in the structure,
+ * so the driver commits it without asking, exactly as before.
+ */
+bool rayBlocked(vec3 from, vec3 direction, float start, float reach) {
+    rayQueryEXT query;
+    // BLEND keeps the old, cheaper test, and that is a measurement rather than
+    // a preference: the loop below costs the traced translucent pipeline 6% more
+    // code, and that pipeline — the one carrying the water, the marched
+    // reflection and the traced lights — is where this renderer lost the
+    // graphics device once, for 7.7%. What is bought by paying it there is
+    // dappled light on the surface of a pond under a tree; what is bought on
+    // the opaque pipelines is dappled light on the whole forest floor. The
+    // constant is a specialisation constant, so the driver removes whichever
+    // half does not apply.
+    if (BLEND) {
+        rayQueryInitializeEXT(query, terrainStructure,
+                gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT,
+                0xFFu, from, start, direction, reach);
+        rayQueryProceedEXT(query);
+        return rayQueryGetIntersectionTypeEXT(query, true)
+                != gl_RayQueryCommittedIntersectionNoneEXT;
+    }
+    rayQueryInitializeEXT(query, terrainStructure,
+            // No gl_RayFlagsOpaqueEXT here, and that is the whole change: as a
+            // ray flag it overrules what each structure says about itself, so
+            // with it set the loop below could never run.
+            gl_RayFlagsTerminateOnFirstHitEXT,
+            0xFFu, from, start, direction, reach);
+    // frame.world.y: how much light leaves are allowed to let through, 0 for
+    // the old behaviour. A switch rather than a rebuild, because a slider that
+    // recompiles a pipeline is a slider that stutters.
+    float seeThrough = frame.world.y;
+    while (rayQueryProceedEXT(query)) {
+        if (seeThrough <= 0.0) {
+            rayQueryConfirmIntersectionEXT(query);
+            continue;
+        }
+        int kind = rayQueryGetIntersectionInstanceCustomIndexEXT(query, false);
+        float stops = kind == KIND_FOLIAGE ? FOLIAGE_STOPS
+                : (kind == KIND_CUTOUT ? CUTOUT_STOPS : 1.0);
+        // Eased towards opaque as the setting comes down, so the slider moves
+        // the shade from dappled to solid rather than switching between two
+        // pictures.
+        stops = mix(1.0, stops, seeThrough);
+        uint primitive = uint(rayQueryGetIntersectionPrimitiveIndexEXT(query, false));
+        if (leafChance(primitive, gl_FragCoord.xy) < stops) {
+            rayQueryConfirmIntersectionEXT(query);
+        }
+    }
+    return rayQueryGetIntersectionTypeEXT(query, true)
+            != gl_RayQueryCommittedIntersectionNoneEXT;
+}
+#endif
+
 /**
  * How much of the sun this fragment is denied, 0 to 1.
  *
@@ -486,14 +620,7 @@ float sunShadow(vec3 normal) {
         float radius = sqrt(ditherValue(gl_FragCoord.xy + 5.588238)) * spread;
         direction = normalize(direction + (cos(angle) * tangent + sin(angle) * bitangent) * radius);
     }
-    rayQueryEXT query;
-    rayQueryInitializeEXT(query, terrainStructure,
-            gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT,
-            0xFFu, from, 0.01, direction, reach);
-    rayQueryProceedEXT(query);
-    bool blocked = rayQueryGetIntersectionTypeEXT(query, true)
-            != gl_RayQueryCommittedIntersectionNoneEXT;
-    return blocked ? frame.sun.w * fade : 0.0;
+    return rayBlocked(from, direction, 0.01, reach) ? frame.sun.w * fade : 0.0;
 #else
     return 0.0;
 #endif
@@ -558,17 +685,12 @@ float lightBlocked(vec3 normal, vec3 toSource, float distance) {
     // the ground, which is what the second term is for.
     vec3 from = vRelative + direction * 0.05
             + normal * (facing > 0.0 ? (0.02 + 0.14 * (1.0 - facing)) : 0.0);
-    rayQueryEXT query;
-    rayQueryInitializeEXT(query, terrainStructure,
-            gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT,
-            // Stopping short of the source, and never inside half of the way:
-            // a torch is a piece of geometry standing in front of the light it
-            // emits, and a fixed margin that is right for a lamp across the
-            // room is most of the distance to one held in the hand.
-            0xFFu, from, 0.02, direction, max(travel - 0.5, travel * 0.5));
-    rayQueryProceedEXT(query);
-    return rayQueryGetIntersectionTypeEXT(query, true)
-            != gl_RayQueryCommittedIntersectionNoneEXT ? 1.0 : 0.0;
+    // Stopping short of the source, and never inside half of the way: a torch
+    // is a piece of geometry standing in front of the light it emits, and a
+    // fixed margin that is right for a lamp across the room is most of the
+    // distance to one held in the hand.
+    return rayBlocked(from, direction, 0.02, max(travel - 0.5, travel * 0.5))
+            ? 1.0 : 0.0;
 #else
     return 0.0;
 #endif
@@ -1023,6 +1145,11 @@ void main() {
     vec3 normal = (BLEND || (lightCount > 0 && directional > 0.0) || SUN_SHADOWS_WANTED
             || (lightCount > 0 && frame.sunParams.w > 0.0) || frame.surface.z > 0.0)
             ? faceNormal() : vec3(0.0, 1.0, 0.0);
+    // Kept before the bending below, because two different questions are being
+    // asked of this vector and only one of them is about light. Which way the
+    // geometry actually points is a fact about the block, and rain lands on it
+    // rather than on the direction a tuft of grass is shaded from.
+    vec3 geometricNormal = normal;
     // After the derivatives and outside their branch: this is arithmetic on the
     // answer, not another question about the neighbourhood.
     if (foliage) {
@@ -1071,6 +1198,53 @@ void main() {
     int maxTracedLights = int(frame.sunParams.w);
     int tracedLights = 0;
     float tracedBlock = 0.0;
+    // Which sources are allowed a traced shadow, decided by distance to this
+    // surface rather than by their place in the list.
+    //
+    // The list arrives sorted by distance to the *camera*, and the loop below
+    // used to take the first few of it that reached this fragment at all. So
+    // which torch cast a shadow was a fact about where the player stood: walk
+    // one block, the order changes, a different torch is chosen, and the shadow
+    // on the wall in front of you appears or vanishes without anything in the
+    // scene having moved. Reported as exactly that — shadows coming and going
+    // from a step up or down.
+    //
+    // The nearest source to a surface is the one whose shadow the eye expects,
+    // and it does not change when the player moves a block away. One pass to
+    // find the cutoff distance, which costs the same arithmetic the loop below
+    // already does and no memory.
+    float tracedCutoff = 1.0e9;
+    // !BLEND is not tidiness, it is the whole reason this is affordable. BLEND
+    // is a specialisation constant, so the driver folds this block out of the
+    // translucent pipeline completely — and that pipeline is the one carrying
+    // the traced shadows, the marched reflection and the water, the one place
+    // in this shader with no headroom left. What is being fixed here is torch
+    // shadows on blocks, which live in the opaque pipelines; water gains
+    // nothing from it either way. Measured: +3.0% of the traced translucent
+    // pipeline with this in it, zero with the gate.
+    if (!BLEND && maxTracedLights > 0 && maxTracedLights < lightCount) {
+        // One pass, not one per allowed light: this sits in the branch that
+        // carries the traced shadows, the marched reflection and the water, and
+        // that branch is where this renderer lost the graphics device once. A
+        // selection of the exact nearest few costs a pass each and measured
+        // +4.2% of the traced translucent pipeline; this costs +1% and answers
+        // the same question well enough — the sources close to the surface are
+        // in, the ones far behind them are out, and neither answer moves when
+        // the player takes a step.
+        float nearest = 1.0e9;
+        for (int i = 0; i < lightCount; ++i) {
+            vec4 source = frame.lights[i];
+            float d = length(source.xyz - vRelative);
+            if (source.w - d > 0.0) {
+                nearest = min(nearest, d);
+            }
+        }
+        // Half again as far as the closest source that reaches here. Anything
+        // inside that is a light this surface is genuinely near; anything past
+        // it was being traced only because it happened to come first in a list
+        // sorted by where the camera stands.
+        tracedCutoff = nearest * 1.6;
+    }
     for (int i = 0; i < lightCount; ++i) {
         vec4 source = frame.lights[i];
         vec3 toSource = source.xyz - vRelative;
@@ -1087,7 +1261,7 @@ void main() {
             // to go from vanilla's answer towards this one.
             level *= mix(1.0, directionalTerm(normal, toSource, distance, backFace), directional);
         }
-        if (level > 0.0 && tracedLights < maxTracedLights) {
+        if (level > 0.0 && tracedLights < maxTracedLights && distance <= tracedCutoff) {
             // Counted rather than bounded by the loop: a fragment usually has
             // one light close enough to matter and sometimes none, so the limit
             // is a ceiling on the unlucky fragment and not a cost every one
@@ -1168,8 +1342,17 @@ void main() {
     // the marched reflection, the one path in this shader with no headroom
     // left. Water and ice live only in that pass anyway and are excluded here
     // by their own nature rather than by a test.
-    if (!BLEND && frame.surface.z > 0.0 && normal.y > 0.9
-            && material != MATERIAL_LAVA) {
+    //
+    // Measured against the geometric normal rather than the shaded one, and
+    // that is not a detail. Foliage is lit as a volume here: the normal of a
+    // tuft of grass is bent most of the way to standing up, because that is
+    // what makes a torch held above it light it. Rain then landed on every
+    // blade of grass, every flower and every leaf as though each were a floor
+    // — a field turning blue in the rain, and tree canopies bluest of all.
+    // The crossed quads a plant is made of are vertical; the bend is about
+    // where light comes from, not about what is above the surface.
+    if (!BLEND && frame.surface.z > 0.0 && geometricNormal.y > 0.9
+            && !foliage && material != MATERIAL_LAVA) {
         float wet = frame.surface.z * vLight.y;
         shaded *= 1.0 - WET_DARKEN * wet;
         // The same Fresnel the water uses, against the same fog colour that
@@ -1179,7 +1362,8 @@ void main() {
         // captured, possibly in another dimension, and a floor sheened with a
         // remembered sky is worse than a floor that only darkens.
         if (frame.fogColor.a > 0.5) {
-            shaded = mix(shaded, frame.fogColor.rgb, fresnel(normal) * wet * WET_SHEEN);
+            shaded = mix(shaded, frame.fogColor.rgb,
+                    fresnel(geometricNormal) * wet * WET_SHEEN);
         }
     }
 
@@ -1303,13 +1487,83 @@ void main() {
                 // Not built into the tracing variant of this shader. See
                 // WHY_NOT_WITH_RAY_QUERY.
 #ifndef RAY_QUERY
-                if (frame.surface.y > 0.0) {
-                    float tilted = clamp(dot(normal.xz, normal.xz)
-                            * (CAUSTIC_EDGE * CAUSTIC_EDGE), 0.0, 1.0);
+                // Waves are a condition rather than a nicety: the pattern is
+                // read out of the slope of the wave, so with the waves off
+                // there is no slope, no pattern, and all this would do is make
+                // the riverbed uniformly brighter.
+                if (frame.surface.y > 0.0 && frame.water.x > 0.0) {
+                    // Measured against the steepest slope this wave setting can
+                    // actually produce, which is the fix for the first version:
+                    // it compared the tilt against a fixed number, and at the
+                    // wave strengths anybody uses the surface never came near
+                    // it. Every fragment landed in the flat part of the curve,
+                    // the whole bed brightened by the same amount, and the
+                    // cells and dark lines that are the entire point of the
+                    // effect were a few per cent of contrast that nobody could
+                    // see. Now the pattern keeps its shape at any wave setting,
+                    // and the setting decides how the water moves rather than
+                    // whether this is visible at all.
+                    float reach = max(WAVE_SLOPE * frame.water.x, 1.0e-3);
+                    float tilted = clamp(length(normal.xz) * (CAUSTIC_EDGE / reach),
+                            0.0, 1.0);
                     // Not named "flat": that is a storage qualifier here, and
                     // the error it gives names the line after the one it is on.
                     float level = 1.0 - tilted;
                     behind *= 1.0 + frame.surface.y * CAUSTIC_GAIN * level * level;
+                }
+#endif
+                // Not built into the tracing variant, and measured rather
+                // than assumed: absorption and foam together cost the traced
+                // translucent pipeline 5.3% more code — the same pass, and
+                // very nearly the same figure, that lost the graphics device
+                // when the glint was added to it. Ice, caustics and the glint
+                // are all out of that variant for the same reason, and the
+                // settings screen says so rather than leaving a slider that
+                // appears to do nothing. See WHY_NOT_WITH_RAY_QUERY.
+#ifndef RAY_QUERY
+                // How much water the light came through, and what that does to
+                // it.
+                //
+                // This is the one thing a pond in this renderer never had, and
+                // it is the difference between water and a blue window: a
+                // puddle and an ocean were shaded identically, because nothing
+                // anywhere asked how deep the water was. Real water takes the
+                // long wavelengths out first — red goes within a metre or two,
+                // green survives further, blue further still — so shallow
+                // water shows the sand almost as it is and deep water is a
+                // colour of its own with nothing of the bed left in it.
+                //
+                // The thickness comes free: the depth of the bed is already
+                // being sampled a few lines up to decide whether the refracted
+                // sample is really behind the surface, and the depth of the
+                // surface is `here`. The difference between them, in blocks,
+                // is how much water is in the way.
+                float bedDepth = textureLod(sceneDepth, shifted, 0.0).r;
+                float through = max(distanceOf(bedDepth) - distanceOf(here), 0.0);
+                // Per block, and each channel its own. Not physical constants:
+                // the sea in this game is a handful of blocks deep, so the real
+                // ones would do nothing at all over that distance.
+                vec3 absorb = exp(-through * WATER_ABSORB);
+                behind = mix(WATER_DEEP * dot(behind, vec3(0.333)), behind, absorb);
+                // Foam where the water is shallow enough that the bed is nearly
+                // touching the surface, which along any shore is a band a
+                // couple of blocks wide. Rides on the same number: there is no
+                // test here for "is this the edge of the water", and there does
+                // not need to be, because the edge is where the water is
+                // thinnest.
+                // Driven by the refraction setting rather than one of its
+                // own: foam is a thing you see through the surface at the
+                // shore, so it lives and dies with seeing through the surface
+                // at all. `water.z` is not free — it carries the wave lattice.
+                if (frame.lightShadow.w > 0.0) {
+                    float shore = clamp(1.0 - through / FOAM_REACH, 0.0, 1.0);
+                    // Squared to keep it a band at the edge rather than a haze
+                    // over the whole shallows, and broken up by the same wave
+                    // slope the caustics use, so it moves with the surface
+                    // instead of lying on it like paint.
+                    float ripple = 0.6 + 0.4 * clamp(length(normal.xz) * 6.0, 0.0, 1.0);
+                    behind = mix(behind, vec3(1.0),
+                            shore * shore * ripple * frame.lightShadow.w * FOAM_MAX);
                 }
 #endif
                 // Exactly what the blend would have done, done here: the frame
@@ -1432,13 +1686,30 @@ void main() {
             bool byDay = frame.sun.y > 0.0;
             vec3 toLight = byDay ? frame.sun.xyz : -frame.sun.xyz;
             float above = byDay ? frame.sun.y : -frame.sun.y;
-            // The flat face for ice, the calmed ripple for water: a sheet of
-            // ice has no ripple, and its highlight is broad and sudden rather
-            // than scattered, which is what makes it read as ice.
+            // The full ripple for water, the flat face for ice.
+            //
+            // Not mirrorNormal, which is what this used at first and what made
+            // it wrong on the screen: that normal is deliberately calmed
+            // towards flat as the view flattens, because the Fresnel term is a
+            // cliff near grazing and the reflection bands without it. A
+            // highlight is not a reflection and wants the opposite. Calmed, the
+            // sea answers the sun as one smooth mirror would — a single
+            // straight column of white running to the horizon, hard-edged,
+            // with no ripple in it anywhere. The scatter *is* the effect: a
+            // glitter path is a great many separate facets each catching the
+            // sun for a moment, and the facets are exactly what the calming
+            // removes.
+            //
+            // Sky light gates it for the same reason it gates the ice sheen,
+            // and this was found in a screenshot rather than reasoned about:
+            // a sheet of ice in a sealed cave, no way out to the surface, with
+            // the sun's streak lying across it. The sun cannot reach a surface
+            // that receives no sky, and vanilla's own light map is the only
+            // thing here that knows the difference.
             float g = material == MATERIAL_WATER
-                    ? celestialGlint(mirrorNormal, WATER_GLINT_SHARPNESS, toLight, above)
+                    ? celestialGlint(normal, WATER_GLINT_SHARPNESS, toLight, above)
                     : celestialGlint(normal, ICE_GLINT_SHARPNESS, toLight, above);
-            g *= glintStrength * GLINT_MAX * (byDay ? 1.0 : MOON_SHARE);
+            g *= glintStrength * GLINT_MAX * vLight.y * (byDay ? 1.0 : MOON_SHARE);
             if (g > 0.0) {
                 shaded += (byDay ? SUN_TINT : MOON_TINT) * g;
                 // Raised with it, because the frame is premultiplied below: a
