@@ -6177,6 +6177,13 @@ final class VkTerrainRenderer {
         // How much light a leaf is allowed to let past a shadow ray, 0 for the
         // old behaviour where every quad stopped it like stone.
         MemoryUtil.memPutFloat(base + 1012, leafShadows);
+        // Whether the target this shader writes into can hold more than one.
+        // Read from the format that was actually granted rather than from the
+        // setting: the driver is allowed to refuse, and a highlight aimed at
+        // a headroom that was refused clips to a flat white patch, which is
+        // the exact complaint the lower ceiling exists to answer.
+        MemoryUtil.memPutFloat(base + 1016,
+                colourFormat == VK_FORMAT_R16G16B16A16_SFLOAT ? 1.0f : 0.0f);
     }
 
     /** How hard it is raining, 0 to 1; see VulkanBridge.updateWeather. */

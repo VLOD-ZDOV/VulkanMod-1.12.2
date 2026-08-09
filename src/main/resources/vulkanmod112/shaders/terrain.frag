@@ -253,13 +253,21 @@ const float ICE_GLINT_SHARPNESS = 96.0;
 /**
  * Full strength at the setting's maximum. Above this the sun becomes a lamp.
  *
- * Brought down from 2.5, which put the core of the highlight far enough over
- * white that it clipped to a flat sheet of it: this frame is eight bits a
- * channel with no headroom above one, so everything spent past that buys
- * nothing and costs the shape of the thing. What is wanted is a bright core
- * that still has ripple visible inside it.
+ * Two ceilings, because there are two frames this can land in.
+ *
+ * It was brought down from 2.5 once: that put the core of the highlight far
+ * enough over white that it clipped to a flat sheet of it, and in a frame of
+ * eight bits a channel everything spent past one buys nothing and costs the
+ * shape of the thing. What is wanted is a bright core with ripple still
+ * visible inside it.
+ *
+ * With headroom the opposite is true: a highlight held under one is a
+ * highlight that never reads as the sun, and the film curve at the end of
+ * the frame is there precisely to bring a number like four back down along a
+ * shoulder. So the ceiling follows the frame rather than being chosen once.
  */
-const float GLINT_MAX = 1.8;
+const float GLINT_MAX_LDR = 1.8;
+const float GLINT_MAX_HDR = 4.0;
 /** Not white: sunlight is warm, and a neutral glint reads as a specular bug. */
 const vec3 SUN_TINT = vec3(1.0, 0.96, 0.88);
 /** Moonlight is the same sunlight twice reflected: cooler, and far dimmer. */
@@ -523,6 +531,11 @@ bool rayBlocked(vec3 from, vec3 direction, float start, float reach) {
             // with it set the loop below could never run.
             gl_RayFlagsTerminateOnFirstHitEXT,
             0xFFu, from, start, direction, reach);
+    // frame.world.z: one when this renderer's own colour target has room above
+    // white in it, zero when it is eight bits a channel. What reads it is the
+    // ceiling of the sun's highlight, which has to be two different numbers
+    // for the two cases and cannot be told apart any other way from inside a
+    // shader.
     // frame.world.y: how much light leaves are allowed to let through, 0 for
     // the old behaviour. A switch rather than a rebuild, because a slider that
     // recompiles a pipeline is a slider that stutters.
@@ -1709,7 +1722,8 @@ void main() {
             float g = material == MATERIAL_WATER
                     ? celestialGlint(normal, WATER_GLINT_SHARPNESS, toLight, above)
                     : celestialGlint(normal, ICE_GLINT_SHARPNESS, toLight, above);
-            g *= glintStrength * GLINT_MAX * vLight.y * (byDay ? 1.0 : MOON_SHARE);
+            g *= glintStrength * mix(GLINT_MAX_LDR, GLINT_MAX_HDR, frame.world.z)
+                    * vLight.y * (byDay ? 1.0 : MOON_SHARE);
             if (g > 0.0) {
                 shaded += (byDay ? SUN_TINT : MOON_TINT) * g;
                 // Raised with it, because the frame is premultiplied below: a
