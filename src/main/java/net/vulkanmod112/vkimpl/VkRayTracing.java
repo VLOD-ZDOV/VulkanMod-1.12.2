@@ -161,6 +161,37 @@ final class VkRayTracing {
         float y;
         float z;
         long touchedFrame;
+        /** See {@link #KIND_SOLID}: what a ray is allowed to see through. */
+        int kind;
+    }
+
+    /**
+     * What a structure is made of, as far as a shadow ray is concerned.
+     *
+     * A ray does not read textures, so without this every leaf quad stops a ray
+     * as though it were stone — which is exactly what a canopy's shadow looked
+     * like: a solid block of shade under a tree that is mostly holes. The kind
+     * travels in the instance's custom index, twenty-four bits of which are
+     * free, and the shader turns it into how likely the quad is to stop light.
+     */
+    static final int KIND_SOLID = 0;
+    static final int KIND_FOLIAGE = 1;
+    static final int KIND_CUTOUT = 2;
+    static final int KIND_CREATURE = 3;
+
+    private int solidCount;
+    private int foliageEnd;
+
+    /**
+     * Where each kind ends in the list handed to {@link #update}.
+     *
+     * The renderer builds that list by joining the layers in a fixed order, so
+     * a position in it is the only thing that says what a chunk is made of —
+     * there is no room for a tag beside it and no need for one.
+     */
+    void setKindBounds(int solidCount, int foliageEnd) {
+        this.solidCount = solidCount;
+        this.foliageEnd = foliageEnd;
     }
 
     VkRayTracing(VulkanContextImpl ctx) {
@@ -204,6 +235,9 @@ final class VkRayTracing {
             buildFrame(chunks, chunkCount, mirror, frameIndex, viewX, viewY, viewZ);
         } catch (Throwable t) {
             broken = true;
+            // Told to the context as well, because what asks "is this session
+            // tracing" asks it there.
+            ctx.noteRayTracingBroken();
             LOGGER.error("Acceleration structures failed and are now off for this session; "
                     + "nothing else in the renderer depends on them", t);
         }
@@ -250,6 +284,8 @@ final class VkRayTracing {
             blas.y = (float) dy;
             blas.z = (float) dz;
             blas.touchedFrame = frameIndex;
+            blas.kind = c < solidCount ? KIND_SOLID
+                    : (c < foliageEnd ? KIND_FOLIAGE : KIND_CUTOUT);
             live.add(blas);
             // The version and not just the place and the length. Break one
             // block and a chunk usually keeps its length, and the allocator
@@ -271,11 +307,44 @@ final class VkRayTracing {
 
         dropUntouched(frameIndex);
 
+        // The creatures, if there are any and there is room for one more.
+        //
+        // Always stale, because a walking animal is different geometry every
+        // frame — there is nothing to compare against and no point looking.
+        // Counted outside the per-frame build budget: that budget exists to
+        // spread the cost of a filling world over several frames, and a shadow
+        // that appears on the third frame after the mob does would be worse
+        // than none.
+        boolean creatures = creatureVertices >= 4 && creatureAddress != 0
+                && live.size() < maxStructures;
+        // Recorded, because what takes vanilla's round shadow away has to ask
+        // whether anything replaced it. Three ways to end up here with nothing
+        // in the structure: no creature drawn by us this frame, a run of
+        // vertices that turned out not to be contiguous, and a full structure
+        // budget. In all three the mob would otherwise stand on nothing at all.
+        creaturesInStructure = creatures;
+        if (creatures) {
+            creatureBlas.x = 0.0f;
+            creatureBlas.y = 0.0f;
+            creatureBlas.z = 0.0f;
+            creatureBlas.touchedFrame = frameIndex;
+            // Opaque, and deliberately: a skin is opaque wherever it is drawn
+            // at all, and letting a ray through it at random would give a mob
+            // a shadow full of holes.
+            creatureBlas.kind = KIND_CREATURE;
+            creatureBlas.sourceOffset = creatureOffset;
+            creatureBlas.sourceSize = creatureVertices * VERTEX_STRIDE;
+            live.add(creatureBlas);
+        }
+
         long start = System.nanoTime();
         try (MemoryStack stack = stackPush()) {
             beginCommands(stack);
             for (Blas blas : toBuild) {
                 buildOne(stack, blas, geometryAddress);
+            }
+            if (creatures) {
+                buildOne(stack, creatureBlas, creatureAddress);
             }
             int instances = writeInstances(stack);
             if (instances > 0) {
@@ -336,7 +405,12 @@ final class VkRayTracing {
         geometry.get(0)
                 .sType(KHRAccelerationStructure.VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR)
                 .geometryType(KHRAccelerationStructure.VK_GEOMETRY_TYPE_TRIANGLES_KHR)
-                .flags(KHRAccelerationStructure.VK_GEOMETRY_OPAQUE_BIT_KHR);
+                // Opaque only where it is true. Marking a leaf quad opaque
+                // tells the driver it may stop a ray without asking anybody,
+                // and then no amount of work in the shader can put the holes
+                // back — the ray never comes back to be asked.
+                .flags(blas.kind == KIND_SOLID || blas.kind == KIND_CREATURE
+                        ? KHRAccelerationStructure.VK_GEOMETRY_OPAQUE_BIT_KHR : 0);
         geometry.get(0).geometry().triangles()
                 .sType(KHRAccelerationStructure
                         .VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR)
@@ -445,7 +519,9 @@ final class VkRayTracing {
             MemoryUtil.memPutFloat(at + 40, 1.0f);
             MemoryUtil.memPutFloat(at + 44, blas.z);
             // instanceCustomIndex 24 bits, mask 8 bits: visible to every ray.
-            MemoryUtil.memPutInt(at + 48, 0xFF000000);
+            // The low bits carry what this structure is made of, which is how
+            // the shader knows whether it may see through what it just hit.
+            MemoryUtil.memPutInt(at + 48, 0xFF000000 | (blas.kind & 0xFFFFFF));
             // shaderBindingTableRecordOffset 24 bits, flags 8 bits.
             MemoryUtil.memPutInt(at + 52, 0);
             MemoryUtil.memPutLong(at + 56, blas.address);
@@ -780,6 +856,38 @@ final class VkRayTracing {
     }
 
     /** Supplied by the terrain renderer, which owns the shared quad indices. */
+    /**
+     * The creatures of the frame, as one structure over one run of vertices.
+     *
+     * A mob is animated, so this is rebuilt every frame — and that is the whole
+     * cost, because it is one build for every creature on screen rather than
+     * one each. The geometry is already there: the same twenty-eight bytes a
+     * vertex the sprite pass draws from, positions first, in world axes
+     * relative to the camera, which is the space the chunk structures are in
+     * too. So the instance needs no transform of its own.
+     *
+     * What this buys is the shadow. Vanilla draws a round blur under every
+     * creature because it has no shadows at all; with the creature in the
+     * structure the sun casts a real one, shaped like the animal, from the same
+     * ray the terrain already uses. Nothing in the shader changes.
+     */
+    private long creatureAddress;
+    private long creatureOffset;
+    private int creatureVertices;
+    private volatile boolean creaturesInStructure;
+    private final Blas creatureBlas = new Blas();
+
+    /** Whether this frame's build actually put the creatures in a structure. */
+    boolean creaturesInStructure() {
+        return creaturesInStructure;
+    }
+
+    void setCreatureGeometry(long buffer, long byteOffset, int vertexCount) {
+        this.creatureAddress = buffer == 0 ? 0L : bufferAddress(buffer);
+        this.creatureOffset = byteOffset;
+        this.creatureVertices = this.creatureAddress == 0 ? 0 : vertexCount;
+    }
+
     private long indexBufferAddress;
 
     void setIndexBuffer(long buffer) {
@@ -808,6 +916,15 @@ final class VkRayTracing {
                     .append(String.format("%.2f", lastBuildNanos / 1e6)).append(" ms to record, ")
                     .append(String.format("%.2f", lastWaitNanos / 1e6))
                     .append(" ms waiting for the card to finish the last batch");
+            // Named separately from the chunks, because it answers a different
+            // question: whether creatures are in the structure at all. A
+            // shadow that is missing under a cow and a structure that was never
+            // built look identical from outside, and this is the line that
+            // tells them apart.
+            sb.append("; creatures ")
+                    .append(creatureVertices > 0
+                            ? creatureVertices / 4 + " quads in one structure"
+                            : "not in the structure");
         }
         sb.append('\n');
     }
@@ -971,6 +1088,9 @@ final class VkRayTracing {
             destroyBlas(blas);
         }
         structures.clear();
+        // Not in that map — it is one structure rebuilt every frame rather than
+        // one per chunk slot — so it is freed by name or not at all.
+        destroyBlas(creatureBlas);
         // The device is idle here, so nothing can still be reading these.
         for (Retired entry : retired) {
             KHRAccelerationStructure.vkDestroyAccelerationStructureKHR(device(), entry.structure, null);

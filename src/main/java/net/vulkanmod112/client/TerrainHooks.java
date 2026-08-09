@@ -403,16 +403,67 @@ public final class TerrainHooks {
                 incompatibleRenderer = true;
                 LOGGER.warn("Detected {}. Vulkan terrain is disabled to keep vanilla rendering safe; "
                         + "use -Dvulkanmod112.allowIncompatibleRenderer=true only for testing.", className);
+                // And in the chat, once, for the same reason every other way of
+                // standing aside says so there: this one was the quietest of
+                // the lot. The renderer never starts, so nothing fails and
+                // nothing is logged as a failure — the mod simply has no effect,
+                // which reads as "it is broken" rather than "it stepped aside
+                // for the renderer you installed".
+                RenderNotice.fellBackToOpenGL("another mod is drawing the world ("
+                        + shortName(className) + "), so the Vulkan renderer stood aside");
                 return false;
             } catch (ClassNotFoundException ignored) {
                 // Not installed.
             } catch (LinkageError ignored) {
                 // A partially loaded renderer is just as unsafe to interpose on.
                 incompatibleRenderer = true;
+                RenderNotice.fellBackToOpenGL("another mod is drawing the world ("
+                        + shortName(className) + "), so the Vulkan renderer stood aside");
                 return false;
             }
         }
         return true;
+    }
+
+    /**
+     * Whether a creature standing here throws a real shadow rather than a blur.
+     *
+     * All of them have to hold, and the last is the one that is easy to forget:
+     * the settings say a ray may be fired, and none of them says there is
+     * anything for it to hit. The creatures reach the structure as one run of
+     * vertices, and that run goes missing for reasons no setting mentions — a
+     * frame where this renderer drew none of them, a run broken up by
+     * particles, a structure budget already full. Reading the settings alone
+     * takes vanilla's blob away in exactly those frames and puts nothing in
+     * its place, which is the one outcome worse than the circle.
+     *
+     * Asked per creature, per frame, and deliberately cheap: reads of fields
+     * that are already in memory.
+     */
+    public static boolean creaturesCastRealShadows() {
+        if (!VulkanConfig.isVulkanEntities() || VulkanConfig.getSunShadows() <= 0) {
+            return false;
+        }
+        if (broken || incompatibleRenderer || !terrainEnabled()) {
+            return false;
+        }
+        VulkanBridge live = liveBridge();
+        if (live == null) {
+            return false;
+        }
+        try {
+            return live.isRayTracingActive() && live.creaturesInStructure();
+        } catch (Throwable ignored) {
+            // A bridge that cannot answer is not a reason to take away the only
+            // shadow there is.
+            return false;
+        }
+    }
+
+    /** The last part of a class name, which is the part anybody recognises. */
+    private static String shortName(String className) {
+        int dot = className.lastIndexOf('.');
+        return dot < 0 ? className : className.substring(dot + 1);
     }
 
     private static int packChunks(BlockRenderLayer layer, List<RenderChunk> chunks) {
@@ -490,7 +541,46 @@ public final class TerrainHooks {
             return 0.0f;
         }
         float rain = mc.world.getRainStrength(mc.getRenderPartialTicks());
-        return rain < 0.0f ? 0.0f : (rain > 1.0f ? 1.0f : rain);
+        rain = rain < 0.0f ? 0.0f : (rain > 1.0f ? 1.0f : rain);
+        return rain <= 0.0f ? 0.0f : rain * biomeRainShare(mc);
+    }
+
+    /**
+     * Whether it is raining <em>here</em>, as one number for the whole frame.
+     *
+     * Rain strength is one value for the entire world, and vanilla's own rain
+     * is not: it asks each column's biome whether rain falls there at all, so a
+     * desert stays dry and a cold biome gets snow while the same storm is on.
+     * The shader has no biome — a fragment knows its material and its light and
+     * nothing about where in the world it is — so a wet floor appeared in the
+     * middle of a desert during a storm, which is where this was reported from.
+     *
+     * The camera's own biome stands in for a per-block answer. It is exact
+     * wherever the player is, which is where they are looking at the ground,
+     * and it is wrong across a biome border in the same way vanilla's rain is
+     * right there: stand in a forest at the edge of a desert and the sand
+     * within a few blocks will be wet. That is a seam a hundred blocks wide at
+     * worst and it moves with the player; the alternative is a per-block biome
+     * lookup on every fragment, which is not something this can afford, or a
+     * per-chunk one, which would put the seam in the same place and keep it.
+     *
+     * Snow biomes answer no as well. Vanilla draws snow rather than rain there,
+     * and snow does not wet a surface until it melts.
+     */
+    private static float biomeRainShare(Minecraft mc) {
+        if (mc.player == null) {
+            return 1.0f;
+        }
+        try {
+            net.minecraft.world.biome.Biome biome =
+                    mc.world.getBiome(new net.minecraft.util.math.BlockPos(mc.player));
+            return biome != null && biome.canRain() ? 1.0f : 0.0f;
+        } catch (Throwable ignored) {
+            // A modded biome that throws is not a reason to stop the frame; the
+            // world-wide answer is the one this had before there was a biome in
+            // it at all.
+            return 1.0f;
+        }
     }
 
     /**
@@ -566,6 +656,13 @@ public final class TerrainHooks {
             return;
         }
         bridge.applySceneBloom(frame.framebufferTexture);
+        // After the glow rather than before it, and that is a rule of this
+        // frame rather than of optics. Bloom decides what is covered by
+        // comparing the finished frame against a copy of the terrain taken
+        // earlier; darkening the frame before that comparison makes the two
+        // disagree everywhere and puts the glow out entirely. It has happened
+        // once already and cost a release.
+        bridge.applySceneOcclusion(frame.framebufferTexture);
         // After the glow and not before it: the tone is of the finished
         // picture, and by this point the glow is part of the picture.
         bridge.applySceneTone(frame.framebufferTexture);

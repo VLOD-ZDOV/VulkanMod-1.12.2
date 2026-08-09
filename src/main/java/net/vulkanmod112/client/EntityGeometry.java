@@ -148,6 +148,77 @@ public final class EntityGeometry {
         }
     }
 
+    /**
+     * The two lights the game shades every creature with, in world directions.
+     *
+     * Vanilla lights entities with the fixed-function pipeline: {@code
+     * RenderHelper.enableStandardItemLighting} switches on two directional
+     * lights of 0.6 each and an ambient of 0.4, and the material takes the
+     * vertex colour for both terms. The positions are handed to OpenGL while
+     * the model-view holds the camera and nothing else, which is what makes
+     * them fixed in the world rather than following the head.
+     *
+     * Nothing here was reproducing any of it, and the symptom was exactly what
+     * that predicts: a creature drawn through Vulkan came out brighter than the
+     * same creature drawn by the game, and flat with it — every face at full
+     * strength, whichever way it pointed. Reported from a live session before
+     * any of this was measured.
+     */
+    private static final float[] LIGHT_0 = normalised(0.2f, 1.0f, -0.7f);
+    private static final float[] LIGHT_1 = normalised(-0.2f, 1.0f, 0.7f);
+    private static final float DIFFUSE = 0.6f;
+    private static final float AMBIENT = 0.4f;
+
+    private static float[] normalised(float x, float y, float z) {
+        float length = (float) Math.sqrt(x * x + y * y + z * z);
+        return new float[]{x / length, y / length, z / length};
+    }
+
+    /**
+     * Vanilla's own shading of one face, folded into the vertex colour.
+     *
+     * Done here rather than in the shader for two reasons that point the same
+     * way: the normal is already in hand at this moment and would otherwise
+     * have to be carried through a vertex format that has no room for it, and
+     * the game shades these flat — one normal for the whole quad — so there is
+     * nothing a per-fragment version would add.
+     *
+     * @param in index of this vertex inside {@code shape}; the normal is the
+     *           sixth, seventh and eighth float of it
+     * @param m  the frame this part is drawn in, whose rotation takes the
+     *           normal into the world
+     */
+    private static int shade(int colour, float[] shape, int in, float[] m) {
+        float nx = shape[in + 5];
+        float ny = shape[in + 6];
+        float nz = shape[in + 7];
+        float wx = m[0] * nx + m[4] * ny + m[8] * nz;
+        float wy = m[1] * nx + m[5] * ny + m[9] * nz;
+        float wz = m[2] * nx + m[6] * ny + m[10] * nz;
+        float length = (float) Math.sqrt(wx * wx + wy * wy + wz * wz);
+        if (length < 1.0e-6f) {
+            return colour;
+        }
+        wx /= length;
+        wy /= length;
+        wz /= length;
+        float lit = AMBIENT
+                + DIFFUSE * Math.max(wx * LIGHT_0[0] + wy * LIGHT_0[1] + wz * LIGHT_0[2], 0.0f)
+                + DIFFUSE * Math.max(wx * LIGHT_1[0] + wy * LIGHT_1[1] + wz * LIGHT_1[2], 0.0f);
+        // OpenGL clamps the result of lighting, and a face square-on to both
+        // lights reaches past one without it.
+        if (lit > 1.0f) {
+            lit = 1.0f;
+        }
+        // The byte order is the vertex format's: R is the low byte, alpha the
+        // high one, and alpha is not a colour — a creature's edges are decided
+        // by the cutoff in the fragment shader and dimming it would move them.
+        int r = (int) (((colour) & 0xFF) * lit);
+        int g = (int) (((colour >>> 8) & 0xFF) * lit);
+        int b = (int) (((colour >>> 16) & 0xFF) * lit);
+        return (colour & 0xFF000000) | (b << 16) | (g << 8) | r;
+    }
+
     /** Eight floats a vertex in, twenty-eight bytes a vertex out. */
     private static void write(float[] shape, float[] m) {
         Batch batch = batchFor(GlTextureMirror.boundOnDefaultUnit());
@@ -171,7 +242,7 @@ public final class EntityGeometry {
             out.putFloat(at + 8, m[2] * x + m[6] * y + m[10] * z + m[14]);
             out.putFloat(at + 12, shape[in + 3]);
             out.putFloat(at + 16, shape[in + 4]);
-            out.putInt(at + 20, colour);
+            out.putInt(at + 20, shade(colour, shape, in, m));
             out.putShort(at + 24, lightU);
             out.putShort(at + 26, lightV);
             at += VERTEX_BYTES;
@@ -229,6 +300,19 @@ public final class EntityGeometry {
     /** The bridge lives in this package; the mixin does not. */
     public static void flushToBridge() {
         flush(TerrainHooks.liveBridge());
+    }
+
+    /**
+     * Closes the capture window, so that nothing outside it is taken.
+     *
+     * Forge calls the entity pass a second time after the translucent layer,
+     * and this renderer has nothing to do with that call: its submission has
+     * gone and its batches are cleared, so a part taken there would be
+     * cancelled for the game and drawn by nobody. Standing down between the
+     * two passes is what leaves it to vanilla, which draws it correctly.
+     */
+    public static void endPass() {
+        viewKnown = false;
     }
 
     public static void flush(VulkanBridge bridge) {

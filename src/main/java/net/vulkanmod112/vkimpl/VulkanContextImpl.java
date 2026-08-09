@@ -598,7 +598,29 @@ public final class VulkanContextImpl implements VulkanBridge {
 
     @Override
     public boolean isRayTracingActive() {
-        return rayTracingEnabled && rayQuerySupported;
+        return rayTracingEnabled && rayQuerySupported && !rayTracingBroken;
+    }
+
+    @Override
+    public boolean creaturesInStructure() {
+        return initialized && terrainRenderer != null
+                && terrainRenderer.creaturesInStructure();
+    }
+
+    /**
+     * Set once, when the structures give up for the session.
+     *
+     * Without it this answered from what the device can do rather than from
+     * what it is doing, and the two part company exactly when something has
+     * gone wrong. What reads this decides whether creatures still need
+     * vanilla's round shadow under them — so the stale answer took the blob
+     * away and left nothing in its place, which is the one outcome worse than
+     * either.
+     */
+    private volatile boolean rayTracingBroken;
+
+    void noteRayTracingBroken() {
+        rayTracingBroken = true;
     }
 
     /**
@@ -1075,6 +1097,15 @@ public final class VulkanContextImpl implements VulkanBridge {
             return;
         }
         terrainRenderer.applySceneBloom(sceneGlTexture);
+    }
+
+    @Override
+    public void applySceneOcclusion(int sceneGlTexture) {
+        // Same thread and same reasoning as the pass above.
+        if (!initialized || terrainRenderer == null) {
+            return;
+        }
+        terrainRenderer.applySceneOcclusion(sceneGlTexture);
     }
 
     @Override

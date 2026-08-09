@@ -38,6 +38,7 @@
     "RenderGlobalAccessor",
     "RenderChunkAccessor",
     "LightmapCoordMixin",
+    "BlobShadowMixin",
     "EntityPassMixin",
     "WeatherRenderMixin",
     "WorldDisplayMixin",

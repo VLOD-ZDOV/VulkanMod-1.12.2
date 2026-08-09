@@ -71,6 +71,7 @@ import org.lwjgl.vulkan.VkSamplerCreateInfo;
 import org.lwjgl.vulkan.VkSemaphoreCreateInfo;
 import org.lwjgl.vulkan.VkShaderModuleCreateInfo;
 import org.lwjgl.vulkan.VkSubmitInfo;
+import org.lwjgl.vulkan.VkSubpassDependency;
 import org.lwjgl.vulkan.VkSubpassDescription;
 import org.lwjgl.vulkan.VkVertexInputAttributeDescription;
 import org.lwjgl.vulkan.VkVertexInputBindingDescription;
@@ -268,6 +269,16 @@ final class VkTerrainRenderer {
      * which is a worse bug than drawing a few extra.
      */
     private long spriteOpaquePipeline;
+    /**
+     * The same shaders again, in the subpass where depth can be written.
+     *
+     * Everything about a creature that is not its depth was already solved and
+     * measured — the bone poses, the skins, the batching. This is the one state
+     * that could not be asked for while the pass had a single read-only depth
+     * attachment, and it is the difference between a mob and a mob-shaped
+     * arrangement of faces in no particular order.
+     */
+    private long creaturePipeline;
     private long spritePipelineLayout;
     private long spriteSetLayout;
     private long spriteDescriptorPool;
@@ -395,6 +406,18 @@ final class VkTerrainRenderer {
     /** Index into {@link #TERRAIN_PIPELINES}; also the layer ordinal vanilla uses. */
     private static final int LAYER_TRANSLUCENT = 3;
     private static final int PIPELINE_TRANSLUCENT = 2;
+    /** Vanilla's second opaque layer: leaves, and what casts a canopy's shadow. */
+    private static final int LAYER_CUTOUT_MIPPED = 1;
+    /** And its third: grass, flowers, crops, rails — cut out of their quads. */
+    private static final int LAYER_CUTOUT = 2;
+    /**
+     * The two subpasses of the translucent pass.
+     *
+     * Creatures go first because they are the only thing here that writes
+     * depth, and everything after them is tested against what they wrote.
+     */
+    private static final int SUBPASS_CREATURES = 0;
+    private static final int SUBPASS_TRANSLUCENT = 1;
 
     /**
      * Vanilla's layer ordinals: SOLID, CUTOUT_MIPPED, CUTOUT, TRANSLUCENT.
@@ -782,6 +805,37 @@ final class VkTerrainRenderer {
     private int aoWidth;
     private int aoHeight;
     private float aoStrength;
+    /**
+     * How much of a gradient the sky is given, 0 for the sky the game drew.
+     *
+     * Vanilla's sky is one colour with a warm band at the horizon at dawn and
+     * dusk, and nothing between: straight up is the same blue as thirty degrees
+     * up. Every shader pack deepens the zenith, and it is the largest single
+     * area of the screen this mod had never touched.
+     */
+    private float skyGradient;
+    /**
+     * How see-through leaves and plants are to a shadow ray, 0 for solid.
+     *
+     * A ray cannot read a texture, so this is a probability rather than a
+     * cut-out: at full strength a leaf quad stops light about as often as a leaf
+     * texture is opaque, and the frame accumulation turns the speckle into
+     * dapple. Off by default like every other effect here, and worth saying why
+     * it has a slider rather than a switch — halfway between is a canopy that
+     * is thinner than it looks, which some people will prefer to either end.
+     */
+    private float leafShadows;
+    private int skyGradientProgram;
+    private int skyGradientStrengthUniform;
+    private int skyGradientTopUniform;
+    private int skyGradientGlowUniform;
+    private int skyGradientSunUniform;
+    private int skyGradientDayUniform;
+    private int skyGradientInvMvpUniform;
+    private int skyGradientInvSizeUniform;
+    private final float[] skyInverse = new float[16];
+    private final java.nio.FloatBuffer skyMatrixBuffer =
+            org.lwjgl.BufferUtils.createFloatBuffer(16);
     /** How far a corner's shadow reaches, in blocks. Set from the menu. */
     private float aoRadius = 2.0f;
     private boolean aoFailed;
@@ -1466,15 +1520,30 @@ final class VkTerrainRenderer {
         viewWorldX = viewX;
         viewWorldY = viewY;
         viewWorldZ = viewZ;
-        // Before anything is recorded, because rewriting the sets stops the
-        // device and a command buffer that is already open cannot survive that.
-        // The flag is raised where the setting is read, which is in the middle
-        // of recording — this is the first safe place after it.
-        if (reflectionBindingsDirty) {
-            reflectionBindingsDirty = false;
-            updateDescriptors();
+        // Before anything is recorded, and only then — which is the half this
+        // was missing.
+        //
+        // A descriptor set that is rewritten while a command buffer holding it
+        // is open does not merely race: the specification says that command
+        // buffer is invalid from that moment, and every call recorded into it
+        // afterwards is a call into nothing. The layers arrive one at a time
+        // and the frame is opened by the first of them, so a setting changed
+        // between two layers landed here with the buffer already recording.
+        // Found by the validation layer the moment somebody switched presets
+        // mid-frame — the driver had been quietly carrying on, and the frame
+        // looked right, which is how this survived.
+        //
+        // Skipped rather than deferred by a queue: both of these already ask
+        // whether anything changed, so leaving the flag up costs one more test
+        // next frame and nothing else. The price is that a settings change can
+        // arrive a frame later than the click, which nobody can see.
+        if (!frameOpen) {
+            if (reflectionBindingsDirty) {
+                reflectionBindingsDirty = false;
+                updateDescriptors();
+            }
+            refreshSamplerIfNeeded();
         }
-        refreshSamplerIfNeeded();
         if (layerOrdinal == LAYER_TRANSLUCENT) {
             // Its own pass, its own submission, and it runs after the opaque
             // frame has already been composited — so none of the state machine
@@ -1496,11 +1565,32 @@ final class VkTerrainRenderer {
             ensureDrawBatchCapacity(Math.max(chunkCount, peakDrawsNeeded));
             peakDrawsNeeded = chunkCount;
             beginFrame(mvp, mirror);
-            // The opaque list is the whole of the terrain this frame, and it
-            // arrives with slots and positions already packed — so the
-            // structures follow what is drawn instead of keeping a second
-            // notion of what is nearby.
-            updateRayTracing(chunks, chunkCount, mirror, viewX, viewY, viewZ);
+            // Solid and leaves together, which is not what this did at first:
+            // it passed the solid list alone and called it "the whole of the
+            // terrain", and it is one of three opaque layers. What that looked
+            // like in the world is exactly what it was — a forest casting the
+            // shadows of its trunks and nothing else, long lone sticks lying
+            // across the ground with no canopy over them.
+            //
+            // Leaves and nothing further. The layer after this one is crossed
+            // quads — grass, flowers, torches, rails — and a ray sees the quad
+            // rather than the texture on it, so a tuft of grass would throw the
+            // shadow of the whole square it is drawn on. A leaf block is a cube
+            // and reads correctly as one.
+            //
+            // The leaf list is the previous frame's, because this layer is
+            // drawn first and that one has not arrived yet. A frame of lag in
+            // which chunks cast shadows is not something anybody can see; the
+            // alternative is building the structures a layer later and having
+            // the solid pass trace against structures that do not include it.
+            int traced = combineForTracing(chunks, chunkCount);
+            updateRayTracing(tracedChunks, traced, mirror, viewX, viewY, viewZ);
+        } else if ((layerOrdinal == LAYER_CUTOUT_MIPPED || layerOrdinal == LAYER_CUTOUT)
+                && TRACE_FOLIAGE && ctx.isRayTracingEnabled()) {
+            rememberForTracing(layerOrdinal, chunks, chunkCount);
+            if (chunkCount > peakDrawsNeeded) {
+                peakDrawsNeeded = chunkCount;
+            }
         } else if (chunkCount > peakDrawsNeeded) {
             peakDrawsNeeded = chunkCount;
         }
@@ -1695,6 +1785,85 @@ final class VkTerrainRenderer {
      * the renderer drawing exactly as before, which is the only behaviour worth
      * having from something nothing depends on yet.
      */
+    /**
+     * Last frame's leaf chunks, packed the way the draw list packs them.
+     *
+     * Kept because the layers arrive in vanilla's order and the structures are
+     * built on the first of them: by the time the leaves are drawn, everything
+     * that was going to trace against them this frame already has.
+     */
+    private int[] foliageChunks = new int[0];
+    private int foliageCount;
+    private int[] cutoutChunks = new int[0];
+    private int cutoutCount;
+    /** Where each kind ends in the combined list; see {@link #combineForTracing}. */
+    private int tracedSolidCount;
+    private int tracedFoliageEnd;
+    /**
+     * A way back out, because this doubles what the structures hold.
+     *
+     * Every acceleration structure is memory and a build, and the builds are
+     * the expensive half of tracing here — so if a canopy's shadow turns out to
+     * cost more than it is worth on some machine, that has to be answerable
+     * without a new build of the mod.
+     */
+    private static final boolean TRACE_FOLIAGE =
+            !"false".equalsIgnoreCase(System.getProperty("vulkanmod112.rayTracingFoliage", "true"));
+    /** Solid and leaves in one array, which is what the structures are built from. */
+    private int[] tracedChunks = new int[0];
+
+    private void rememberForTracing(int layerOrdinal, int[] chunks, int chunkCount) {
+        boolean leaves = layerOrdinal == LAYER_CUTOUT_MIPPED;
+        int[] into = leaves ? foliageChunks : cutoutChunks;
+        int needed = chunkCount * 4;
+        if (into.length < needed) {
+            into = new int[Math.max(needed, into.length * 2)];
+            if (leaves) {
+                foliageChunks = into;
+            } else {
+                cutoutChunks = into;
+            }
+        }
+        System.arraycopy(chunks, 0, into, 0, needed);
+        if (leaves) {
+            foliageCount = chunkCount;
+        } else {
+            cutoutCount = chunkCount;
+        }
+    }
+
+    /**
+     * Joins this frame's solid list to the last frame's leaves and plants.
+     *
+     * A chunk is one entry of four ints — the mirror slot and the origin — and
+     * the slot is per layer, so the lists can simply follow one another: no
+     * chunk appears twice, because a chunk's solid geometry, its leaves and its
+     * grass live in different vertex buffers with slots of their own.
+     *
+     * The order is the whole of how the kinds are told apart afterwards: solid
+     * first, then leaves, then everything else that is cut out. A structure
+     * built from a leaf quad has to be marked as see-through and one built from
+     * stone must not be, and this is where that is decided.
+     *
+     * @return how many chunks the combined array holds
+     */
+    private int combineForTracing(int[] chunks, int chunkCount) {
+        tracedSolidCount = chunkCount;
+        tracedFoliageEnd = chunkCount + foliageCount;
+        int total = tracedFoliageEnd + cutoutCount;
+        if (total == chunkCount) {
+            tracedChunks = chunks;
+            return chunkCount;
+        }
+        if (tracedChunks.length < total * 4 || tracedChunks == chunks) {
+            tracedChunks = new int[Math.max(total * 4, tracedChunks.length * 2)];
+        }
+        System.arraycopy(chunks, 0, tracedChunks, 0, chunkCount * 4);
+        System.arraycopy(foliageChunks, 0, tracedChunks, chunkCount * 4, foliageCount * 4);
+        System.arraycopy(cutoutChunks, 0, tracedChunks, tracedFoliageEnd * 4, cutoutCount * 4);
+        return total;
+    }
+
     private void updateRayTracing(int[] chunks, int chunkCount, VkChunkMirror mirror,
                                   double viewX, double viewY, double viewZ) {
         if (!ctx.isRayTracingEnabled()) {
@@ -1707,6 +1876,20 @@ final class VkTerrainRenderer {
         // it; handing it over every frame costs one query and removes a way for
         // the structures to be built from an address that no longer exists.
         rayTracing.setIndexBuffer(quadIndexBuffer);
+        // The creatures of the previous frame, for the same reason the leaves
+        // are the previous frame's: this runs on the first layer of the frame
+        // and they are not drawn until the last. Their slot is not the one
+        // being written now, so the geometry is still there to be read.
+        int previous = (activeFrameSlot + framesInFlight - 1) % framesInFlight;
+        if (creatureVertexCount != null && creatureVertexCount[previous] > 0
+                && spriteVertexBuffers != null && spriteVertexBuffers[previous] != 0) {
+            rayTracing.setCreatureGeometry(spriteVertexBuffers[previous],
+                    (long) creatureFirstVertex[previous] * SPRITE_VERTEX_STRIDE,
+                    creatureVertexCount[previous]);
+        } else {
+            rayTracing.setCreatureGeometry(0L, 0L, 0);
+        }
+        rayTracing.setKindBounds(tracedSolidCount, tracedFoliageEnd);
         rayTracing.update(chunks, chunkCount, mirror, frameCounter,
                 activeFrameSlot, framesInFlight, viewX, viewY, viewZ);
         // Each frame slot has a structure of its own and descriptor sets of its
@@ -1755,6 +1938,12 @@ final class VkTerrainRenderer {
     }
 
     private VkRayTracing rayTracing;
+
+    /** Whether the creatures of this frame really are in a structure. */
+    boolean creaturesInStructure() {
+        VkRayTracing tracing = rayTracing;
+        return tracing != null && tracing.creaturesInStructure();
+    }
     /** The tracing build of the terrain pipelines, or zeroes where impossible. */
     private final long[] tracingPipelines = new long[TERRAIN_PIPELINES.length];
     /** Which structure each frame slot's descriptor sets name; 0 means none. */
@@ -2500,6 +2689,7 @@ final class VkTerrainRenderer {
             return false;
         }
         MemoryUtil.memCopy(MemoryUtil.memAddress0(spriteScratch), spriteVertexMapped[slot], bytes);
+        noteCreatureSpan(slot);
         int quads = spriteScratchVertices / 4;
         if (quads > quadIndexCapacityQuads) {
             // Growing it destroys the buffer, and the opaque pass of the frame
@@ -2512,8 +2702,63 @@ final class VkTerrainRenderer {
         return true;
     }
 
+    /**
+     * Where this frame's creature vertices sit in the sprite buffer.
+     *
+     * A structure can be built straight out of that buffer — it is the same
+     * twenty-eight bytes a vertex with the position first that the terrain uses
+     * — but only over one continuous run, and the buffer holds particles and
+     * weather as well. Creatures are submitted at the end of the entity pass
+     * and everything else afterwards, so in practice they are a run at the
+     * front; this measures rather than trusts that, and says nothing at all
+     * when they turn out to be scattered.
+     */
+    private int[] creatureFirstVertex;
+    private int[] creatureVertexCount;
+    private boolean creatureSpanWarned;
+
+    private void noteCreatureSpan(int slot) {
+        if (creatureFirstVertex == null || creatureFirstVertex.length != framesInFlight) {
+            creatureFirstVertex = new int[framesInFlight];
+            creatureVertexCount = new int[framesInFlight];
+        }
+        int first = Integer.MAX_VALUE;
+        int end = 0;
+        int total = 0;
+        for (int b = 0; b < spriteBatchCount; b++) {
+            if (spriteBatches[b * 3 + 2] < FIRST_SKIN_SLOT) {
+                continue;
+            }
+            int start = spriteBatches[b * 3];
+            int count = spriteBatches[b * 3 + 1];
+            first = Math.min(first, start);
+            end = Math.max(end, start + count);
+            total += count;
+        }
+        if (total == 0 || end - first != total) {
+            // Either there are none, or they are not one run — a structure over
+            // the gap would contain particles, and a particle is a quad turned
+            // to face the camera. Its shadow would be a rectangle that turns
+            // with the player.
+            creatureVertexCount[slot] = 0;
+            if (total != 0 && !creatureSpanWarned) {
+                creatureSpanWarned = true;
+                LOGGER.info("Creature geometry arrived in more than one run this frame; "
+                        + "their shadows are skipped rather than guessed at");
+            }
+            return;
+        }
+        creatureFirstVertex[slot] = first;
+        creatureVertexCount[slot] = total;
+    }
+
     /** Records this frame's sprite batches into the translucent pass. */
-    private void drawSprites(MemoryStack stack, VkCommandBuffer cmd) {
+    /**
+     * @param creatures true to draw only the creature skins, false for
+     *                  everything else — the two live in different subpasses
+     *                  and cannot be recorded together
+     */
+    private void drawSprites(MemoryStack stack, VkCommandBuffer cmd, boolean creatures) {
         int slot = activeFrameSlot;
         long boundPipeline = 0;
         vkCmdBindVertexBuffers(cmd, 0, stack.longs(spriteVertexBuffers[slot]), stack.longs(0L));
@@ -2530,6 +2775,12 @@ final class VkTerrainRenderer {
             int first = spriteBatches[b * 3];
             int count = spriteBatches[b * 3 + 1];
             int sheet = spriteBatches[b * 3 + 2];
+            // Which half of the pass this batch belongs to. A creature skin is
+            // any slot past the game's own sheets, and those are drawn in the
+            // subpass that owns the depth attachment.
+            if ((sheet >= FIRST_SKIN_SLOT) != creatures) {
+                continue;
+            }
             long set = spriteSets[sheet];
             // Slot 0 borrows the terrain's atlas and has no image of its own;
             // the rest must have one. A set whose image was freed by a resource
@@ -2542,8 +2793,14 @@ final class VkTerrainRenderer {
             // Which state this batch wants is decided by which slot it is in:
             // the game's own sheets are particles and weather, everything past
             // them is a creature skin.
-            long wanted = sheet >= FIRST_SKIN_SLOT && spriteOpaquePipeline != 0
-                    ? spriteOpaquePipeline : spritePipeline;
+            long wanted;
+            if (creatures && creaturePipeline != 0) {
+                wanted = creaturePipeline;
+            } else if (sheet >= FIRST_SKIN_SLOT && spriteOpaquePipeline != 0) {
+                wanted = spriteOpaquePipeline;
+            } else {
+                wanted = spritePipeline;
+            }
             if (wanted != boundPipeline) {
                 boundPipeline = wanted;
                 vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, wanted);
@@ -2580,10 +2837,21 @@ final class VkTerrainRenderer {
         want = Long.highestOneBit(want) * 2;
         destroySpriteVertexBuffer(slot);
         try (MemoryStack stack = stackPush()) {
+            // Ray tracing reads creature geometry straight out of this buffer
+            // to build a structure over it, so it needs an address and the
+            // right to be a build input — asked for only where tracing is
+            // actually on, because both are features a device has to have.
+            int usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+            boolean traced = ctx.isRayTracingEnabled() && ctx.isRayQuerySupported();
+            if (traced) {
+                usage |= org.lwjgl.vulkan.VK12.VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
+                        | org.lwjgl.vulkan.KHRAccelerationStructure
+                                .VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
+            }
             VkBufferCreateInfo info = VkBufferCreateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO)
                     .size(want)
-                    .usage(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT)
+                    .usage(usage)
                     .sharingMode(VK_SHARING_MODE_EXCLUSIVE);
             LongBuffer pBuffer = stack.mallocLong(1);
             if (vkCreateBuffer(device(), info, null, pBuffer) != VK_SUCCESS) {
@@ -2602,6 +2870,15 @@ final class VkTerrainRenderer {
                     .sType(VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO)
                     .allocationSize(req.size())
                     .memoryTypeIndex(type);
+            if (traced) {
+                // Asking for the address on the buffer is not enough: the
+                // memory under it has to be allocated knowing that an address
+                // will be taken, or the call to take one is invalid.
+                alloc.pNext(org.lwjgl.vulkan.VkMemoryAllocateFlagsInfo.calloc(stack)
+                        .sType(org.lwjgl.vulkan.VK11.VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO)
+                        .flags(org.lwjgl.vulkan.VK12.VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT)
+                        .address());
+            }
             LongBuffer pMemory = stack.mallocLong(1);
             if (vkAllocateMemory(device(), alloc, null, pMemory) != VK_SUCCESS) {
                 vkDestroyBuffer(device(), buffer, null);
@@ -2736,14 +3013,24 @@ final class VkTerrainRenderer {
             scissor.get(0).extent(VkExtent2D.calloc(stack).width(width).height(height));
             vkCmdSetScissor(cmd, 0, scissor);
 
-            // Sprites first, water second, which is the order vanilla draws
-            // them in: a bubble behind a water surface has to end up under the
-            // water's colour rather than over it. Depth cannot settle it here —
-            // the attachment is read-only, so nothing in this pass occludes
-            // anything else in it — which leaves the order of the draws as the
-            // whole of the answer.
+            // Creatures first, in the subpass that owns the depth attachment,
+            // so that everything after them is tested against where they are.
             if (sprites) {
-                drawSprites(stack, cmd);
+                drawSprites(stack, cmd, true);
+            }
+            // Once, always, whether or not anything was drawn above: the pass
+            // has two subpasses and a command buffer that ends inside the first
+            // of them is not a valid recording.
+            vkCmdNextSubpass(cmd, VK_SUBPASS_CONTENTS_INLINE);
+
+            // Particles and weather next, water last, which is the order
+            // vanilla draws them in: a bubble behind a water surface has to end
+            // up under the water's colour rather than over it. Depth does not
+            // settle it between these two — the attachment is read-only from
+            // here on, so nothing in this subpass occludes anything else in it
+            // — which leaves the order of the draws as the whole of the answer.
+            if (sprites) {
+                drawSprites(stack, cmd, false);
             }
             clearSprites();
 
@@ -3001,10 +3288,13 @@ final class VkTerrainRenderer {
             }
 
             boolean ao = false;
-            if (aoStrength > 0.0f && !aoFailed) {
+            // Not when the whole scene is being darkened later instead: the
+            // same corners would be shaded twice, once here from a depth image
+            // holding only blocks and once there from one holding everything.
+            if (aoStrength > 0.0f && !sceneOcclusion && !aoFailed) {
                 int frameFbo = GL11C.glGetInteger(GL30C.GL_FRAMEBUFFER_BINDING);
                 try {
-                    ao = aoPass();
+                    ao = aoPass(glDepthTexture);
                 } catch (Throwable t) {
                     LOGGER.error("Ambient occlusion failed; off for this session", t);
                     aoFailed = true;
@@ -3064,6 +3354,18 @@ final class VkTerrainRenderer {
             org.lwjgl.opengl.GL11.glVertex2f(1.0f, 1.0f);
             org.lwjgl.opengl.GL11.glVertex2f(-1.0f, 1.0f);
             org.lwjgl.opengl.GL11.glEnd();
+
+            // The sky, while it is still the only thing behind the terrain.
+            //
+            // Here and nowhere later on purpose: the game draws the sky before
+            // the world and the clouds after it, so at this one moment every
+            // pixel the terrain did not cover is sky and nothing else. A pass
+            // after the whole frame would have to tell sky from a distant hill,
+            // and the only thing that could answer is a depth buffer the game
+            // keeps as a renderbuffer and will not let anyone read.
+            if (skyGradient > 0.0f) {
+                paintSkyGradient();
+            }
 
             // After the terrain is in the frame and before the game draws
             // anything else into it.
@@ -3145,7 +3447,7 @@ final class VkTerrainRenderer {
      * to read, and before the colour is drawn into the frame, because what the
      * frame receives is the colour already darkened.
      */
-    private boolean aoPass() {
+    private boolean aoPass(int depthTexture) {
         if (!ensureAoTargets()) {
             return false;
         }
@@ -3194,7 +3496,7 @@ final class VkTerrainRenderer {
             GL20C.glUniform1f(aoRadiusUniform, aoRadius);
             GL20C.glUniform1f(aoStrengthUniform, aoStrength);
             GL13C.glActiveTexture(GL13C.GL_TEXTURE0);
-            GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, glDepthTexture);
+            GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, depthTexture);
             fullscreenQuad();
 
             // Smoothed, because sixteen samples of a neighbourhood is a noisy
@@ -3960,6 +4262,186 @@ final class VkTerrainRenderer {
      * into clipping, because the only thing it could spend there is detail that
      * is already in the frame.
      */
+    /**
+     * Corners of the whole picture, not only of the blocks.
+     *
+     * Everything this renderer draws is in a depth image of its own, and that
+     * image holds terrain and nothing else — so the occlusion built from it
+     * stops at the edge of what this mod owns. A chest casts nothing into the
+     * floor it stands on; nor does a mob, nor a modded block drawn by its own
+     * renderer. Standing next to a chest in the sun is where anybody notices.
+     *
+     * By this point the game has finished the world and its depth buffer holds
+     * all of them. Nothing here takes drawing away from anyone: the picture is
+     * already made, and this reads its depth and darkens where the light could
+     * not have reached. A mod cannot break on it, because a mod is not asked to
+     * do anything.
+     *
+     * The occlusion itself is the same pass and the same shader the terrain
+     * already used, handed a different depth texture. That is the whole of the
+     * change — the arithmetic that turns a depth into a position and a position
+     * into a corner does not care whose geometry made it.
+     */
+    void applySceneOcclusion(int sceneTexture) {
+        if (!sceneOcclusion || aoFailed || aoStrength <= 0.0f || sceneTexture == 0
+                || width <= 0 || height <= 0) {
+            return;
+        }
+        int prevProgram = GL11C.glGetInteger(GL20C.GL_CURRENT_PROGRAM);
+        int prevFbo = GL11C.glGetInteger(GL30C.GL_FRAMEBUFFER_BINDING);
+        int prevTexture = GL11C.glGetInteger(GL11C.GL_TEXTURE_BINDING_2D);
+        int prevActive = GL11C.glGetInteger(GL13C.GL_ACTIVE_TEXTURE);
+        try {
+            if (!ensureSceneOcclusionTargets()) {
+                return;
+            }
+            org.lwjgl.opengl.GL11.glPushAttrib(org.lwjgl.opengl.GL11.GL_ENABLE_BIT
+                    | org.lwjgl.opengl.GL11.GL_DEPTH_BUFFER_BIT
+                    | org.lwjgl.opengl.GL11.GL_COLOR_BUFFER_BIT
+                    | org.lwjgl.opengl.GL11.GL_TEXTURE_BIT
+                    | org.lwjgl.opengl.GL11.GL_CURRENT_BIT
+                    | org.lwjgl.opengl.GL11.GL_POLYGON_BIT
+                    | org.lwjgl.opengl.GL11.GL_VIEWPORT_BIT);
+            try {
+                GL11C.glDisable(org.lwjgl.opengl.GL11.GL_ALPHA_TEST);
+                GL11C.glDisable(GL11C.GL_CULL_FACE);
+                GL11C.glDisable(GL11C.GL_SCISSOR_TEST);
+                GL11C.glDisable(GL11C.GL_DEPTH_TEST);
+                GL11C.glDisable(GL11C.GL_BLEND);
+                GL11C.glDepthMask(false);
+
+                // The game's depth into a texture, because a renderbuffer
+                // cannot be sampled and the game's is one. A blit does not care
+                // which of the two kinds either side is.
+                GL30C.glBindFramebuffer(GL30C.GL_READ_FRAMEBUFFER, prevFbo);
+                GL30C.glBindFramebuffer(GL30C.GL_DRAW_FRAMEBUFFER, sceneDepthFbo);
+                GL30C.glBlitFramebuffer(0, 0, width, height, 0, 0, width, height,
+                        GL11C.GL_DEPTH_BUFFER_BIT, GL11C.GL_NEAREST);
+                // And the colour, because the pass below reads what it writes.
+                GL30C.glBindFramebuffer(GL30C.GL_DRAW_FRAMEBUFFER, sceneCopyFbo);
+                GL30C.glBlitFramebuffer(0, 0, width, height, 0, 0, width, height,
+                        GL11C.GL_COLOR_BUFFER_BIT, GL11C.GL_NEAREST);
+                GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo);
+
+                if (!aoPass(sceneDepthTexture)) {
+                    return;
+                }
+                GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo);
+                GL11C.glViewport(0, 0, width, height);
+                GL20C.glUseProgram(sceneOcclusionProgram);
+                GL20C.glUniform2f(sceneOcclusionInvSize, 1.0f / width, 1.0f / height);
+                GL13C.glActiveTexture(GL13C.GL_TEXTURE1);
+                GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, aoTexture);
+                GL13C.glActiveTexture(GL13C.GL_TEXTURE0);
+                GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, sceneCopyTexture);
+                fullscreenQuad();
+            } finally {
+                org.lwjgl.opengl.GL11.glPopAttrib();
+            }
+        } catch (Throwable t) {
+            // The same fence every other full-screen effect stands behind: a
+            // corner is decoration and the world is not.
+            LOGGER.error("Whole-scene occlusion failed; off for this session", t);
+            aoFailed = true;
+        } finally {
+            GL20C.glUseProgram(prevProgram);
+            GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo);
+            // The unit first and the binding second, because the binding that
+            // was read belongs to that unit. Binding before selecting puts it
+            // on whichever unit this pass happened to leave selected, which is
+            // zero — the one the game keeps its atlas on.
+            GL13C.glActiveTexture(prevActive);
+            GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, prevTexture);
+        }
+    }
+
+    private int sceneDepthTexture;
+    private int sceneDepthFbo;
+    private int sceneCopyTexture;
+    private int sceneCopyFbo;
+    private int sceneOcclusionProgram;
+    private int sceneOcclusionInvSize;
+    private int sceneTargetsWidth;
+    private int sceneTargetsHeight;
+    /** Whether the corners of the whole picture are darkened instead of the blocks'. */
+    private boolean sceneOcclusion;
+
+    private boolean ensureSceneOcclusionTargets() {
+        if (sceneDepthTexture != 0 && sceneTargetsWidth == width
+                && sceneTargetsHeight == height && sceneOcclusionProgram != 0) {
+            return true;
+        }
+        destroySceneOcclusionTargets();
+        sceneDepthTexture = GL11C.glGenTextures();
+        GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, sceneDepthTexture);
+        GL11C.glTexImage2D(GL11C.GL_TEXTURE_2D, 0, GL30C.GL_DEPTH_COMPONENT24, width, height,
+                0, GL11C.GL_DEPTH_COMPONENT, GL11C.GL_UNSIGNED_INT, (java.nio.ByteBuffer) null);
+        GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_MIN_FILTER, GL11C.GL_NEAREST);
+        GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_MAG_FILTER, GL11C.GL_NEAREST);
+        GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_WRAP_S, GL12C.GL_CLAMP_TO_EDGE);
+        GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_WRAP_T, GL12C.GL_CLAMP_TO_EDGE);
+        sceneDepthFbo = GL30C.glGenFramebuffers();
+        GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, sceneDepthFbo);
+        GL30C.glFramebufferTexture2D(GL30C.GL_FRAMEBUFFER, GL30C.GL_DEPTH_ATTACHMENT,
+                GL11C.GL_TEXTURE_2D, sceneDepthTexture, 0);
+
+        sceneCopyTexture = GL11C.glGenTextures();
+        GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, sceneCopyTexture);
+        GL11C.glTexImage2D(GL11C.GL_TEXTURE_2D, 0, GL11C.GL_RGBA8, width, height,
+                0, GL11C.GL_RGBA, GL11C.GL_UNSIGNED_BYTE, (java.nio.ByteBuffer) null);
+        GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_MIN_FILTER, GL11C.GL_LINEAR);
+        GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_MAG_FILTER, GL11C.GL_LINEAR);
+        GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_WRAP_S, GL12C.GL_CLAMP_TO_EDGE);
+        GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_WRAP_T, GL12C.GL_CLAMP_TO_EDGE);
+        sceneCopyFbo = GL30C.glGenFramebuffers();
+        GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, sceneCopyFbo);
+        GL30C.glFramebufferTexture2D(GL30C.GL_FRAMEBUFFER, GL30C.GL_COLOR_ATTACHMENT0,
+                GL11C.GL_TEXTURE_2D, sceneCopyTexture, 0);
+
+        if (sceneOcclusionProgram == 0) {
+            sceneOcclusionProgram = buildQuadProgram(
+                    "uniform sampler2D uColor;\n"
+                            + "uniform sampler2D uAo;\n"
+                            + "uniform vec2 uInvSize;\n"
+                            + "void main() {\n"
+                            + "    vec2 uv = gl_FragCoord.xy * uInvSize;\n"
+                            + "    vec3 c = texture2D(uColor, uv).rgb;\n"
+                            + "    gl_FragColor = vec4(c * texture2D(uAo, uv).r, 1.0);\n"
+                            + "}\n");
+            int prev = GL11C.glGetInteger(GL20C.GL_CURRENT_PROGRAM);
+            GL20C.glUseProgram(sceneOcclusionProgram);
+            GL20C.glUniform1i(GL20C.glGetUniformLocation(sceneOcclusionProgram, "uColor"), 0);
+            GL20C.glUniform1i(GL20C.glGetUniformLocation(sceneOcclusionProgram, "uAo"), 1);
+            sceneOcclusionInvSize =
+                    GL20C.glGetUniformLocation(sceneOcclusionProgram, "uInvSize");
+            GL20C.glUseProgram(prev);
+        }
+        sceneTargetsWidth = width;
+        sceneTargetsHeight = height;
+        return true;
+    }
+
+    private void destroySceneOcclusionTargets() {
+        if (sceneDepthFbo != 0) {
+            GL30C.glDeleteFramebuffers(sceneDepthFbo);
+            sceneDepthFbo = 0;
+        }
+        if (sceneDepthTexture != 0) {
+            GL11C.glDeleteTextures(sceneDepthTexture);
+            sceneDepthTexture = 0;
+        }
+        if (sceneCopyFbo != 0) {
+            GL30C.glDeleteFramebuffers(sceneCopyFbo);
+            sceneCopyFbo = 0;
+        }
+        if (sceneCopyTexture != 0) {
+            GL11C.glDeleteTextures(sceneCopyTexture);
+            sceneCopyTexture = 0;
+        }
+        sceneTargetsWidth = 0;
+        sceneTargetsHeight = 0;
+    }
+
     void applySceneTone(int sceneTexture) {
         if (toneFailed || toneStrength <= 0.0f || sceneTexture == 0
                 || width <= 0 || height <= 0) {
@@ -4013,8 +4495,10 @@ final class VkTerrainRenderer {
         GL20C.glUseProgram(prevProgram);
         // Both framebuffer targets, because the blit above bound them apart.
         GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo);
-        GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, prevTexture);
+        // The unit first and the binding second — see the same two lines at the
+        // end of the whole-scene occlusion pass.
         GL13C.glActiveTexture(prevActive);
+        GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, prevTexture);
     }
 
     private int toneTexture;
@@ -4712,6 +5196,7 @@ final class VkTerrainRenderer {
 
             createDescriptorInfrastructure(stack);
             createDrawBatches(stack);
+            decideColourDepth(stack);
             createRenderPass(stack);
             pipelineCacheHandle = pipelineCache.create(
                     device(), System.getProperty("vulkanmod112.pipelineCache"));
@@ -5215,6 +5700,9 @@ final class VkTerrainRenderer {
         // first, and it is a number rather than a coordinate, so it stays exact
         // however far out the world runs.
         MemoryUtil.memPutFloat(base + 1008, (float) (viewWorldY - seaLevel));
+        // How much light a leaf is allowed to let past a shadow ray, 0 for the
+        // old behaviour where every quad stopped it like stone.
+        MemoryUtil.memPutFloat(base + 1012, leafShadows);
     }
 
     /** How hard it is raining, 0 to 1; see VulkanBridge.updateWeather. */
@@ -5378,6 +5866,10 @@ final class VkTerrainRenderer {
         toneWarmth = clampPercent(intProperty("vulkanmod112.sceneWarmth", 50)) * 2.0f - 1.0f;
         bloomStrength = clampPercent(intProperty("vulkanmod112.bloom", 0));
         aoStrength = clampPercent(intProperty("vulkanmod112.ambientOcclusion", 0));
+        skyGradient = clampPercent(intProperty("vulkanmod112.skyGradient", 0));
+        sceneOcclusion = Boolean.parseBoolean(
+                System.getProperty("vulkanmod112.sceneOcclusion", "false"));
+        leafShadows = clampPercent(intProperty("vulkanmod112.leafShadows", 0));
         aoRadius = Math.max(1, Math.min(6, intProperty("vulkanmod112.aoRadius", 2)));
         iceShine = clampPercent(intProperty("vulkanmod112.iceShine", 0));
         waterCaustics = clampPercent(intProperty("vulkanmod112.waterCaustics", 0));
@@ -5599,10 +6091,59 @@ final class VkTerrainRenderer {
         writeSpriteSet(0, atlasView, atlasSampler);
     }
 
+    /**
+     * Whether the shared colour targets carry sixteen bits a channel this
+     * session, decided once and never changed.
+     *
+     * Once, because the format is written into the render passes and every
+     * pipeline built against them: changing it later would mean rebuilding all
+     * of that mid-frame, which is a great deal of machinery for a setting
+     * nobody flips twice.
+     *
+     * What it buys is a ceiling. Everything this shader computes about water —
+     * the reflection, the refraction, the caustics, the glint — is written into
+     * this target and read back out of it by the same shader, and at eight bits
+     * that round trip is where the banding comes from. It is not the whole of
+     * HDR: the game's own frame is eight bits and this mod does not own it, so
+     * bloom and the tone curve still land in a buffer with no headroom.
+     *
+     * Asked of the driver rather than assumed. An exportable image is not the
+     * same question as an ordinary one — it is the pair of drivers that has to
+     * agree — so a refusal here is expected on some machines and answered by
+     * staying where we were, with a line in the log saying which it was.
+     */
+    private int colourFormat = VK_FORMAT_R8G8B8A8_UNORM;
+    private int glColourFormat = org.lwjgl.opengl.GL11.GL_RGBA8;
+
+    private int colourBytesPerPixel() {
+        return colourFormat == VK_FORMAT_R16G16B16A16_SFLOAT ? 8 : 4;
+    }
+
+    private void decideColourDepth(MemoryStack stack) {
+        if (!Boolean.parseBoolean(System.getProperty("vulkanmod112.hdrTargets", "false"))) {
+            return;
+        }
+        int wanted = VK_FORMAT_R16G16B16A16_SFLOAT;
+        int usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT
+                | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+        org.lwjgl.vulkan.VkImageFormatProperties props =
+                org.lwjgl.vulkan.VkImageFormatProperties.calloc(stack);
+        int result = vkGetPhysicalDeviceImageFormatProperties(ctx.getPhysicalDevice(), wanted,
+                VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL, usage, 0, props);
+        if (result != VK_SUCCESS) {
+            LOGGER.warn("Sixteen-bit colour targets were asked for and this device will not "
+                    + "make one ({}); staying at eight bits", result);
+            return;
+        }
+        colourFormat = wanted;
+        glColourFormat = GL30C.GL_RGBA16F;
+        LOGGER.info("Colour targets are sixteen bits a channel this session");
+    }
+
     private void createRenderPass(MemoryStack stack) {
         VkAttachmentDescription.Buffer attachments = VkAttachmentDescription.calloc(2, stack);
         attachments.get(0)
-                .format(VK_FORMAT_R8G8B8A8_UNORM)
+                .format(colourFormat)
                 .samples(VK_SAMPLE_COUNT_1_BIT)
                 .loadOp(VK_ATTACHMENT_LOAD_OP_CLEAR)
                 .storeOp(VK_ATTACHMENT_STORE_OP_STORE)
@@ -5657,7 +6198,7 @@ final class VkTerrainRenderer {
     private void createTranslucentRenderPass(MemoryStack stack) {
         VkAttachmentDescription.Buffer attachments = VkAttachmentDescription.calloc(2, stack);
         attachments.get(0)
-                .format(VK_FORMAT_R8G8B8A8_UNORM)
+                .format(colourFormat)
                 .samples(VK_SAMPLE_COUNT_1_BIT)
                 .loadOp(VK_ATTACHMENT_LOAD_OP_CLEAR)
                 .storeOp(VK_ATTACHMENT_STORE_OP_STORE)
@@ -5690,21 +6231,71 @@ final class VkTerrainRenderer {
 
         VkAttachmentReference.Buffer colorRef = VkAttachmentReference.calloc(1, stack);
         colorRef.get(0).attachment(0).layout(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+        // Writable depth, for creatures. This is the whole of the fix for them:
+        // the layout of a depth attachment is declared per subpass rather than
+        // per pass, so one pass can hold both answers.
+        VkAttachmentReference creatureDepthRef = VkAttachmentReference.calloc(stack)
+                .attachment(1).layout(VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
         // Read-only depth: the test runs, nothing is written.
         VkAttachmentReference depthRef = VkAttachmentReference.calloc(stack)
                 .attachment(1).layout(VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
 
-        VkSubpassDescription.Buffer subpass = VkSubpassDescription.calloc(1, stack);
-        subpass.get(0)
+        // Two subpasses, and the order is the point.
+        //
+        // Subpass 0 draws creatures with depth writes on, so a mob hides the mob
+        // behind it and a head hides the back of its own skull — which the first
+        // attempt at drawing entities could not do at all, and looked exactly
+        // like that. Subpass 1 is everything this pass drew before, unchanged,
+        // with the depth attachment read-only: the water shader samples that
+        // same image for its reflections, and an image cannot be written as an
+        // attachment and read as a texture in one subpass.
+        //
+        // The gain is not only that mobs occlude each other. Water is now tested
+        // against depth that has creatures in it, so a mob under the surface is
+        // under it because it is, rather than because of the order the two were
+        // drawn in; particles stop showing through mobs for the same reason.
+        VkSubpassDescription.Buffer subpasses = VkSubpassDescription.calloc(2, stack);
+        subpasses.get(SUBPASS_CREATURES)
+                .pipelineBindPoint(VK_PIPELINE_BIND_POINT_GRAPHICS)
+                .colorAttachmentCount(1)
+                .pColorAttachments(colorRef)
+                .pDepthStencilAttachment(creatureDepthRef);
+        subpasses.get(SUBPASS_TRANSLUCENT)
                 .pipelineBindPoint(VK_PIPELINE_BIND_POINT_GRAPHICS)
                 .colorAttachmentCount(1)
                 .pColorAttachments(colorRef)
                 .pDepthStencilAttachment(depthRef);
 
+        // What the second subpass has to wait for, spelled out twice because it
+        // reads the same image two different ways: as a depth attachment it
+        // tests against, and as a texture the water shader samples. The colour
+        // attachment is in here as well — subpass 0 blends creatures into it and
+        // subpass 1 blends over them, and blending is a read as much as a write.
+        //
+        // Not BY_REGION: the reflection march walks across the screen, so a
+        // fragment of water reads depth at pixels other than its own, and a
+        // by-region promise would be a lie the driver is entitled to believe.
+        VkSubpassDependency.Buffer dependency = VkSubpassDependency.calloc(1, stack);
+        dependency.get(0)
+                .srcSubpass(SUBPASS_CREATURES)
+                .dstSubpass(SUBPASS_TRANSLUCENT)
+                .srcStageMask(VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT
+                        | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT)
+                .dstStageMask(VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT
+                        | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+                        | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT)
+                .srcAccessMask(VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT
+                        | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT)
+                .dstAccessMask(VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT
+                        | VK_ACCESS_SHADER_READ_BIT
+                        | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT
+                        | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
+
         VkRenderPassCreateInfo rpInfo = VkRenderPassCreateInfo.calloc(stack)
                 .sType(VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO)
                 .pAttachments(attachments)
-                .pSubpasses(subpass);
+                .pSubpasses(subpasses)
+                .pDependencies(dependency);
         LongBuffer pRenderPass = stack.mallocLong(1);
         check(vkCreateRenderPass(device(), rpInfo, null, pRenderPass),
                 "vkCreateRenderPass(translucent)");
@@ -5891,7 +6482,10 @@ final class VkTerrainRenderer {
                     // blended one is drawn in the translucent pass because that
                     // is the pass whose depth is loaded rather than cleared.
                     .renderPass(spec.blend ? translucentRenderPass : renderPass)
-                    .subpass(0);
+                    // The opaque pass has one subpass; the translucent one has
+                    // two, and everything that is not a creature is in the
+                    // second. A pipeline naming the wrong one is refused.
+                    .subpass(spec.blend ? SUBPASS_TRANSLUCENT : 0);
         }
         LongBuffer pPipeline = stack.mallocLong(TERRAIN_PIPELINES.length);
         check(vkCreateGraphicsPipelines(device(), pipelineCacheHandle, pipelineInfo, null,
@@ -6077,7 +6671,7 @@ final class VkTerrainRenderer {
                 .pDynamicState(dynamic)
                 .layout(spritePipelineLayout)
                 .renderPass(translucentRenderPass)
-                .subpass(0);
+                .subpass(SUBPASS_TRANSLUCENT);
         LongBuffer pPipeline = stack.mallocLong(1);
         check(vkCreateGraphicsPipelines(device(), pipelineCacheHandle, pipelineInfo, null, pPipeline),
                 "vkCreateGraphicsPipelines(sprite)");
@@ -6087,20 +6681,42 @@ final class VkTerrainRenderer {
         // cutoff already in the fragment shader still discards where the texture
         // is transparent, which is what a cutout wants.
         //
-        // Depth is NOT written, and asking for it here would have been a
-        // specification violation rather than a setting. This subpass declares
-        // its depth attachment DEPTH_STENCIL_READ_ONLY_OPTIMAL (see the
-        // translucent render pass), because the water shader samples that same
-        // image for its reflections — an image cannot be both written as an
-        // attachment and read as a texture in one pass. So no pipeline in here
-        // may write depth, and the near side of a model cannot hide its far
-        // side until creatures are drawn somewhere with a depth buffer of their
-        // own. Turning the flag on would have written nothing and reported an
-        // error; leaving it off is the honest half of the fix.
+        // This one is kept for a creature whose skin arrives while the second
+        // subpass is being recorded — an item frame's contents, anything the
+        // sprite path is handed late. It does not write depth, because nothing
+        // in that subpass may.
         blendAttachment.get(0).blendEnable(false);
         check(vkCreateGraphicsPipelines(device(), pipelineCacheHandle, pipelineInfo, null, pPipeline),
                 "vkCreateGraphicsPipelines(sprite opaque)");
         spriteOpaquePipeline = pPipeline.get(0);
+
+        // And the one creatures are actually drawn with: the first subpass,
+        // where depth is an ordinary writable attachment.
+        //
+        // Depth writing is the whole reason this subpass exists. Without it a
+        // model has no inside: the far side of a head is drawn over the near
+        // side whenever it happens to come later in the batch, which is what
+        // "heads with no texture" turned out to be, and one mob is drawn
+        // through another.
+        //
+        // Culling stays off, and that is vanilla's decision rather than ours:
+        // RenderLivingBase turns face culling off for the whole of every living
+        // creature it draws, so the models are built with no promise about
+        // which way a face points. Turning it on here would not be an
+        // optimisation, it would be a new rule the models were never written
+        // to.
+        VkPipelineDepthStencilStateCreateInfo creatureDepth =
+                VkPipelineDepthStencilStateCreateInfo.calloc(stack)
+                        .sType(VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO)
+                        .depthTestEnable(true)
+                        .depthWriteEnable(true)
+                        .depthCompareOp(VK_COMPARE_OP_LESS_OR_EQUAL);
+        pipelineInfo.get(0)
+                .pDepthStencilState(creatureDepth)
+                .subpass(SUBPASS_CREATURES);
+        check(vkCreateGraphicsPipelines(device(), pipelineCacheHandle, pipelineInfo, null, pPipeline),
+                "vkCreateGraphicsPipelines(creature)");
+        creaturePipeline = pPipeline.get(0);
 
         vkDestroyShaderModule(device(), vertModule, null);
         vkDestroyShaderModule(device(), fragModule, null);
@@ -6130,6 +6746,132 @@ final class VkTerrainRenderer {
      * on the way out. This is the same trick the opaque composite already uses
      * to send depth the other way, pointed backwards.
      */
+    /**
+     * Deepens the sky away from the horizon, over the sky the game drew.
+     *
+     * The colour is not invented: it is the game's own fog colour darkened,
+     * which is the same colour vanilla fades its distance into and therefore
+     * cannot disagree with the horizon underneath it. What the gradient adds is
+     * only the falling-off — flat at the horizon, deepest overhead.
+     *
+     * Masked by this renderer's own depth. Where the terrain drew, the depth is
+     * short of one and nothing is painted; where nothing drew, it stands at the
+     * clear value, and that is exactly the sky. No test on colour, which would
+     * catch a white cloud or a snowy peak.
+     *
+     * Screen height rather than a true view direction, and this is the honest
+     * limit of it: looking straight up puts the deepest part of the gradient
+     * across the middle of the screen instead of at the point overhead. That is
+     * what every cheap version of this does, it is a look rather than a sky
+     * model, and the slider is where somebody decides how much of it they want.
+     */
+    private int buildSkyGradientProgram() {
+        return buildQuadProgram(
+                "uniform sampler2D uDepth;\n"
+                        + "uniform vec2 uInvSize;\n"
+                        + "uniform mat4 uInvMvp;\n"
+                        + "uniform vec3 uSun;\n"
+                        + "uniform vec3 uZenith;\n"
+                        + "uniform vec3 uGlow;\n"
+                        + "uniform float uStrength;\n"
+                        + "uniform float uDay;\n"
+                        + "void main() {\n"
+                        + "    vec2 uv = gl_FragCoord.xy * uInvSize;\n"
+                        // Anything the terrain touched is not sky. The clear
+                        // value is one, and a drawn pixel is always below it.
+                        + "    if (texture2D(uDepth, uv).r < 0.9999) discard;\n"
+                        // Where this pixel actually looks, in the world.
+                        //
+                        // The first version used the height of the pixel on the
+                        // screen, which is the same thing only while the camera
+                        // is level: look up and the deepest part of the sky lay
+                        // across the middle of the view instead of overhead.
+                        // Unprojecting the far plane costs one matrix multiply
+                        // and answers the real question.
+                        + "    vec4 far = uInvMvp * vec4(uv * 2.0 - 1.0, 1.0, 1.0);\n"
+                        + "    vec3 dir = normalize(far.xyz / far.w);\n"
+                        + "    float up = clamp(dir.y, 0.0, 1.0);\n"
+                        // Deepest overhead, nothing at the horizon — where the
+                        // game's own colour is already right and the terrain
+                        // fades into it.
+                        + "    float deep = pow(up, 0.65);\n"
+                        // And warm where the sky meets the sun, which is the
+                        // other half of what a sky looks like and the half a
+                        // gradient alone cannot give. Held to the horizon and
+                        // to daylight: a glow around a sun that has set is the
+                        // sort of thing that reads as a bug.
+                        + "    float toSun = clamp(dot(dir, uSun), 0.0, 1.0);\n"
+                        + "    float glow = pow(toSun, 6.0) * (1.0 - up) * uDay;\n"
+                        + "    vec3 tint = mix(uZenith, uGlow, glow);\n"
+                        + "    gl_FragColor = vec4(tint, uStrength * max(deep, glow));\n"
+                        + "}\n");
+    }
+
+    private void paintSkyGradient() {
+        if (skyGradientProgram == 0) {
+            skyGradientProgram = buildSkyGradientProgram();
+            skyGradientStrengthUniform =
+                    GL20C.glGetUniformLocation(skyGradientProgram, "uStrength");
+            skyGradientTopUniform = GL20C.glGetUniformLocation(skyGradientProgram, "uZenith");
+            skyGradientGlowUniform = GL20C.glGetUniformLocation(skyGradientProgram, "uGlow");
+            skyGradientSunUniform = GL20C.glGetUniformLocation(skyGradientProgram, "uSun");
+            skyGradientDayUniform = GL20C.glGetUniformLocation(skyGradientProgram, "uDay");
+            skyGradientInvMvpUniform =
+                    GL20C.glGetUniformLocation(skyGradientProgram, "uInvMvp");
+            skyGradientInvSizeUniform =
+                    GL20C.glGetUniformLocation(skyGradientProgram, "uInvSize");
+            int prev = GL11C.glGetInteger(GL20C.GL_CURRENT_PROGRAM);
+            GL20C.glUseProgram(skyGradientProgram);
+            GL20C.glUniform1i(GL20C.glGetUniformLocation(skyGradientProgram, "uDepth"), 1);
+            GL20C.glUseProgram(prev);
+        }
+        // Without an invertible matrix there is no direction to shade by, and a
+        // sky painted by screen height was the thing being fixed. Skipped for
+        // the frame rather than approximated.
+        if (!invert(currentMvp, skyInverse)) {
+            return;
+        }
+        GL20C.glUseProgram(skyGradientProgram);
+        GL20C.glUniform2f(skyGradientInvSizeUniform, 1.0f / width, 1.0f / height);
+        skyMatrixBuffer.clear();
+        skyMatrixBuffer.put(skyInverse).flip();
+        GL20C.glUniformMatrix4fv(skyGradientInvMvpUniform, false, skyMatrixBuffer);
+        GL20C.glUniform3f(skyGradientSunUniform,
+                sunDirection[0], sunDirection[1], sunDirection[2]);
+        // Nothing while the sun is under the horizon, and eased in rather than
+        // switched on as it rises — the same shape the glint uses for the same
+        // reason.
+        GL20C.glUniform1f(skyGradientDayUniform,
+                Math.max(0.0f, Math.min(sunDirection[1] * 4.0f, 1.0f)));
+        // The fog colour, taken down towards a night sky rather than towards
+        // black: a zenith that goes grey reads as haze, and haze is the one
+        // thing the horizon already has.
+        GL20C.glUniform3f(skyGradientTopUniform,
+                fogState[0] * 0.42f, fogState[1] * 0.46f, fogState[2] * 0.62f);
+        // And up towards warm where the sky meets the sun. Built from the same
+        // fog colour so that it stays this world's sky rather than a colour
+        // this mod picked: in the Nether, or under a mod's own sky, it leans
+        // whatever is already there.
+        GL20C.glUniform3f(skyGradientGlowUniform,
+                Math.min(fogState[0] * 1.35f, 1.0f),
+                Math.min(fogState[1] * 1.12f, 1.0f),
+                Math.min(fogState[2] * 0.86f, 1.0f));
+        GL20C.glUniform1f(skyGradientStrengthUniform, skyGradient);
+        GL13C.glActiveTexture(GL13C.GL_TEXTURE1);
+        GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, glDepthTexture);
+        GL11C.glEnable(GL11C.GL_BLEND);
+        GL11C.glBlendFunc(GL11C.GL_SRC_ALPHA, GL11C.GL_ONE_MINUS_SRC_ALPHA);
+        GL11C.glDisable(GL11C.GL_DEPTH_TEST);
+        GL11C.glDepthMask(false);
+        org.lwjgl.opengl.GL11.glBegin(org.lwjgl.opengl.GL11.GL_QUADS);
+        org.lwjgl.opengl.GL11.glVertex2f(-1.0f, -1.0f);
+        org.lwjgl.opengl.GL11.glVertex2f(1.0f, -1.0f);
+        org.lwjgl.opengl.GL11.glVertex2f(1.0f, 1.0f);
+        org.lwjgl.opengl.GL11.glVertex2f(-1.0f, 1.0f);
+        org.lwjgl.opengl.GL11.glEnd();
+        GL11C.glDisable(GL11C.GL_BLEND);
+    }
+
     private int buildDepthImportProgram() {
         return buildQuadProgram(
                 "uniform sampler2D uSource;\n"
@@ -6468,7 +7210,7 @@ final class VkTerrainRenderer {
         height = fbHeight;
         try (MemoryStack stack = stackPush()) {
             long[] colorOut = new long[4];
-            createExportedTarget(stack, VK_FORMAT_R8G8B8A8_UNORM,
+            createExportedTarget(stack, colourFormat,
                     VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT
                             | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
                     VK_IMAGE_ASPECT_COLOR_BIT, colorOut);
@@ -6476,7 +7218,7 @@ final class VkTerrainRenderer {
             colorMemory = colorOut[1];
             colorView = colorOut[2];
             glColorMemoryObject = importMemoryToGL(stack, colorMemory, colorOut[3]);
-            glColorTexture = createGlTexture(glColorMemoryObject, org.lwjgl.opengl.GL11.GL_RGBA8);
+            glColorTexture = createGlTexture(glColorMemoryObject, glColourFormat);
 
             long[] depthOut = new long[4];
             createExportedTarget(stack, depthFormat(stack),
@@ -6507,15 +7249,14 @@ final class VkTerrainRenderer {
             }
 
             long[] translucentOut = new long[4];
-            createExportedTarget(stack, VK_FORMAT_R8G8B8A8_UNORM,
+            createExportedTarget(stack, colourFormat,
                     VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
                     VK_IMAGE_ASPECT_COLOR_BIT, translucentOut);
             translucentImage = translucentOut[0];
             translucentMemory = translucentOut[1];
             translucentView = translucentOut[2];
             glTranslucentMemoryObject = importMemoryToGL(stack, translucentMemory, translucentOut[3]);
-            glTranslucentTexture = createGlTexture(glTranslucentMemoryObject,
-                    org.lwjgl.opengl.GL11.GL_RGBA8);
+            glTranslucentTexture = createGlTexture(glTranslucentMemoryObject, glColourFormat);
 
             VkFramebufferCreateInfo fbInfo = VkFramebufferCreateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO)
@@ -6548,7 +7289,10 @@ final class VkTerrainRenderer {
             GL20C.glUseProgram(prev);
 
             // Diagnostic readback strip (host-visible, persistently mapped)
-            int readbackSize = width * READBACK_ROWS * 4;
+            // Four bytes a pixel was the format rather than a fact: a
+            // sixteen-bit target is eight, and a buffer sized for the old one
+            // is a copy that writes past its end.
+            int readbackSize = width * READBACK_ROWS * colourBytesPerPixel();
             VkBufferCreateInfo rbInfo = VkBufferCreateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO)
                     .size(readbackSize)
@@ -7443,6 +8187,10 @@ final class VkTerrainRenderer {
             vkDestroyPipeline(device(), spriteOpaquePipeline, null);
             spriteOpaquePipeline = 0;
         }
+        if (creaturePipeline != 0) {
+            vkDestroyPipeline(device(), creaturePipeline, null);
+            creaturePipeline = 0;
+        }
         if (spritePipelineLayout != 0) {
             vkDestroyPipelineLayout(device(), spritePipelineLayout, null);
             spritePipelineLayout = 0;
@@ -7514,6 +8262,7 @@ final class VkTerrainRenderer {
             destroyAoTargets();
             destroyAccumTargets();
             destroyToneTargets();
+            destroySceneOcclusionTargets();
             GL11C.glDeleteTextures(glColorTexture);
             GL11C.glDeleteTextures(glDepthTexture);
             EXTMemoryObject.glDeleteMemoryObjectsEXT(glColorMemoryObject);

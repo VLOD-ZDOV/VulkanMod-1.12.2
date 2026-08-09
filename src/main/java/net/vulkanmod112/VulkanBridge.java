@@ -164,6 +164,17 @@ public interface VulkanBridge {
      * Grades the finished frame — terrain, creatures, particles, weather and
      * water together — where all of it exists at once. Does nothing at zero.
      */
+    /**
+     * Darkens the corners of the whole picture, not only of the blocks.
+     *
+     * The occlusion this renderer already had is computed inside its own pass,
+     * from a depth image holding terrain and nothing else — so a chest, a mob
+     * or a modded block casts nothing into the floor it stands on, however
+     * plainly it is standing there. By this point the game has finished the
+     * world, and its depth buffer holds every one of them.
+     */
+    void applySceneOcclusion(int sceneGlTexture);
+
     void applySceneTone(int sceneGlTexture);
 
     /** Tells the Vulkan side which GL texture holds the 16x16 lightmap. */
@@ -266,6 +277,19 @@ public interface VulkanBridge {
 
     /** Whether rays can actually be traced right now, whatever the setting says. */
     boolean isRayTracingActive();
+
+    /**
+     * Whether this frame's creatures really are in the acceleration structure.
+     *
+     * Tracing being on says a ray can be fired; it does not say there is
+     * anything for the ray to hit. The creatures go in as one structure over
+     * one run of vertices, and that run can be missing for reasons that have
+     * nothing to do with the settings: none drawn by this renderer yet, a run
+     * broken up by particles, or a structure budget with no room left in it.
+     * Whatever takes vanilla's round shadow away has to ask this as well, or a
+     * mob stands on nothing at all — which is worse than the circle.
+     */
+    boolean creaturesInStructure();
 
     /**
      * Copies one of the game's sprite sheets into Vulkan, by slot.
