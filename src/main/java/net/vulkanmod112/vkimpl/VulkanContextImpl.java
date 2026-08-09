@@ -1202,6 +1202,14 @@ public final class VulkanContextImpl implements VulkanBridge {
     }
 
     @Override
+    public synchronized void updateClouds(int glTexture, float height, float driftBlocks) {
+        if (!initialized || !interopCapable) {
+            return;
+        }
+        terrainRenderer().setCloudState(glTexture, height, driftBlocks);
+    }
+
+    @Override
     public synchronized boolean drawsSprites() {
         if (!initialized || !interopCapable || terrainRenderer == null) {
             return false;

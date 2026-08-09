@@ -381,6 +381,8 @@ public final class VulkanConfig {
     static final int DEF_LEAF_SHADOWS = 0;
     /** How dark a short shadow towards the sun, over the finished picture. */
     static final int DEF_CONTACT_SHADOWS = 0;
+    /** How dark the shadow of the game's own clouds may go. */
+    static final int DEF_CLOUD_SHADOWS = 0;
     /** How bright the shafts of light from the sun may be. */
     static final int DEF_GOD_RAYS = 0;
     /** Whether the game's frame is asked for with room above white in it. */
@@ -592,6 +594,7 @@ public final class VulkanConfig {
     private static volatile boolean sceneOcclusion = DEF_SCENE_OCCLUSION;
     private static volatile int leafShadows = DEF_LEAF_SHADOWS;
     private static volatile int contactShadows = DEF_CONTACT_SHADOWS;
+    private static volatile int cloudShadows = DEF_CLOUD_SHADOWS;
     private static volatile int godRays = DEF_GOD_RAYS;
     private static volatile boolean hdrFrame = DEF_HDR_FRAME;
     private static volatile int exposure = DEF_EXPOSURE;
@@ -916,6 +919,9 @@ public final class VulkanConfig {
                 "How much light is let in before the film curve closes the range back down. The middle is no change. Only means anything with the frame above turned on.");
         godRays = config.getInt("godRays", CATEGORY_GENERAL, DEF_GOD_RAYS, 0, 100,
                 "How bright the shafts of light from the sun may be. Gathered from the finished picture: the walk from a pixel towards the sun adds up what the sky shows through, so anything standing in the way leaves a dark lane and a gap in a canopy leaves a bright one. No geometry and no rays are involved, so it cannot break another mod - and whatever a mod drew is in the picture and casts its own shafts for free. Needs the sun above the horizon and roughly in front of you; fades out rather than switching off as it leaves the screen.");
+        cloudShadows = config.getInt("cloudShadows", CATEGORY_GENERAL, DEF_CLOUD_SHADOWS,
+                0, 100,
+                "How dark a shadow the clouds overhead cast on the world. Read from the very sheet the game draws its clouds from, at the height the world reports and with the drift the game itself counts - so the dark patch lands under the cloud that cast it rather than beside it. Needs the clouds turned on and the sun above the horizon; fades out near the horizon, where the journey up to the cloud layer is long enough that the shadow lands nowhere near what is overhead.");
         contactShadows = config.getInt("contactShadows", CATEGORY_GENERAL,
                 DEF_CONTACT_SHADOWS, 0, 100,
                 "How dark a short shadow cast along the ground towards the sun may go. It is worked out from the depth of the picture rather than from geometry, so whatever drew into that depth casts one - a chest, a creature, another mod's machine - and nothing is taken away from any mod to get it. It can only find something that is itself on the screen and within about a block of the surface, which is why it is a contact shadow and not a shadow: it fills the gap where a thing meets the floor, and the sun's own long shadows are the traced ones. Shares the ambient occlusion pass, so it costs a loop rather than a pass, and turn on Occlusion Over Everything for it to see anything but blocks.");
@@ -1245,6 +1251,7 @@ public final class VulkanConfig {
      */
     public static void resetToDefaults() {
         setContactShadows(DEF_CONTACT_SHADOWS);
+        setCloudShadows(DEF_CLOUD_SHADOWS);
         setGodRays(DEF_GOD_RAYS);
         setHdrFrame(DEF_HDR_FRAME);
         setExposure(DEF_EXPOSURE);
@@ -1611,6 +1618,16 @@ public final class VulkanConfig {
     public static void setGodRays(int value) {
         godRays = clamp(value, 0, 100);
         store(CATEGORY_GENERAL, "godRays", godRays);
+        applySystemProperties();
+    }
+
+    public static int getCloudShadows() {
+        return cloudShadows;
+    }
+
+    public static void setCloudShadows(int value) {
+        cloudShadows = clamp(value, 0, 100);
+        store(CATEGORY_GENERAL, "cloudShadows", cloudShadows);
         applySystemProperties();
     }
 
@@ -2327,6 +2344,7 @@ public final class VulkanConfig {
         publish("vulkanmod112.sceneOcclusion", Boolean.toString(sceneOcclusion));
         publish("vulkanmod112.leafShadows", Integer.toString(leafShadows));
         publish("vulkanmod112.contactShadows", Integer.toString(contactShadows));
+        publish("vulkanmod112.cloudShadows", Integer.toString(cloudShadows));
         publish("vulkanmod112.godRays", Integer.toString(godRays));
         publish("vulkanmod112.hdrFrame", Boolean.toString(hdrFrame));
         publish("vulkanmod112.exposure", Integer.toString(exposure));

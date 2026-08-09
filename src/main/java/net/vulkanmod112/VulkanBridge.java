@@ -260,6 +260,22 @@ public interface VulkanBridge {
      */
     void updateWeather(float rainStrength, int seaLevel);
 
+    /**
+     * Where the game's own clouds are, so that they can throw a shadow.
+     *
+     * Every number here is the game's rather than this mod's, and that is the
+     * whole point of the effect: the shadow is cast by sampling the very
+     * texture the clouds are drawn from, at the place the game's own
+     * arithmetic puts it. A pattern of our own would drift away from what is
+     * overhead, and a shadow that does not match its cloud reads as a fault
+     * rather than as weather.
+     *
+     * @param glTexture   the cloud sheet, as OpenGL knows it, or 0 for none
+     * @param height      the height the clouds hang at, in world blocks
+     * @param driftBlocks how far they have drifted along x since the world began
+     */
+    void updateClouds(int glTexture, float height, float driftBlocks);
+
     boolean drawsSprites();
 
     /**

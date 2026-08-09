@@ -803,6 +803,12 @@ final class VkTerrainRenderer {
     private int aoRadiusUniform = -1;
     private int aoSunUniform = -1;
     private int aoContactUniform = -1;
+    private int aoCloudShadowUniform = -1;
+    private int aoCloudUvUniform = -1;
+    private int aoSunWorldUniform = -1;
+    private int aoCol0Uniform = -1;
+    private int aoCol1Uniform = -1;
+    private int aoCol2Uniform = -1;
     private int aoStrengthUniform = -1;
     private int aoWidth;
     private int aoHeight;
@@ -817,10 +823,22 @@ final class VkTerrainRenderer {
      * and other mods' machines, this renderer's own holds blocks alone.
      */
     private float contactShadows;
+    /**
+     * How dark the shadow of the game's own clouds may go on the world.
+     *
+     * Rides the occlusion pass for the same reason the contact shadows do,
+     * and is by some distance the cheapest thing on this page: one texture
+     * read of a sheet the game already has loaded. What it buys is out of
+     * proportion to that — a sky with clouds in it that leave no mark on the
+     * ground is the flattest thing in the picture, and moving cloud shade
+     * across a landscape reads as depth in the sky without drawing a single
+     * cloud of our own.
+     */
+    private float cloudShadows;
 
     /** Whether the occlusion pass has anything to do at all. */
     private boolean aoWanted() {
-        return aoStrength > 0.0f || contactShadows > 0.0f;
+        return aoStrength > 0.0f || contactShadows > 0.0f || cloudShadows > 0.0f;
     }
     /**
      * How much of a gradient the sky is given, 0 for the sky the game drew.
@@ -3523,6 +3541,7 @@ final class VkTerrainRenderer {
             GL20C.glUniform1f(aoRadiusUniform, aoRadius);
             GL20C.glUniform1f(aoStrengthUniform, aoStrength);
             writeContactSun();
+            writeCloudShadow();
             GL13C.glActiveTexture(GL13C.GL_TEXTURE0);
             GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, depthTexture);
             fullscreenQuad();
@@ -3602,6 +3621,52 @@ final class VkTerrainRenderer {
                 contactShadows * Math.min(1.0f, sunDirection[1] * 5.0f));
     }
 
+    /**
+     * Where the game's clouds sit on their own sheet, from the camera's point.
+     *
+     * The wrapping is done here, in double precision, and only the wrapped
+     * remainder is handed over. A world coordinate can be in the millions, and
+     * a million divided by three thousand and handed to a float leaves nothing
+     * of the fraction — the shadow would move in visible steps as the player
+     * walks, which is the classic way this effect goes wrong far from spawn.
+     * Everything the shader adds to it is measured from the camera and small.
+     */
+    private void writeCloudShadow() {
+        if (aoCloudShadowUniform < 0) {
+            return;
+        }
+        int sheet = cloudTexture;
+        if (cloudShadows <= 0.0f || sheet == 0 || sunDirection[1] <= 0.05f) {
+            GL20C.glUniform1f(aoCloudShadowUniform, 0.0f);
+            return;
+        }
+        // The game's own arithmetic: a cloud cell is twelve blocks and the
+        // sheet is two hundred and fifty six cells across, drifting along x.
+        final double cell = 12.0;
+        final double sheetCells = 256.0;
+        double perBlock = 1.0 / (cell * sheetCells);
+        double baseU = ((viewWorldX + cloudDrift) / cell) / sheetCells;
+        double baseV = ((viewWorldZ / cell) + 0.33) / sheetCells;
+        baseU -= Math.floor(baseU);
+        baseV -= Math.floor(baseV);
+        GL20C.glUniform4f(aoCloudUvUniform, (float) baseU, (float) baseV,
+                (float) perBlock, (float) (cloudHeight - viewWorldY));
+        GL20C.glUniform3f(aoSunWorldUniform,
+                sunDirection[0], sunDirection[1], sunDirection[2]);
+        modelViewMatrix.clear();
+        GL11C.glGetFloatv(org.lwjgl.opengl.GL11.GL_MODELVIEW_MATRIX, modelViewMatrix);
+        GL20C.glUniform3f(aoCol0Uniform, modelViewMatrix.get(0),
+                modelViewMatrix.get(1), modelViewMatrix.get(2));
+        GL20C.glUniform3f(aoCol1Uniform, modelViewMatrix.get(4),
+                modelViewMatrix.get(5), modelViewMatrix.get(6));
+        GL20C.glUniform3f(aoCol2Uniform, modelViewMatrix.get(8),
+                modelViewMatrix.get(9), modelViewMatrix.get(10));
+        GL13C.glActiveTexture(GL13C.GL_TEXTURE2);
+        GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, sheet);
+        GL13C.glActiveTexture(GL13C.GL_TEXTURE0);
+        GL20C.glUniform1f(aoCloudShadowUniform, cloudShadows);
+    }
+
     private boolean ensureAoTargets() {
         int wantWidth = Math.max(1, width / 2);
         int wantHeight = Math.max(1, height / 2);
@@ -3665,6 +3730,18 @@ final class VkTerrainRenderer {
                         // separate flag, so the shader has one thing to ask.
                         + "uniform vec3 uSun;\n"
                         + "uniform float uContact;\n"
+                        + "uniform sampler2D uClouds;\n"
+                        + "uniform float uCloudShadow;\n"
+                        // xy: where the camera sits on the cloud sheet,
+                        // already wrapped; z: how much of the sheet one block
+                        // covers; w: how far the clouds are above the eye.
+                        + "uniform vec4 uCloudUv;\n"
+                        + "uniform vec3 uSunWorld;\n"
+                        // The three columns of the view rotation, which turn
+                        // a view-space direction back into world axes.
+                        + "uniform vec3 uCol0;\n"
+                        + "uniform vec3 uCol1;\n"
+                        + "uniform vec3 uCol2;\n"
                         // How far a contact shadow reaches, in blocks, split
                         // over eight steps — and how thick a thing has to be
                         // before it is treated as standing in the way rather
@@ -3875,7 +3952,40 @@ final class VkTerrainRenderer {
                         + "            }\n"
                         + "        }\n"
                         + "    }\n"
-                        + "    float lit = clamp(ao, 0.0, 1.0) * (1.0 - uContact * contact * 0.75);\n"
+                        // The shadow of the game's own clouds, cast onto whatever
+                        // is in the picture. Nothing about it is invented: the
+                        // sheet is the one the game draws its clouds from, the
+                        // height is the one the world reports, and the drift is
+                        // the game's own counter — so the dark patch lands under
+                        // the cloud that cast it. This is also the cheapest way
+                        // there is to make a sky read as having depth, and it
+                        // costs one texture read on a pass that already exists.
+                        + "    float cloud = 0.0;\n"
+                        + "    if (uCloudShadow > 0.0 && uSunWorld.y > 0.05) {\n"
+                        // View space back to the axes the world is measured in.
+                        // A direction only, so the three dot products are the
+                        // whole of it and the camera's own position never enters
+                        // the arithmetic — which is what keeps this exact a
+                        // million blocks from the origin.
+                        + "        vec3 rel = vec3(dot(uCol0, p), dot(uCol1, p), dot(uCol2, p));\n"
+                        + "        float climb = uCloudUv.w - rel.y;\n"
+                        // Only what is under the clouds is in their shade. Above
+                        // them the sun is unobstructed, and marching backwards
+                        // would put a shadow on the top of a mountain that rises
+                        // through the cloud layer.
+                        + "        if (climb > 0.0) {\n"
+                        + "            vec2 hit = rel.xz + uSunWorld.xz * (climb / uSunWorld.y);\n"
+                        + "            vec2 uv2 = fract(uCloudUv.xy + hit * uCloudUv.z);\n"
+                        + "            cloud = texture2D(uClouds, uv2).a;\n"
+                        // Faded out with the sun near the horizon, where the
+                        // journey to the cloud layer is long enough that the
+                        // shadow lands a hundred blocks from anything overhead
+                        // and reads as a stain rather than as weather.
+                        + "            cloud *= clamp(uSunWorld.y * 3.0, 0.0, 1.0);\n"
+                        + "        }\n"
+                        + "    }\n"
+                        + "    float lit = clamp(ao, 0.0, 1.0) * (1.0 - uContact * contact * 0.75)\n"
+                        + "            * (1.0 - uCloudShadow * cloud);\n"
                         + "    gl_FragColor = vec4(clamp(lit, 0.0, 1.0));\n"
                         + "}\n");
         aoInvSize = GL20C.glGetUniformLocation(aoProgram, "uInvSize");
@@ -3884,6 +3994,16 @@ final class VkTerrainRenderer {
         aoStrengthUniform = GL20C.glGetUniformLocation(aoProgram, "uStrength");
         aoSunUniform = GL20C.glGetUniformLocation(aoProgram, "uSun");
         aoContactUniform = GL20C.glGetUniformLocation(aoProgram, "uContact");
+        aoCloudShadowUniform = GL20C.glGetUniformLocation(aoProgram, "uCloudShadow");
+        aoCloudUvUniform = GL20C.glGetUniformLocation(aoProgram, "uCloudUv");
+        aoSunWorldUniform = GL20C.glGetUniformLocation(aoProgram, "uSunWorld");
+        aoCol0Uniform = GL20C.glGetUniformLocation(aoProgram, "uCol0");
+        aoCol1Uniform = GL20C.glGetUniformLocation(aoProgram, "uCol1");
+        aoCol2Uniform = GL20C.glGetUniformLocation(aoProgram, "uCol2");
+        int prevAo = GL11C.glGetInteger(GL20C.GL_CURRENT_PROGRAM);
+        GL20C.glUseProgram(aoProgram);
+        GL20C.glUniform1i(GL20C.glGetUniformLocation(aoProgram, "uClouds"), 2);
+        GL20C.glUseProgram(prevAo);
     }
 
     private void destroyAoTargets() {
@@ -6186,6 +6306,23 @@ final class VkTerrainRenderer {
                 colourFormat == VK_FORMAT_R16G16B16A16_SFLOAT ? 1.0f : 0.0f);
     }
 
+    /**
+     * The game's clouds, as they are this frame: sheet, height, drift.
+     *
+     * Zero for the sheet means there is nothing overhead to cast a shadow —
+     * clouds switched off, no world, or the sheet not loaded yet — and the
+     * pass reads that as "no shadow" rather than needing a flag of its own.
+     */
+    private volatile int cloudTexture;
+    private volatile float cloudHeight;
+    private volatile float cloudDrift;
+
+    synchronized void setCloudState(int glTexture, float height, float driftBlocks) {
+        cloudTexture = glTexture;
+        cloudHeight = height;
+        cloudDrift = driftBlocks;
+    }
+
     /** How hard it is raining, 0 to 1; see VulkanBridge.updateWeather. */
     private volatile float rainStrength;
 
@@ -6348,6 +6485,7 @@ final class VkTerrainRenderer {
         bloomStrength = clampPercent(intProperty("vulkanmod112.bloom", 0));
         aoStrength = clampPercent(intProperty("vulkanmod112.ambientOcclusion", 0));
         contactShadows = clampPercent(intProperty("vulkanmod112.contactShadows", 0));
+        cloudShadows = clampPercent(intProperty("vulkanmod112.cloudShadows", 0));
         godRays = clampPercent(intProperty("vulkanmod112.godRays", 0));
         hdrFrame = Boolean.parseBoolean(
                 System.getProperty("vulkanmod112.hdrFrameActive", "false"));

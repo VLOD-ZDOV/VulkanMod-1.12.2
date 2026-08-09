@@ -335,6 +335,7 @@ public final class TerrainHooks {
                 bridge.updateSun(SUN);
                 bridge.updateWeather(rainStrength(mc),
                         mc.world == null ? 63 : mc.world.getSeaLevel());
+                captureClouds(mc);
                 if (lightmapColors != null) {
                     checkLightmapStillOurs();
                     bridge.updateLightmapData(lightmapColors);
@@ -592,6 +593,50 @@ public final class TerrainHooks {
      * Read from GL rather than recomputed, because the game changes fog for
      * water, lava, blindness, the void and render distance, and mods add more.
      */
+    /** The sheet the game draws its clouds from, looked up once. */
+    private static final net.minecraft.util.ResourceLocation CLOUD_SHEET =
+            new net.minecraft.util.ResourceLocation("textures/environment/clouds.png");
+
+    /**
+     * Hands over where the game's clouds are, so they can throw a shadow.
+     *
+     * Nothing is invented here and that is deliberate. The sheet is the one the
+     * game binds, the height is the one the world reports, and the drift is the
+     * game's own counter — so the shadow lands under the cloud that cast it
+     * rather than beside it. Every one of those would have been easy to
+     * reproduce approximately, and approximately is exactly what would make the
+     * effect read as broken.
+     *
+     * Zero is sent whenever the clouds are not there to cast anything: the
+     * player turned them off, the sheet has not been loaded yet, or there is no
+     * world. Deciding that here rather than in the shader keeps the question
+     * where the answer is.
+     */
+    private static void captureClouds(Minecraft mc) {
+        VulkanBridge bridge = liveBridge();
+        if (bridge == null) {
+            return;
+        }
+        int texture = 0;
+        float height = 0.0f;
+        float drift = 0.0f;
+        if (mc.world != null && mc.gameSettings != null
+                && mc.gameSettings.shouldRenderClouds() != 0) {
+            net.minecraft.client.renderer.texture.ITextureObject sheet =
+                    mc.getTextureManager().getTexture(CLOUD_SHEET);
+            if (sheet != null) {
+                texture = sheet.getGlTextureId();
+                height = mc.world.provider.getCloudHeight();
+                if (mc.renderGlobal instanceof net.vulkanmod112.mixin.RenderGlobalAccessor) {
+                    int ticks = ((net.vulkanmod112.mixin.RenderGlobalAccessor) mc.renderGlobal)
+                            .vulkanmod112$cloudTicks();
+                    drift = (float) ((ticks + mc.getRenderPartialTicks()) * 0.03);
+                }
+            }
+        }
+        bridge.updateClouds(texture, height, drift);
+    }
+
     private static void captureFog() {
         if (!VulkanConfig.isFogEnabled() || !GL11.glIsEnabled(GL11.GL_FOG)) {
             FOG[3] = 0.0f; // mode 0: the shader skips the blend

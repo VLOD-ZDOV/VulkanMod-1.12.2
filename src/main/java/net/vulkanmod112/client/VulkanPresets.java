@@ -99,6 +99,7 @@ public final class VulkanPresets {
         boolean sceneOcclusion;
         int leafShadows;
         int contactShadows;
+        int cloudShadows;
         int godRays;
         boolean hdrFrame;
         int exposure = 50;
@@ -161,6 +162,7 @@ public final class VulkanPresets {
         look.sceneOcclusion = true;
         look.leafShadows = 100;
         look.contactShadows = 60;
+        look.cloudShadows = 55;
         look.godRays = 45;
         look.hdrFrame = true;
         look.roundSun = true;
@@ -311,6 +313,7 @@ public final class VulkanPresets {
         VulkanConfig.setSceneOcclusion(look.sceneOcclusion);
         VulkanConfig.setLeafShadows(look.leafShadows);
         VulkanConfig.setContactShadows(look.contactShadows);
+        VulkanConfig.setCloudShadows(look.cloudShadows);
         VulkanConfig.setGodRays(look.godRays);
         VulkanConfig.setHdrFrame(look.hdrFrame);
         VulkanConfig.setExposure(look.exposure);

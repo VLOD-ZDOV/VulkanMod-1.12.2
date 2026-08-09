@@ -2080,6 +2080,34 @@ final class VulkanOptions {
                                         VulkanConfig.setContactShadows(value);
                                     }
                                 }),
+                        new VRangeOption("Cloud Shadows",
+                                "The shade of the clouds overhead, moving across the world. "
+                                        + "Nothing about it is invented: it reads the very sheet "
+                                        + "the game draws its clouds from, at the height the "
+                                        + "world reports, with the drift the game itself counts "
+                                        + "— so the dark patch lands under the cloud that cast "
+                                        + "it rather than beside it, and it costs one texture "
+                                        + "read on a pass that already exists. A sky with clouds "
+                                        + "that leave no mark on the ground is the flattest "
+                                        + "thing in the picture, and this is the cheapest way to "
+                                        + "answer that without drawing a single cloud of its "
+                                        + "own. Falls on whatever is in the picture, this mod's "
+                                        + "blocks and another mod's machine alike. Needs the "
+                                        + "game's clouds turned on.",
+                                Cost.of(Level.NONE, Level.NONE, Level.NONE),
+                                "Needs clouds on and the sun above the horizon.",
+                                0, 100, 5, "%", "Off",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getCloudShadows();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setCloudShadows(value);
+                                    }
+                                }),
                         new VRangeOption("Light Shafts",
                                 "Sunlight made visible in the air itself, in lanes through a "
                                         + "canopy or a cave mouth. The oldest trick there is for "
