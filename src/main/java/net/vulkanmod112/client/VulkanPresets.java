@@ -100,6 +100,8 @@ public final class VulkanPresets {
         int leafShadows;
         int contactShadows;
         int godRays;
+        boolean hdrFrame;
+        int exposure = 50;
         int waterRefraction;
         boolean roundSun;
         boolean roundMoon;
@@ -160,6 +162,7 @@ public final class VulkanPresets {
         look.leafShadows = 100;
         look.contactShadows = 60;
         look.godRays = 45;
+        look.hdrFrame = true;
         look.roundSun = true;
         look.roundMoon = true;
         apply(mc, look);
@@ -309,6 +312,8 @@ public final class VulkanPresets {
         VulkanConfig.setLeafShadows(look.leafShadows);
         VulkanConfig.setContactShadows(look.contactShadows);
         VulkanConfig.setGodRays(look.godRays);
+        VulkanConfig.setHdrFrame(look.hdrFrame);
+        VulkanConfig.setExposure(look.exposure);
         VulkanConfig.setWaterRefraction(look.waterRefraction);
         VulkanConfig.setRoundSun(look.roundSun);
         VulkanConfig.setRoundMoon(look.roundMoon);

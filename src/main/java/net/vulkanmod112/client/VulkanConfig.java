@@ -383,6 +383,10 @@ public final class VulkanConfig {
     static final int DEF_CONTACT_SHADOWS = 0;
     /** How bright the shafts of light from the sun may be. */
     static final int DEF_GOD_RAYS = 0;
+    /** Whether the game's frame is asked for with room above white in it. */
+    static final boolean DEF_HDR_FRAME = false;
+    /** Middle of the slider is no change; it only means anything with HDR on. */
+    static final int DEF_EXPOSURE = 50;
     /** How much of the sky's colour the clouds take. */
     static final int DEF_CLOUD_TINT = 0;
     /** How many chunks the offscreen preloader keeps queued. */
@@ -589,6 +593,8 @@ public final class VulkanConfig {
     private static volatile int leafShadows = DEF_LEAF_SHADOWS;
     private static volatile int contactShadows = DEF_CONTACT_SHADOWS;
     private static volatile int godRays = DEF_GOD_RAYS;
+    private static volatile boolean hdrFrame = DEF_HDR_FRAME;
+    private static volatile int exposure = DEF_EXPOSURE;
     private static volatile int cloudTint = DEF_CLOUD_TINT;
     private static volatile int preloadQueue = DEF_PRELOAD_QUEUE;
     private static volatile int preloadScan = DEF_PRELOAD_SCAN;
@@ -903,6 +909,11 @@ public final class VulkanConfig {
                         + "than where its holes are - averaged over frames it comes out as "
                         + "dapple. Needs ray tracing and sun shadows; costs more the more of the "
                         + "screen is under a tree.");
+        hdrFrame = config.getBoolean("hdrFrame", CATEGORY_GENERAL, DEF_HDR_FRAME,
+                "Ask the game for a frame with room above white in it. Minecraft draws the world into eight bits a channel, so anything brighter than white is cut off before any effect here ever sees it - which is why the glow has no light to add, a highlight on water arrives already flattened into a white patch, and the tone curve can only tilt colours "
+                        + "rather than shape the light. With this on the frame holds sixteen bits a channel and the tone pass closes the range back down along a film curve at the end. Applies at once, costs video memory, and is asked of the driver first - if it will not have it, the log says so and nothing changes. Goes back to eight bits by itself if the Vulkan renderer stops drawing, because the pass that closes the range back down lives there.");
+        exposure = config.getInt("exposure", CATEGORY_GENERAL, DEF_EXPOSURE, 0, 100,
+                "How much light is let in before the film curve closes the range back down. The middle is no change. Only means anything with the frame above turned on.");
         godRays = config.getInt("godRays", CATEGORY_GENERAL, DEF_GOD_RAYS, 0, 100,
                 "How bright the shafts of light from the sun may be. Gathered from the finished picture: the walk from a pixel towards the sun adds up what the sky shows through, so anything standing in the way leaves a dark lane and a gap in a canopy leaves a bright one. No geometry and no rays are involved, so it cannot break another mod - and whatever a mod drew is in the picture and casts its own shafts for free. Needs the sun above the horizon and roughly in front of you; fades out rather than switching off as it leaves the screen.");
         contactShadows = config.getInt("contactShadows", CATEGORY_GENERAL,
@@ -1235,6 +1246,8 @@ public final class VulkanConfig {
     public static void resetToDefaults() {
         setContactShadows(DEF_CONTACT_SHADOWS);
         setGodRays(DEF_GOD_RAYS);
+        setHdrFrame(DEF_HDR_FRAME);
+        setExposure(DEF_EXPOSURE);
         setTerrainEnabled(DEF_TERRAIN);
         setOverlayEnabled(DEF_OVERLAY);
         setEntityDistance(DEF_ENTITY_DISTANCE);
@@ -1568,6 +1581,26 @@ public final class VulkanConfig {
     public static void setSunHaze(int value) {
         sunHaze = clamp(value, 0, 100);
         store(CATEGORY_GENERAL, "sunHaze", sunHaze);
+        applySystemProperties();
+    }
+
+    public static boolean isHdrFrame() {
+        return hdrFrame;
+    }
+
+    public static void setHdrFrame(boolean value) {
+        hdrFrame = value;
+        store(CATEGORY_GENERAL, "hdrFrame", value);
+        applySystemProperties();
+    }
+
+    public static int getExposure() {
+        return exposure;
+    }
+
+    public static void setExposure(int value) {
+        exposure = clamp(value, 0, 100);
+        store(CATEGORY_GENERAL, "exposure", exposure);
         applySystemProperties();
     }
 
@@ -2295,6 +2328,8 @@ public final class VulkanConfig {
         publish("vulkanmod112.leafShadows", Integer.toString(leafShadows));
         publish("vulkanmod112.contactShadows", Integer.toString(contactShadows));
         publish("vulkanmod112.godRays", Integer.toString(godRays));
+        publish("vulkanmod112.hdrFrame", Boolean.toString(hdrFrame));
+        publish("vulkanmod112.exposure", Integer.toString(exposure));
         publish("vulkanmod112.cloudTint", Integer.toString(cloudTint));
         publish("vulkanmod112.preloadQueue", Integer.toString(preloadQueue));
         publish("vulkanmod112.preloadScan", Integer.toString(preloadScan));

@@ -2111,6 +2111,63 @@ final class VulkanOptions {
                                         VulkanConfig.setGodRays(value);
                                     }
                                 }),
+                        new VSwitchOption("High Dynamic Range",
+                                "Ask the game for a frame with room above white in it. This is "
+                                        + "the floor under every other effect here that has to "
+                                        + "do with light: the world is drawn into eight bits a "
+                                        + "channel, so a highlight a hundred times brighter than "
+                                        + "the grass beside it arrives already flattened into "
+                                        + "the same white, before anything on this page ever "
+                                        + "sees it. That is why the glow has no light of its own "
+                                        + "to add, why the sun on water had to be dimmed rather "
+                                        + "than left to burn, and why the tone row below can "
+                                        + "tilt colours but cannot shape light the way a film "
+                                        + "curve does. With this on the frame carries sixteen "
+                                        + "bits a channel and the tone pass closes that range "
+                                        + "back down at the end, along a curve with a shoulder "
+                                        + "instead of a cliff. The driver is asked first and the "
+                                        + "log says plainly if it will not have it. Applies "
+                                        + "at once, and costs video memory the size of your "
+                                        + "screen twice over. It also undoes itself: the frame "
+                                        + "goes back to eight bits the moment the Vulkan "
+                                        + "renderer stops drawing, because the pass that closes "
+                                        + "the range back down lives there, and a frame with "
+                                        + "nothing to close it is worse than no headroom at all.",
+                                Cost.of(Level.NONE, Level.LOW, Level.MEDIUM),
+                                "Needs the Vulkan renderer to be drawing.",
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return VulkanConfig.isHdrFrame();
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        VulkanConfig.setHdrFrame(value);
+                                    }
+                                }),
+                        new VRangeOption("Exposure",
+                                "How much light is let in before the film curve closes the range "
+                                        + "back down. The middle of the slider is no change, and "
+                                        + "each step either side is the same size as the last, "
+                                        + "because that is how light behaves. Only means "
+                                        + "anything with High Dynamic Range on — without the "
+                                        + "headroom there is nothing above white to bring down, "
+                                        + "and opening up would only wash the picture out.",
+                                Cost.of(Level.NONE, Level.NONE, Level.NONE),
+                                "Needs High Dynamic Range.",
+                                0, 100, 5, "%", null,
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getExposure();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setExposure(value);
+                                    }
+                                }),
                         new VRangeOption("Sky Gradient",
                                 "Deepens the sky away from the horizon. Vanilla's is one colour "
                                         + "from the horizon to straight overhead, and every "

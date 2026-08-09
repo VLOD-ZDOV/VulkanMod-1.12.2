@@ -4541,6 +4541,33 @@ final class VkTerrainRenderer {
     private boolean raysFailed;
     /** How bright the shafts of light from the sun may be, 0 for off. */
     private float godRays;
+    /**
+     * Whether the game's frame really is floating this session.
+     *
+     * Read from what happened rather than from what was asked for. The
+     * switch is a wish; the mixin that changes the format is the only thing
+     * that knows whether the driver took it, and it says so by publishing
+     * this. Grading a frame as though it had headroom it does not have
+     * would darken the whole picture for nothing.
+     */
+    private boolean hdrFrame;
+    /** Light let in before the film curve closes the range back down. */
+    private float exposure = 0.5f;
+
+    private boolean hdrFrameActive() {
+        return hdrFrame;
+    }
+
+    /**
+     * The exposure slider in stops, with the middle of it meaning no change.
+     *
+     * Stops rather than a straight multiplier because that is how light
+     * behaves and how the slider will feel: every step the same size, and
+     * the same distance either side of neutral.
+     */
+    private float exposureStops() {
+        return (exposure - 0.5f) * 3.0f;
+    }
     /** Where the sun is on the screen, and how much of it counts, this frame. */
     private final float[] sunScreen = new float[3];
 
@@ -4854,7 +4881,11 @@ final class VkTerrainRenderer {
     }
 
     void applySceneTone(int sceneTexture) {
-        if (toneFailed || toneStrength <= 0.0f || sceneTexture == 0
+        // A floating frame has to be brought back into range here whether
+        // anything is being graded or not: this is the last place that
+        // sees it before the hand and the interface are drawn over it, and
+        // the screen shows eight bits whatever the buffer holds.
+        if (toneFailed || (toneStrength <= 0.0f && !hdrFrameActive()) || sceneTexture == 0
                 || width <= 0 || height <= 0) {
             return;
         }
@@ -4897,6 +4928,8 @@ final class VkTerrainRenderer {
         GL20C.glUniform2f(toneInvSize, 1.0f / width, 1.0f / height);
         GL20C.glUniform1f(toneStrengthUniform, toneStrength);
         GL20C.glUniform1f(toneWarmthUniform, toneWarmth);
+        GL20C.glUniform1f(toneHdrUniform, hdrFrameActive() ? 1.0f : 0.0f);
+        GL20C.glUniform1f(toneExposureUniform, exposureStops());
         GL13C.glActiveTexture(GL13C.GL_TEXTURE0);
         GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, toneTexture);
         fullscreenQuad();
@@ -4918,6 +4951,8 @@ final class VkTerrainRenderer {
     private int toneInvSize;
     private int toneStrengthUniform;
     private int toneWarmthUniform;
+    private int toneHdrUniform = -1;
+    private int toneExposureUniform = -1;
     private int toneWidth;
     private int toneHeight;
     private boolean toneFailed;
@@ -4955,6 +4990,8 @@ final class VkTerrainRenderer {
                 toneInvSize = GL20C.glGetUniformLocation(toneProgram, "uInvSize");
                 toneStrengthUniform = GL20C.glGetUniformLocation(toneProgram, "uStrength");
                 toneWarmthUniform = GL20C.glGetUniformLocation(toneProgram, "uWarmth");
+                toneHdrUniform = GL20C.glGetUniformLocation(toneProgram, "uHdr");
+                toneExposureUniform = GL20C.glGetUniformLocation(toneProgram, "uExposure");
             }
             toneWidth = width;
             toneHeight = height;
@@ -4989,8 +5026,34 @@ final class VkTerrainRenderer {
                         + "uniform vec2 uInvSize;\n"
                         + "uniform float uStrength;\n"
                         + "uniform float uWarmth;\n"
+                        // Whether the frame being read has room above white in
+                        // it, and how much light to let in before it is closed
+                        // back down. Both do nothing at all while the frame is
+                        // eight bits, which is the default.
+                        + "uniform float uHdr;\n"
+                        + "uniform float uExposure;\n"
+                        // The film curve proper — the one thing an eight bit
+                        // frame cannot have. It closes an open-ended range down
+                        // into nought to one along a shoulder, so a highlight
+                        // brighter than white keeps its shape instead of
+                        // arriving already flattened into a white patch. This
+                        // is the standard cheap fit to the academy curve: no
+                        // table to carry and no branch, five multiplies.
+                        + "vec3 filmic(vec3 x) {\n"
+                        + "    return clamp((x * (2.51 * x + 0.03))\n"
+                        + "               / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);\n"
+                        + "}\n"
                         + "void main() {\n"
                         + "    vec3 c = texture2D(uSource, gl_FragCoord.xy * uInvSize).rgb;\n"
+                        // Not part of the grading, and deliberately not behind
+                        // the strength slider: with a floating frame this is
+                        // the only thing that brings the picture back into the
+                        // range a screen can show. Left out, everything above
+                        // white is cut off at the moment of display and the
+                        // headroom bought nothing at all.
+                        + "    if (uHdr > 0.5) {\n"
+                        + "        c = filmic(c * exp2(uExposure));\n"
+                        + "    }\n"
                         // An S curve about the middle grey of the frame. Not a
                         // film curve: there is no headroom above white in an
                         // eight bit buffer, so anything that pushed highlights
@@ -6279,6 +6342,9 @@ final class VkTerrainRenderer {
         aoStrength = clampPercent(intProperty("vulkanmod112.ambientOcclusion", 0));
         contactShadows = clampPercent(intProperty("vulkanmod112.contactShadows", 0));
         godRays = clampPercent(intProperty("vulkanmod112.godRays", 0));
+        hdrFrame = Boolean.parseBoolean(
+                System.getProperty("vulkanmod112.hdrFrameActive", "false"));
+        exposure = clampPercent(intProperty("vulkanmod112.exposure", 50));
         skyGradient = clampPercent(intProperty("vulkanmod112.skyGradient", 0));
         sceneOcclusion = Boolean.parseBoolean(
                 System.getProperty("vulkanmod112.sceneOcclusion", "false"));

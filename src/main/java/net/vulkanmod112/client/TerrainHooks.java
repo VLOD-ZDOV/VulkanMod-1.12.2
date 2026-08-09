@@ -646,6 +646,21 @@ public final class TerrainHooks {
      * is inside the glow rather than pasted over it, and a torch throws light
      * onto the sky, which is drawn long after this mod's own frame is finished.
      */
+    /**
+     * Whether the passes over the finished picture are going to run at all.
+     *
+     * Asked from outside because one of those passes is not decoration: with a
+     * floating frame, the tone pass is the only thing that brings the picture
+     * back into the range a screen can show, and it lives on the Vulkan side.
+     * Whatever decides the frame's format has to ask the same question this
+     * hook asks, from the same place, or the two answers drift and the frame
+     * ends up floating with nothing to close it down. Hence one method rather
+     * than the same condition written twice.
+     */
+    public static boolean sceneEffectsWillRun() {
+        return liveBridge() != null && VulkanConfig.isTerrainEnabled();
+    }
+
     public static void applySceneBloom() {
         VulkanBridge bridge = liveBridge();
         if (bridge == null || !VulkanConfig.isTerrainEnabled()) {

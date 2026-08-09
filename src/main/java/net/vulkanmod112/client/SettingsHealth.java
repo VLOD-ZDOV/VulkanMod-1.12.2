@@ -62,6 +62,34 @@ public final class SettingsHealth {
     }
 
     /**
+     * Why the frame is still eight bits although it was asked to be more.
+     *
+     * Three states rather than two, and the difference matters to whoever is
+     * reading it: got it, could have it but nothing would close it back down,
+     * and will never get it on this driver. The middle one is the one that can
+     * be acted on, and saying that the driver refused to somebody whose
+     * renderer is simply switched off is advice that costs an evening.
+     */
+    private static String describeHdrFrame() {
+        if (!VulkanConfig.isHdrFrame()) {
+            return null;
+        }
+        if (Boolean.getBoolean("vulkanmod112.hdrFrameActive")) {
+            return null;
+        }
+        if (Boolean.getBoolean("vulkanmod112.hdrFrameRefused")) {
+            return "high dynamic range — this driver would not give a floating frame, "
+                    + "so the picture stays eight bits a channel";
+        }
+        // The only other way to be on and inactive: the frame is put back to
+        // eight bits on purpose whenever the pass that would close its range
+        // back down is not going to run. Naming the cause rather than the
+        // effect, because the cause is the thing that can be fixed.
+        return "high dynamic range — the Vulkan renderer is not drawing, and the pass "
+                + "that brings the picture back into range lives there";
+    }
+
+    /**
      * The settings that are on and cannot act, and why, or null when none are.
      *
      * @return a sentence meant to be read by whoever is looking at the screen
@@ -110,6 +138,18 @@ public final class SettingsHealth {
             if (names.length() > 0) {
                 out.append(names).append(" — ").append(tracingReason());
             }
+        }
+        // Asked separately from everything above, because this one is not about
+        // our renderer at all: it is the format of the game's own frame, and it
+        // stays wrong in exactly the sessions where the renderer is perfectly
+        // healthy. The two answers are worth telling apart — one of them the
+        // player can act on and the other one they cannot.
+        String hdr = describeHdrFrame();
+        if (hdr != null) {
+            if (out.length() > 0) {
+                out.append("; ");
+            }
+            out.append(hdr);
         }
         return out.length() == 0 ? null : out.toString();
     }

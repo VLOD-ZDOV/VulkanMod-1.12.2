@@ -50,6 +50,13 @@ public class VulkanMod112 {
         // case where the renderer did not come up.
         net.minecraftforge.common.MinecraftForge.EVENT_BUS.register(
                 new net.vulkanmod112.client.FrameGraphHandler());
+        // Independent of Vulkan for the opposite reason to the rest: this is
+        // what gives the game's frame room above white, and it is also the only
+        // thing that takes it back. Losing the Vulkan side has to put the frame
+        // back to eight bits, so the handler that does it cannot live behind
+        // the Vulkan side coming up.
+        net.minecraftforge.common.MinecraftForge.EVENT_BUS.register(
+                new net.vulkanmod112.client.HdrFrame.Handler());
         // Also independent of Vulkan: what marks the diagnostics log with where
         // the camera was and what put it there. It writes nothing unless ultra
         // logging is on.
