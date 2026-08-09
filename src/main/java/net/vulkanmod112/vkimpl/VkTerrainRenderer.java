@@ -6582,9 +6582,12 @@ final class VkTerrainRenderer {
      * What it buys is a ceiling. Everything this shader computes about water —
      * the reflection, the refraction, the caustics, the glint — is written into
      * this target and read back out of it by the same shader, and at eight bits
-     * that round trip is where the banding comes from. It is not the whole of
-     * HDR: the game's own frame is eight bits and this mod does not own it, so
-     * bloom and the tone curve still land in a buffer with no headroom.
+     * that round trip is where the banding comes from. This is one half of
+     * high dynamic range and the game's own frame is the other: a highlight
+     * has to survive reflection and refraction here, and then the glow and
+     * the tone curve there. Both halves answer to the same switch, because
+     * buying the headroom and losing it one step later looks exactly like
+     * the setting not working.
      *
      * Asked of the driver rather than assumed. An exportable image is not the
      * same question as an ordinary one — it is the pair of drivers that has to
@@ -6599,7 +6602,21 @@ final class VkTerrainRenderer {
     }
 
     private void decideColourDepth(MemoryStack stack) {
-        if (!Boolean.parseBoolean(System.getProperty("vulkanmod112.hdrTargets", "false"))) {
+        // The settings switch and the key are one question asked twice. The
+        // switch is what a player turns on and it means the whole of high
+        // dynamic range, both halves of it: this target, so that a highlight
+        // survives reflection and refraction, and the game's own frame, so
+        // that it survives the glow and the tone curve. Keeping them apart
+        // would let somebody buy the headroom and lose it one step later,
+        // which is indistinguishable from the setting not working. The key
+        // stays because it is how this was tried before there was a switch,
+        // and because it can be given to somebody whose driver is suspect
+        // without walking them through a menu.
+        boolean wantedBySwitch = Boolean.parseBoolean(
+                System.getProperty("vulkanmod112.hdrFrame", "false"));
+        boolean wantedByKey = Boolean.parseBoolean(
+                System.getProperty("vulkanmod112.hdrTargets", "false"));
+        if (!wantedBySwitch && !wantedByKey) {
             return;
         }
         int wanted = VK_FORMAT_R16G16B16A16_SFLOAT;
