@@ -4420,8 +4420,19 @@ final class VkTerrainRenderer {
      * change — the arithmetic that turns a depth into a position and a position
      * into a corner does not care whose geometry made it.
      */
+    /**
+     * The pass over the finished picture — occlusion, and light shafts.
+     *
+     * Two effects rather than one because they want the same two things and
+     * neither is cheap to get: the depth of the whole scene, which has to be
+     * blitted out of a renderbuffer to be sampled at all, and a copy of the
+     * colour, because a texture cannot be read and written at once. Splitting
+     * them into two hooks would pay for both twice for nothing.
+     */
     void applySceneOcclusion(int sceneTexture) {
-        if (!sceneOcclusion || aoFailed || !aoWanted() || sceneTexture == 0
+        boolean wantOcclusion = sceneOcclusion && !aoFailed && aoWanted();
+        boolean wantRays = godRaysWanted();
+        if ((!wantOcclusion && !wantRays) || sceneTexture == 0
                 || width <= 0 || height <= 0) {
             return;
         }
@@ -4461,18 +4472,31 @@ final class VkTerrainRenderer {
                         GL11C.GL_COLOR_BUFFER_BIT, GL11C.GL_NEAREST);
                 GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo);
 
-                if (!aoPass(sceneDepthTexture)) {
-                    return;
+                if (wantOcclusion && aoPass(sceneDepthTexture)) {
+                    GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo);
+                    GL11C.glViewport(0, 0, width, height);
+                    GL20C.glUseProgram(sceneOcclusionProgram);
+                    GL20C.glUniform2f(sceneOcclusionInvSize, 1.0f / width, 1.0f / height);
+                    GL13C.glActiveTexture(GL13C.GL_TEXTURE1);
+                    GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, aoTexture);
+                    GL13C.glActiveTexture(GL13C.GL_TEXTURE0);
+                    GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, sceneCopyTexture);
+                    fullscreenQuad();
+                    // The copy again, because the shafts below read the colour
+                    // and the darkening has just changed it. Shafts gathered
+                    // from the undarkened copy would carry light the picture no
+                    // longer has.
+                    if (wantRays) {
+                        GL30C.glBindFramebuffer(GL30C.GL_READ_FRAMEBUFFER, prevFbo);
+                        GL30C.glBindFramebuffer(GL30C.GL_DRAW_FRAMEBUFFER, sceneCopyFbo);
+                        GL30C.glBlitFramebuffer(0, 0, width, height, 0, 0, width, height,
+                                GL11C.GL_COLOR_BUFFER_BIT, GL11C.GL_NEAREST);
+                        GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo);
+                    }
                 }
-                GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo);
-                GL11C.glViewport(0, 0, width, height);
-                GL20C.glUseProgram(sceneOcclusionProgram);
-                GL20C.glUniform2f(sceneOcclusionInvSize, 1.0f / width, 1.0f / height);
-                GL13C.glActiveTexture(GL13C.GL_TEXTURE1);
-                GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, aoTexture);
-                GL13C.glActiveTexture(GL13C.GL_TEXTURE0);
-                GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, sceneCopyTexture);
-                fullscreenQuad();
+                if (wantRays) {
+                    rayPass(prevFbo);
+                }
             } finally {
                 org.lwjgl.opengl.GL11.glPopAttrib();
             }
@@ -4503,6 +4527,255 @@ final class VkTerrainRenderer {
     private int sceneTargetsHeight;
     /** Whether the corners of the whole picture are darkened instead of the blocks'. */
     private boolean sceneOcclusion;
+
+    private int rayTexture;
+    private int rayFbo;
+    private int rayWidth;
+    private int rayHeight;
+    private int rayProgram;
+    private int rayInvSize = -1;
+    private int raySunUniform = -1;
+    private int rayAddProgram;
+    private int rayAddInvSize = -1;
+    private int rayAddStrengthUniform = -1;
+    private boolean raysFailed;
+    /** How bright the shafts of light from the sun may be, 0 for off. */
+    private float godRays;
+    /** Where the sun is on the screen, and how much of it counts, this frame. */
+    private final float[] sunScreen = new float[3];
+
+    /**
+     * Whether shafts are worth gathering this frame.
+     *
+     * The sun has to be above the horizon and in front of the eye, and its
+     * place on the screen decides the rest: this technique gathers along the
+     * line from a pixel towards the sun, so with the sun behind you every line
+     * runs the wrong way and what comes out is not a dim effect but a wrong
+     * one.
+     */
+    private boolean godRaysWanted() {
+        if (godRays <= 0.0f || raysFailed || sunDirection[1] <= 0.0f) {
+            return false;
+        }
+        computeSunScreen();
+        return sunScreen[2] > 0.0f;
+    }
+
+    /**
+     * The sun's place on the screen, and how much of it to believe.
+     *
+     * Weight rather than a yes or no, because the sun crossing the edge of the
+     * screen must not switch the shafts off between one frame and the next —
+     * that reads as a flicker, and a flicker is the one artefact nobody
+     * forgives. It falls to nothing over half a screen outside the frame,
+     * which is roughly where a shaft stops reaching into the picture anyway.
+     */
+    private void computeSunScreen() {
+        sunScreen[2] = 0.0f;
+        projectionMatrix.clear();
+        GL11C.glGetFloatv(org.lwjgl.opengl.GL11.GL_PROJECTION_MATRIX, projectionMatrix);
+        modelViewMatrix.clear();
+        GL11C.glGetFloatv(org.lwjgl.opengl.GL11.GL_MODELVIEW_MATRIX, modelViewMatrix);
+        float x = sunDirection[0];
+        float y = sunDirection[1];
+        float z = sunDirection[2];
+        float vx = modelViewMatrix.get(0) * x + modelViewMatrix.get(4) * y
+                + modelViewMatrix.get(8) * z;
+        float vy = modelViewMatrix.get(1) * x + modelViewMatrix.get(5) * y
+                + modelViewMatrix.get(9) * z;
+        float vz = modelViewMatrix.get(2) * x + modelViewMatrix.get(6) * y
+                + modelViewMatrix.get(10) * z;
+        // Behind the eye. A direction has no position, so this is the whole of
+        // the test — there is no near plane to fall foul of.
+        if (vz >= -1.0e-4f) {
+            return;
+        }
+        float cx = projectionMatrix.get(0) * vx + projectionMatrix.get(4) * vy
+                + projectionMatrix.get(8) * vz;
+        float cy = projectionMatrix.get(1) * vx + projectionMatrix.get(5) * vy
+                + projectionMatrix.get(9) * vz;
+        float cw = projectionMatrix.get(3) * vx + projectionMatrix.get(7) * vy
+                + projectionMatrix.get(11) * vz;
+        if (!(cw > 1.0e-6f)) {
+            return;
+        }
+        float u = (cx / cw) * 0.5f + 0.5f;
+        float v = (cy / cw) * 0.5f + 0.5f;
+        float outside = Math.max(
+                Math.max(-u, u - 1.0f),
+                Math.max(-v, v - 1.0f));
+        float edge = 1.0f - Math.max(0.0f, outside) / 0.5f;
+        if (!(edge > 0.0f)) {
+            return;
+        }
+        sunScreen[0] = u;
+        sunScreen[1] = v;
+        // Faded out again as the sun nears the horizon, where the shafts lie
+        // along the ground rather than across the picture and the same
+        // strength reads as a wash of colour over everything.
+        sunScreen[2] = edge * Math.min(1.0f, sunDirection[1] * 4.0f);
+    }
+
+    /**
+     * Gathers the shafts at half resolution and adds them to the frame.
+     *
+     * The gathering is the oldest trick there is for this and still the right
+     * one here: walk from the pixel towards the sun and add up what the sky
+     * shows through, so terrain in the way leaves a dark lane and a gap in a
+     * canopy leaves a bright one. It needs no geometry, no second view of the
+     * world and no rays — which is what makes it the one shafts effect that
+     * cannot break another mod, because everything it reads is a picture the
+     * game has already finished drawing.
+     */
+    private void rayPass(int prevFbo) {
+        try {
+            if (!ensureRayTargets()) {
+                return;
+            }
+            GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, rayFbo);
+            GL11C.glViewport(0, 0, rayWidth, rayHeight);
+            GL11C.glDisable(GL11C.GL_BLEND);
+            GL20C.glUseProgram(rayProgram);
+            GL20C.glUniform2f(rayInvSize, 1.0f / rayWidth, 1.0f / rayHeight);
+            GL20C.glUniform2f(raySunUniform, sunScreen[0], sunScreen[1]);
+            GL13C.glActiveTexture(GL13C.GL_TEXTURE1);
+            GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, sceneDepthTexture);
+            GL13C.glActiveTexture(GL13C.GL_TEXTURE0);
+            GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, sceneCopyTexture);
+            fullscreenQuad();
+
+            // Added rather than mixed: light arriving along the line of sight
+            // is light on top of what is already there, and a shaft crossing a
+            // dark hillside has to brighten it rather than replace it.
+            GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo);
+            GL11C.glViewport(0, 0, width, height);
+            GL11C.glEnable(GL11C.GL_BLEND);
+            GL11C.glBlendFunc(GL11C.GL_ONE, GL11C.GL_ONE);
+            GL20C.glUseProgram(rayAddProgram);
+            GL20C.glUniform2f(rayAddInvSize, 1.0f / width, 1.0f / height);
+            GL20C.glUniform1f(rayAddStrengthUniform, godRays * sunScreen[2]);
+            GL13C.glActiveTexture(GL13C.GL_TEXTURE0);
+            GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, rayTexture);
+            fullscreenQuad();
+            GL11C.glDisable(GL11C.GL_BLEND);
+        } catch (Throwable t) {
+            // Its own fence rather than the occlusion's: a fault in the shafts
+            // is no reason to stop darkening the corners of the world.
+            LOGGER.error("Light shafts failed; off for this session", t);
+            raysFailed = true;
+            GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo);
+        }
+    }
+
+    private boolean ensureRayTargets() {
+        int wantWidth = Math.max(1, width / 2);
+        int wantHeight = Math.max(1, height / 2);
+        if (rayFbo != 0 && wantWidth == rayWidth && wantHeight == rayHeight
+                && rayProgram != 0 && rayAddProgram != 0) {
+            return true;
+        }
+        destroyRayTargets();
+        rayWidth = wantWidth;
+        rayHeight = wantHeight;
+        rayTexture = GL11C.glGenTextures();
+        allocateBloomTexture(rayTexture, rayWidth, rayHeight);
+        rayFbo = GL30C.glGenFramebuffers();
+        GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, rayFbo);
+        GL30C.glFramebufferTexture2D(GL30C.GL_FRAMEBUFFER, GL30C.GL_COLOR_ATTACHMENT0,
+                GL11C.GL_TEXTURE_2D, rayTexture, 0);
+        if (GL30C.glCheckFramebufferStatus(GL30C.GL_FRAMEBUFFER) != GL30C.GL_FRAMEBUFFER_COMPLETE) {
+            LOGGER.error("Light shaft framebuffer incomplete; shafts are off for this session");
+            raysFailed = true;
+            destroyRayTargets();
+            return false;
+        }
+        buildRayPrograms();
+        return true;
+    }
+
+    private void buildRayPrograms() {
+        if (rayProgram == 0) {
+            rayProgram = buildQuadProgram(
+                    "uniform sampler2D uSource;\n"
+                            + "uniform sampler2D uDepth;\n"
+                            + "uniform vec2 uInvSize;\n"
+                            + "uniform vec2 uSun;\n"
+                            // How much of the way to the sun the walk covers,
+                            // and how fast a step stops counting. Short of the
+                            // whole distance on purpose: the far end of that
+                            // line is where the sun is, and a pixel there
+                            // gathers the sun itself over and over.
+                            + "const float RAY_SPAN = 0.85;\n"
+                            + "const float RAY_DECAY = 0.94;\n"
+                            + "void main() {\n"
+                            + "    vec2 uv = gl_FragCoord.xy * uInvSize;\n"
+                            + "    vec2 stride = (uv - uSun) * (RAY_SPAN / 24.0);\n"
+                            // Started off the pixel's own place by a fraction
+                            // of a step, different at every pixel, so the
+                            // twenty-four samples do not land on the same rings
+                            // across the whole screen. Rings are what this
+                            // technique looks like when it is done wrong.
+                            + "    vec3 h3 = fract(vec3(gl_FragCoord.xyx) * vec3(0.1031, 0.1030, 0.0973));\n"
+                            + "    h3 += dot(h3, h3.yzx + 33.33);\n"
+                            + "    vec2 p = uv - stride * fract((h3.x + h3.y) * h3.z);\n"
+                            + "    vec3 total = vec3(0.0);\n"
+                            + "    float weight = 1.0;\n"
+                            + "    float share = 0.0;\n"
+                            + "    for (int i = 0; i < 24; i++) {\n"
+                            + "        p -= stride;\n"
+                            // Only what the sky shows through counts. Terrain,
+                            // a creature or another mod's machine standing in
+                            // the line contributes nothing, and that absence is
+                            // the shaft: the dark lanes are the shadows and the
+                            // bright ones are the gaps.
+                            + "        float d = texture2D(uDepth, p).r;\n"
+                            + "        if (d >= 0.9999) {\n"
+                            + "            total += texture2D(uSource, p).rgb * weight;\n"
+                            + "        }\n"
+                            + "        share += weight;\n"
+                            + "        weight *= RAY_DECAY;\n"
+                            + "    }\n"
+                            + "    gl_FragColor = vec4(total / max(share, 0.0001), 1.0);\n"
+                            + "}\n");
+            rayInvSize = GL20C.glGetUniformLocation(rayProgram, "uInvSize");
+            raySunUniform = GL20C.glGetUniformLocation(rayProgram, "uSun");
+            int prev = GL11C.glGetInteger(GL20C.GL_CURRENT_PROGRAM);
+            GL20C.glUseProgram(rayProgram);
+            GL20C.glUniform1i(GL20C.glGetUniformLocation(rayProgram, "uDepth"), 1);
+            GL20C.glUseProgram(prev);
+        }
+        if (rayAddProgram == 0) {
+            rayAddProgram = buildQuadProgram(
+                    "uniform sampler2D uSource;\n"
+                            + "uniform vec2 uInvSize;\n"
+                            + "uniform float uStrength;\n"
+                            // Warmed, because sunlight through air is warm and
+                            // the sky colour gathered above is not — taking the
+                            // sky's own colour straight gives blue shafts,
+                            // which read as fog rather than as light.
+                            + "const vec3 RAY_TINT = vec3(1.0, 0.92, 0.78);\n"
+                            + "void main() {\n"
+                            + "    vec2 uv = gl_FragCoord.xy * uInvSize;\n"
+                            + "    gl_FragColor = vec4(texture2D(uSource, uv).rgb\n"
+                            + "            * RAY_TINT * uStrength * 0.6, 1.0);\n"
+                            + "}\n");
+            rayAddInvSize = GL20C.glGetUniformLocation(rayAddProgram, "uInvSize");
+            rayAddStrengthUniform = GL20C.glGetUniformLocation(rayAddProgram, "uStrength");
+        }
+    }
+
+    private void destroyRayTargets() {
+        if (rayFbo != 0) {
+            GL30C.glDeleteFramebuffers(rayFbo);
+            rayFbo = 0;
+        }
+        if (rayTexture != 0) {
+            GL11C.glDeleteTextures(rayTexture);
+            rayTexture = 0;
+        }
+        rayWidth = 0;
+        rayHeight = 0;
+    }
 
     private boolean ensureSceneOcclusionTargets() {
         if (sceneDepthTexture != 0 && sceneTargetsWidth == width
@@ -6005,6 +6278,7 @@ final class VkTerrainRenderer {
         bloomStrength = clampPercent(intProperty("vulkanmod112.bloom", 0));
         aoStrength = clampPercent(intProperty("vulkanmod112.ambientOcclusion", 0));
         contactShadows = clampPercent(intProperty("vulkanmod112.contactShadows", 0));
+        godRays = clampPercent(intProperty("vulkanmod112.godRays", 0));
         skyGradient = clampPercent(intProperty("vulkanmod112.skyGradient", 0));
         sceneOcclusion = Boolean.parseBoolean(
                 System.getProperty("vulkanmod112.sceneOcclusion", "false"));
@@ -8402,6 +8676,7 @@ final class VkTerrainRenderer {
             destroyAccumTargets();
             destroyToneTargets();
             destroySceneOcclusionTargets();
+            destroyRayTargets();
             GL11C.glDeleteTextures(glColorTexture);
             GL11C.glDeleteTextures(glDepthTexture);
             EXTMemoryObject.glDeleteMemoryObjectsEXT(glColorMemoryObject);

@@ -381,6 +381,8 @@ public final class VulkanConfig {
     static final int DEF_LEAF_SHADOWS = 0;
     /** How dark a short shadow towards the sun, over the finished picture. */
     static final int DEF_CONTACT_SHADOWS = 0;
+    /** How bright the shafts of light from the sun may be. */
+    static final int DEF_GOD_RAYS = 0;
     /** How much of the sky's colour the clouds take. */
     static final int DEF_CLOUD_TINT = 0;
     /** How many chunks the offscreen preloader keeps queued. */
@@ -586,6 +588,7 @@ public final class VulkanConfig {
     private static volatile boolean sceneOcclusion = DEF_SCENE_OCCLUSION;
     private static volatile int leafShadows = DEF_LEAF_SHADOWS;
     private static volatile int contactShadows = DEF_CONTACT_SHADOWS;
+    private static volatile int godRays = DEF_GOD_RAYS;
     private static volatile int cloudTint = DEF_CLOUD_TINT;
     private static volatile int preloadQueue = DEF_PRELOAD_QUEUE;
     private static volatile int preloadScan = DEF_PRELOAD_SCAN;
@@ -900,6 +903,8 @@ public final class VulkanConfig {
                         + "than where its holes are - averaged over frames it comes out as "
                         + "dapple. Needs ray tracing and sun shadows; costs more the more of the "
                         + "screen is under a tree.");
+        godRays = config.getInt("godRays", CATEGORY_GENERAL, DEF_GOD_RAYS, 0, 100,
+                "How bright the shafts of light from the sun may be. Gathered from the finished picture: the walk from a pixel towards the sun adds up what the sky shows through, so anything standing in the way leaves a dark lane and a gap in a canopy leaves a bright one. No geometry and no rays are involved, so it cannot break another mod - and whatever a mod drew is in the picture and casts its own shafts for free. Needs the sun above the horizon and roughly in front of you; fades out rather than switching off as it leaves the screen.");
         contactShadows = config.getInt("contactShadows", CATEGORY_GENERAL,
                 DEF_CONTACT_SHADOWS, 0, 100,
                 "How dark a short shadow cast along the ground towards the sun may go. It is worked out from the depth of the picture rather than from geometry, so whatever drew into that depth casts one - a chest, a creature, another mod's machine - and nothing is taken away from any mod to get it. It can only find something that is itself on the screen and within about a block of the surface, which is why it is a contact shadow and not a shadow: it fills the gap where a thing meets the floor, and the sun's own long shadows are the traced ones. Shares the ambient occlusion pass, so it costs a loop rather than a pass, and turn on Occlusion Over Everything for it to see anything but blocks.");
@@ -1229,6 +1234,7 @@ public final class VulkanConfig {
      */
     public static void resetToDefaults() {
         setContactShadows(DEF_CONTACT_SHADOWS);
+        setGodRays(DEF_GOD_RAYS);
         setTerrainEnabled(DEF_TERRAIN);
         setOverlayEnabled(DEF_OVERLAY);
         setEntityDistance(DEF_ENTITY_DISTANCE);
@@ -1562,6 +1568,16 @@ public final class VulkanConfig {
     public static void setSunHaze(int value) {
         sunHaze = clamp(value, 0, 100);
         store(CATEGORY_GENERAL, "sunHaze", sunHaze);
+        applySystemProperties();
+    }
+
+    public static int getGodRays() {
+        return godRays;
+    }
+
+    public static void setGodRays(int value) {
+        godRays = clamp(value, 0, 100);
+        store(CATEGORY_GENERAL, "godRays", godRays);
         applySystemProperties();
     }
 
@@ -2278,6 +2294,7 @@ public final class VulkanConfig {
         publish("vulkanmod112.sceneOcclusion", Boolean.toString(sceneOcclusion));
         publish("vulkanmod112.leafShadows", Integer.toString(leafShadows));
         publish("vulkanmod112.contactShadows", Integer.toString(contactShadows));
+        publish("vulkanmod112.godRays", Integer.toString(godRays));
         publish("vulkanmod112.cloudTint", Integer.toString(cloudTint));
         publish("vulkanmod112.preloadQueue", Integer.toString(preloadQueue));
         publish("vulkanmod112.preloadScan", Integer.toString(preloadScan));

@@ -2080,6 +2080,37 @@ final class VulkanOptions {
                                         VulkanConfig.setContactShadows(value);
                                     }
                                 }),
+                        new VRangeOption("Light Shafts",
+                                "Sunlight made visible in the air itself, in lanes through a "
+                                        + "canopy or a cave mouth. The oldest trick there is for "
+                                        + "this and still the right one here: the walk from a "
+                                        + "pixel towards the sun adds up what the sky shows "
+                                        + "through, so anything standing in the line leaves a "
+                                        + "dark lane behind it and a gap leaves a bright one. "
+                                        + "Nothing about it involves geometry, a second view of "
+                                        + "the world or a ray — it reads a picture the game has "
+                                        + "already finished, which is what makes it the one "
+                                        + "version of this effect that cannot break another mod, "
+                                        + "and it means whatever a mod drew casts its own shafts "
+                                        + "for nothing. What it cannot do is show a shaft whose "
+                                        + "sun is off the screen: it fades out as the sun leaves "
+                                        + "the view rather than switching off, because switching "
+                                        + "off would be a flicker. Runs at half resolution, "
+                                        + "twenty-four samples a pixel.",
+                                Cost.of(Level.NONE, Level.MEDIUM, Level.LOW),
+                                "Needs the sun above the horizon and roughly in front of you.",
+                                0, 100, 5, "%", "Off",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getGodRays();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setGodRays(value);
+                                    }
+                                }),
                         new VRangeOption("Sky Gradient",
                                 "Deepens the sky away from the horizon. Vanilla's is one colour "
                                         + "from the horizon to straight overhead, and every "
