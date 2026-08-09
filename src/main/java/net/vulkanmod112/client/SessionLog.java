@@ -93,6 +93,12 @@ public final class SessionLog {
         public void onClientTick(net.minecraftforge.fml.common.gameevent.TickEvent.ClientTickEvent event) {
             if (event.phase == net.minecraftforge.fml.common.gameevent.TickEvent.Phase.END) {
                 RenderNotice.flushToChat();
+                // The restart notice went out from the fallback handler and
+                // nowhere else, and that handler exists only where the renderer
+                // never started — which is every session except the one the
+                // message is for. Somebody switching ray tracing on in a
+                // working game queued a line that nothing ever printed.
+                RenderNotice.flushRestartToChat();
                 LangDump.onceIfAsked();
             }
         }
