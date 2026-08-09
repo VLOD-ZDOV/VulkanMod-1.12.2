@@ -439,8 +439,21 @@ float fogFactor(int mode) {
  * of letting them fall into a short repeating cycle.
  */
 float ditherValue(vec2 pixel) {
+    // The turn is only ever right where something averages the frames it
+    // produces, and that is the opaque target alone: the translucent one has no
+    // motion vectors, so nothing reprojects it and nothing accumulates it.
+    //
+    // This is the same rule that made the turn exist, read from the other end.
+    // A dither that never moves averages a hundred copies of one answer, which
+    // is why the turn was added; a dither that moves with nothing to average it
+    // is a different answer every frame with nothing to settle it, which is not
+    // grain but flicker — and flicker on water while frame averaging is *on*
+    // reads as the averaging having made things worse.
+    //
+    // BLEND is a specialization constant, so the pipeline that draws water is
+    // compiled with the turn folded away to nothing rather than branching on it.
     return fract(52.9829189 * fract(dot(pixel, vec2(0.06711056, 0.00583715)))
-                 + frame.lightShadow.z);
+                 + (BLEND ? 0.0 : frame.lightShadow.z));
 }
 
 // True only in the build that can trace, and a compile-time constant in both —
