@@ -72,6 +72,35 @@ public final class VulkanPresets {
         int screenReflections;
         int shaderAmbientOcclusion;
         int aoRadius = VulkanConfig.DEF_AO_RADIUS;
+
+        // The rule above was written and then broken: everything added to this
+        // mod after it was never filed here, so the preset that means "show me
+        // what this can do" went on setting eight effects out of eighteen and
+        // left the rest wherever they were — which for a fresh install is off.
+        // Reported as "the beautiful preset did nothing, it all looked
+        // ordinary", and it was doing exactly what it said, which was not much.
+        //
+        // Material tags first, because they are not an effect: they are what
+        // records which block a vertex came from, and swaying, bloom, occlusion
+        // and every water and ice effect are switched on but inert without
+        // them. A preset that turns on the effects and not the tags is the one
+        // way to get all of the cost and none of the picture.
+        boolean materialTags;
+        boolean dynamicLights;
+        int sceneTone;
+        int sceneWarmth = VulkanConfig.DEF_SCENE_WARMTH;
+        int celestialGlint;
+        int iceShine;
+        int waterCaustics;
+        int wetSurfaces;
+        int sunHaze;
+        int cloudTint;
+        int skyGradient;
+        boolean sceneOcclusion;
+        int leafShadows;
+        int waterRefraction;
+        boolean roundSun;
+        boolean roundMoon;
     }
 
     /**
@@ -104,14 +133,31 @@ public final class VulkanPresets {
         look.fpsLimit = 260;
         look.vsync = false;
 
+        // Without this line every effect below is switched on and does nothing.
+        look.materialTags = true;
+        look.dynamicLights = true;
         look.directionalLight = 65;
-        look.heightFog = 35;
+        look.heightFog = 20;
         look.waterReflection = 70;
         look.waterWaves = 50;
         look.foliageSway = 55;
         look.bloom = 45;
         look.screenReflections = 35;
         look.shaderAmbientOcclusion = 60;
+        look.sceneTone = 45;
+        look.sceneWarmth = 55;
+        look.waterRefraction = 45;
+        look.celestialGlint = 55;
+        look.iceShine = 60;
+        look.waterCaustics = 60;
+        look.wetSurfaces = 65;
+        look.sunHaze = 60;
+        look.cloudTint = 70;
+        look.skyGradient = 55;
+        look.sceneOcclusion = true;
+        look.leafShadows = 100;
+        look.roundSun = true;
+        look.roundMoon = true;
         apply(mc, look);
     }
 
@@ -244,6 +290,22 @@ public final class VulkanPresets {
         VulkanConfig.setScreenReflections(look.screenReflections);
         VulkanConfig.setAmbientOcclusion(look.shaderAmbientOcclusion);
         VulkanConfig.setAoRadius(look.aoRadius);
+        VulkanConfig.setMaterialTags(look.materialTags);
+        VulkanConfig.setDynamicLights(look.dynamicLights);
+        VulkanConfig.setSceneTone(look.sceneTone);
+        VulkanConfig.setSceneWarmth(look.sceneWarmth);
+        VulkanConfig.setCelestialGlint(look.celestialGlint);
+        VulkanConfig.setIceShine(look.iceShine);
+        VulkanConfig.setWaterCaustics(look.waterCaustics);
+        VulkanConfig.setWetSurfaces(look.wetSurfaces);
+        VulkanConfig.setSunHaze(look.sunHaze);
+        VulkanConfig.setCloudTint(look.cloudTint);
+        VulkanConfig.setSkyGradient(look.skyGradient);
+        VulkanConfig.setSceneOcclusion(look.sceneOcclusion);
+        VulkanConfig.setLeafShadows(look.leafShadows);
+        VulkanConfig.setWaterRefraction(look.waterRefraction);
+        VulkanConfig.setRoundSun(look.roundSun);
+        VulkanConfig.setRoundMoon(look.roundMoon);
         if (look.chunkBuildThreads > 0) {
             VulkanConfig.setChunkBuildThreads(look.chunkBuildThreads);
         }

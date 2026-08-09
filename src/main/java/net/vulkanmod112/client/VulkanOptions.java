@@ -1193,15 +1193,14 @@ final class VulkanOptions {
                                         VulkanConfig.setShowOcclusion(value);
                                     }
                                 }),
-                        new VSwitchOption("Vulkan Entities (broken)",
-                                "KNOWN BROKEN, and left here only so the work can be continued: "
-                                        + "creatures come out see-through, water covers them even "
-                                        + "when they are above it, and nothing flashes red when "
-                                        + "hurt. The cause is not any of those separately — the "
-                                        + "pass they are drawn in is the one built for particles, "
-                                        + "which writes no depth because the water shader reads "
-                                        + "that same image. Until creatures have a pass with a "
-                                        + "depth buffer of their own this cannot be made right. "
+                        new VSwitchOption("Vulkan Entities (experimental)",
+                                "Creatures now have a subpass of their own with a writable depth "
+                                        + "buffer, which is what they were missing: one mob hides "
+                                        + "the mob behind it, a head hides the back of its own "
+                                        + "skull, water covers a creature only when the creature "
+                                        + "is really under it, and particles stop showing through. "
+                                        + "What is still missing is the red flash when something "
+                                        + "is hurt and the shimmer on enchanted armour. "
                                         + "Draw creatures through Vulkan instead of letting the game draw "
                                         + "them. Experimental, and the first thing here that "
                                         + "replaces vanilla's own drawing rather than adding to "
@@ -1992,6 +1991,87 @@ final class VulkanOptions {
                                     @Override
                                     public void set(int value) {
                                         VulkanConfig.setSunHaze(value);
+                                    }
+                                }),
+                        new VRangeOption("Shadows Through Leaves",
+                                "How much light a canopy lets through in a traced shadow. Without "
+                                        + "it a leaf block stops a shadow ray exactly as stone "
+                                        + "does, because a ray does not read textures — so a tree "
+                                        + "that is mostly holes throws a solid slab of shade, "
+                                        + "which is the thing that tells this apart from a shader "
+                                        + "pack at a glance. Instead of asking where a leaf's "
+                                        + "holes are, this asks how much of it is holes and lets "
+                                        + "light past that often; the frame averaging turns the "
+                                        + "speckle into dapple. Grass and flowers cast a shadow "
+                                        + "at all for the first time here, and a light one. "
+                                        + "Halfway between is a thinner canopy rather than a "
+                                        + "worse one.",
+                                Cost.of(Level.NONE, Level.MEDIUM, Level.NONE),
+                                "Needs Ray Tracing and Sun Shadows. Costs most where the screen "
+                                        + "is full of trees.",
+                                0, 100, 5, "%", "Off",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getLeafShadows();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setLeafShadows(value);
+                                    }
+                                }),
+                        new VSwitchOption("Occlusion Over Everything",
+                                "Darken the corners of the whole picture instead of the blocks' "
+                                        + "alone. Without it the shading is worked out inside "
+                                        + "this mod's own pass, from a depth image that holds "
+                                        + "terrain and nothing else — so a chest casts nothing "
+                                        + "into the floor it stands on, and neither does a mob or "
+                                        + "a modded block drawn by its own renderer. This reads "
+                                        + "the game's finished depth, where every one of them is. "
+                                        + "Nothing is taken away from any mod by it: the picture "
+                                        + "is already drawn, and this only reads it. Needs "
+                                        + "Ambient Occlusion above zero, and uses that same "
+                                        + "slider.",
+                                Cost.of(Level.NONE, Level.LOW, Level.LOW),
+                                "Needs Ambient Occlusion above zero.",
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return VulkanConfig.isSceneOcclusion();
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        VulkanConfig.setSceneOcclusion(value);
+                                    }
+                                }),
+                        new VRangeOption("Sky Gradient",
+                                "Deepens the sky away from the horizon. Vanilla's is one colour "
+                                        + "from the horizon to straight overhead, and every "
+                                        + "shader pack darkens the top of it — the sky is the "
+                                        + "largest thing on the screen and the flattest. The "
+                                        + "colour is the game's own fog colour taken down towards "
+                                        + "a night sky rather than a colour of this mod's "
+                                        + "choosing, so the top cannot disagree with the horizon "
+                                        + "under it. Painted only where nothing else drew, so a "
+                                        + "hilltop against the sky keeps its own colour. It "
+                                        + "follows the screen rather than the true direction of "
+                                        + "the sky: look straight up and the deepest part is "
+                                        + "across the middle rather than overhead. That is what "
+                                        + "makes it a look rather than a sky.",
+                                Cost.of(Level.NONE, Level.LOW, Level.NONE),
+                                "One fullscreen pass over the part of the frame with no terrain.",
+                                0, 100, 5, "%", "Off",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getSkyGradient();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setSkyGradient(value);
                                     }
                                 }),
                         new VRangeOption("Cloud Tint",

@@ -90,6 +90,7 @@ public final class SettingsHealth {
             add(names, "sun and moon glint", VulkanConfig.getCelestialGlint());
             add(names, "ice shine", VulkanConfig.getIceShine());
             add(names, "water caustics", VulkanConfig.getWaterCaustics());
+            add(names, "water depth and shore foam", VulkanConfig.getWaterRefraction());
             if (names.length() > 0) {
                 out.append(names).append(" — these are left out of the traced "
                         + "terrain shader on purpose, and ray tracing is on");

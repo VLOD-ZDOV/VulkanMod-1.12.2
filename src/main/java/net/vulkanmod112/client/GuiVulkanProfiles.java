@@ -174,6 +174,10 @@ public final class GuiVulkanProfiles extends GuiScreen {
     @Override
     public void drawScreen(int mouseX, int mouseY, float partialTicks) {
         this.drawDefaultBackground();
+        // This screen is where a profile is written, so this is the screen
+        // standing in front of whoever wrote one — the settings page behind it
+        // nodded to an empty room.
+        SixSeven.begin();
         this.drawCenteredString(this.fontRenderer, Lang.tr(Lang.UI, "Profiles"),
                 this.width / 2, 14, 0xFFFFFF);
         this.drawCenteredString(this.fontRenderer,
@@ -211,6 +215,7 @@ public final class GuiVulkanProfiles extends GuiScreen {
             this.fontRenderer.drawString(this.status, left, bottom + 6, 0xA0A0A0);
         }
         super.drawScreen(mouseX, mouseY, partialTicks);
+        SixSeven.end();
     }
 
     @Override

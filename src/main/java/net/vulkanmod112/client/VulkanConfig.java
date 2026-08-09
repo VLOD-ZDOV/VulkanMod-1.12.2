@@ -376,6 +376,9 @@ public final class VulkanConfig {
     static final int DEF_WET_SURFACES = 0;
     /** How much fog warms towards the sun and cools away from it. */
     static final int DEF_SUN_HAZE = 0;
+    static final int DEF_SKY_GRADIENT = 0;
+    static final boolean DEF_SCENE_OCCLUSION = false;
+    static final int DEF_LEAF_SHADOWS = 0;
     /** How much of the sky's colour the clouds take. */
     static final int DEF_CLOUD_TINT = 0;
     /** How many chunks the offscreen preloader keeps queued. */
@@ -577,6 +580,9 @@ public final class VulkanConfig {
     private static volatile int waterCaustics = DEF_WATER_CAUSTICS;
     private static volatile int wetSurfaces = DEF_WET_SURFACES;
     private static volatile int sunHaze = DEF_SUN_HAZE;
+    private static volatile int skyGradient = DEF_SKY_GRADIENT;
+    private static volatile boolean sceneOcclusion = DEF_SCENE_OCCLUSION;
+    private static volatile int leafShadows = DEF_LEAF_SHADOWS;
     private static volatile int cloudTint = DEF_CLOUD_TINT;
     private static volatile int preloadQueue = DEF_PRELOAD_QUEUE;
     private static volatile int preloadScan = DEF_PRELOAD_SCAN;
@@ -885,6 +891,27 @@ public final class VulkanConfig {
                         + "- there is no test for whether this particular block is under a roof, "
                         + "so a lit cave mouth will damp a little too. A mood rather than a "
                         + "simulation, like the height fog.");
+        leafShadows = config.getInt("leafShadows", CATEGORY_GENERAL, DEF_LEAF_SHADOWS, 0, 100,
+                "How much light gets through leaves and plants in a traced shadow. A ray cannot "
+                        + "read a texture, so this is how often a leaf quad stops light rather "
+                        + "than where its holes are - averaged over frames it comes out as "
+                        + "dapple. Needs ray tracing and sun shadows; costs more the more of the "
+                        + "screen is under a tree.");
+        sceneOcclusion = config.getBoolean("sceneOcclusion", CATEGORY_GENERAL, DEF_SCENE_OCCLUSION,
+                "Darken the corners of the whole picture rather than of the blocks alone. The "
+                        + "occlusion is otherwise computed inside this mod's own pass, from a "
+                        + "depth image holding terrain and nothing else, so a chest, a mob or a "
+                        + "modded block casts nothing into the floor under it. This reads the "
+                        + "game's finished depth instead, where all of them are. Costs one more "
+                        + "pass over the frame and takes nothing away from anyone: the picture is "
+                        + "already drawn by then.");
+        skyGradient = config.getInt("skyGradient", CATEGORY_GENERAL, DEF_SKY_GRADIENT, 0, 100,
+                "How much deeper the sky gets away from the horizon. Vanilla's sky is one colour "
+                        + "from the horizon to straight overhead; this deepens the top of it "
+                        + "towards a night sky, using the game's own fog colour so it cannot "
+                        + "disagree with the horizon under it. Painted only where the terrain "
+                        + "drew nothing, and it follows the screen rather than the true direction "
+                        + "of the sky — a look rather than a sky model.");
         sunHaze = config.getInt("sunHaze", CATEGORY_GENERAL, DEF_SUN_HAZE, 0, 100,
                 "How much the fog warms towards the sun and cools away from it. The game fogs "
                         + "everything to one colour whichever way you face; the sky it hangs "
@@ -1528,6 +1555,36 @@ public final class VulkanConfig {
     public static void setSunHaze(int value) {
         sunHaze = clamp(value, 0, 100);
         store(CATEGORY_GENERAL, "sunHaze", sunHaze);
+        applySystemProperties();
+    }
+
+    public static int getLeafShadows() {
+        return leafShadows;
+    }
+
+    public static void setLeafShadows(int value) {
+        leafShadows = clamp(value, 0, 100);
+        store(CATEGORY_GENERAL, "leafShadows", leafShadows);
+        applySystemProperties();
+    }
+
+    public static boolean isSceneOcclusion() {
+        return sceneOcclusion;
+    }
+
+    public static void setSceneOcclusion(boolean value) {
+        sceneOcclusion = value;
+        store(CATEGORY_GENERAL, "sceneOcclusion", value);
+        applySystemProperties();
+    }
+
+    public static int getSkyGradient() {
+        return skyGradient;
+    }
+
+    public static void setSkyGradient(int value) {
+        skyGradient = clamp(value, 0, 100);
+        store(CATEGORY_GENERAL, "skyGradient", skyGradient);
         applySystemProperties();
     }
 
@@ -2200,6 +2257,9 @@ public final class VulkanConfig {
         publish("vulkanmod112.waterCaustics", Integer.toString(waterCaustics));
         publish("vulkanmod112.wetSurfaces", Integer.toString(wetSurfaces));
         publish("vulkanmod112.sunHaze", Integer.toString(sunHaze));
+        publish("vulkanmod112.skyGradient", Integer.toString(skyGradient));
+        publish("vulkanmod112.sceneOcclusion", Boolean.toString(sceneOcclusion));
+        publish("vulkanmod112.leafShadows", Integer.toString(leafShadows));
         publish("vulkanmod112.cloudTint", Integer.toString(cloudTint));
         publish("vulkanmod112.preloadQueue", Integer.toString(preloadQueue));
         publish("vulkanmod112.preloadScan", Integer.toString(preloadScan));
