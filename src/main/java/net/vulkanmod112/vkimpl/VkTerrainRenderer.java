@@ -801,10 +801,27 @@ final class VkTerrainRenderer {
     private int aoInvSize = -1;
     private int aoProjUniform = -1;
     private int aoRadiusUniform = -1;
+    private int aoSunUniform = -1;
+    private int aoContactUniform = -1;
     private int aoStrengthUniform = -1;
     private int aoWidth;
     private int aoHeight;
     private float aoStrength;
+    /**
+     * How dark a short shadow cast along the ground towards the sun may go.
+     *
+     * Shares the occlusion pass rather than opening one of its own: both
+     * answer a question about the neighbourhood from the same depth image, and
+     * the second one costs a loop rather than a pass. Which depth image that
+     * is decides what casts — the game's finished one holds chests, creatures
+     * and other mods' machines, this renderer's own holds blocks alone.
+     */
+    private float contactShadows;
+
+    /** Whether the occlusion pass has anything to do at all. */
+    private boolean aoWanted() {
+        return aoStrength > 0.0f || contactShadows > 0.0f;
+    }
     /**
      * How much of a gradient the sky is given, 0 for the sky the game drew.
      *
@@ -935,6 +952,16 @@ final class VkTerrainRenderer {
      */
     private static final float AO_BLUR_SPREAD = 2.0f;
     private final java.nio.FloatBuffer projectionMatrix =
+            org.lwjgl.BufferUtils.createFloatBuffer(16);
+    /**
+     * The modelview the world is being drawn with, for turning the sun from
+     * world axes into the ones the occlusion pass reconstructs positions in.
+     *
+     * Read from the driver rather than carried, exactly as the projection
+     * beside it is, and for the same reason: this runs inside the game's own
+     * world pass, where both are still set to what drew the picture.
+     */
+    private final java.nio.FloatBuffer modelViewMatrix =
             org.lwjgl.BufferUtils.createFloatBuffer(16);
     private final int[] compositeAoOnlyUniforms = {-1, -1};
     private final int[] compositeMotionUniforms = {-1, -1};
@@ -3291,7 +3318,7 @@ final class VkTerrainRenderer {
             // Not when the whole scene is being darkened later instead: the
             // same corners would be shaded twice, once here from a depth image
             // holding only blocks and once there from one holding everything.
-            if (aoStrength > 0.0f && !sceneOcclusion && !aoFailed) {
+            if (aoWanted() && !sceneOcclusion && !aoFailed) {
                 int frameFbo = GL11C.glGetInteger(GL30C.GL_FRAMEBUFFER_BINDING);
                 try {
                     ao = aoPass(glDepthTexture);
@@ -3495,6 +3522,7 @@ final class VkTerrainRenderer {
             GL20C.glUniform4f(aoProjUniform, 1.0f / m0, 1.0f / m5, near, far);
             GL20C.glUniform1f(aoRadiusUniform, aoRadius);
             GL20C.glUniform1f(aoStrengthUniform, aoStrength);
+            writeContactSun();
             GL13C.glActiveTexture(GL13C.GL_TEXTURE0);
             GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, depthTexture);
             fullscreenQuad();
@@ -3523,6 +3551,55 @@ final class VkTerrainRenderer {
             org.lwjgl.opengl.GL11.glPopAttrib();
         }
         return true;
+    }
+
+    /**
+     * The sun in the space the occlusion pass works in, and how dark it may go.
+     *
+     * Zero length means "do not march": below the horizon there is no direction
+     * to march along, and the shader is given one thing to test rather than a
+     * direction and a flag that can disagree with it.
+     *
+     * The direction is turned by the rotation of the modelview and nothing
+     * else. A direction has no position, so the translation in the fourth
+     * column is not wanted — carrying it would make the sun swing round the
+     * world as the player walks, which is the classic way this goes wrong and
+     * looks like the shadows lagging rather than like the wrong maths.
+     */
+    private void writeContactSun() {
+        if (aoContactUniform < 0 || aoSunUniform < 0) {
+            return;
+        }
+        if (contactShadows <= 0.0f || sunDirection[1] <= 0.0f) {
+            GL20C.glUniform1f(aoContactUniform, 0.0f);
+            GL20C.glUniform3f(aoSunUniform, 0.0f, 0.0f, 0.0f);
+            return;
+        }
+        modelViewMatrix.clear();
+        GL11C.glGetFloatv(org.lwjgl.opengl.GL11.GL_MODELVIEW_MATRIX, modelViewMatrix);
+        float x = sunDirection[0];
+        float y = sunDirection[1];
+        float z = sunDirection[2];
+        float vx = modelViewMatrix.get(0) * x + modelViewMatrix.get(4) * y
+                + modelViewMatrix.get(8) * z;
+        float vy = modelViewMatrix.get(1) * x + modelViewMatrix.get(5) * y
+                + modelViewMatrix.get(9) * z;
+        float vz = modelViewMatrix.get(2) * x + modelViewMatrix.get(6) * y
+                + modelViewMatrix.get(10) * z;
+        float len = (float) Math.sqrt(vx * vx + vy * vy + vz * vz);
+        if (!(len > 1.0e-4f)) {
+            // A modelview with no rotation left in it is not this pass's to
+            // interpret; the pass simply does nothing this frame.
+            GL20C.glUniform1f(aoContactUniform, 0.0f);
+            GL20C.glUniform3f(aoSunUniform, 0.0f, 0.0f, 0.0f);
+            return;
+        }
+        GL20C.glUniform3f(aoSunUniform, vx / len, vy / len, vz / len);
+        // Faded out as the sun reaches the horizon, where a shadow marched
+        // along the ground stretches past anything on the screen and every
+        // sample lands on the same wall.
+        GL20C.glUniform1f(aoContactUniform,
+                contactShadows * Math.min(1.0f, sunDirection[1] * 5.0f));
     }
 
     private boolean ensureAoTargets() {
@@ -3583,6 +3660,17 @@ final class VkTerrainRenderer {
                         + "uniform vec4 uProj;\n"
                         + "uniform float uRadius;\n"
                         + "uniform float uStrength;\n"
+                        // The sun, in the space this pass works in, and zero
+                        // when it is below the horizon. Length rather than a
+                        // separate flag, so the shader has one thing to ask.
+                        + "uniform vec3 uSun;\n"
+                        + "uniform float uContact;\n"
+                        // How far a contact shadow reaches, in blocks, split
+                        // over eight steps — and how thick a thing has to be
+                        // before it is treated as standing in the way rather
+                        // than as the far side of the world seen past it.
+                        + "const float CONTACT_STEP = 0.16;\n"
+                        + "const float CONTACT_THICK = 0.55;\n"
                         + "float linearZ(float d) {\n"
                         + "    return 2.0 * uProj.z * uProj.w\n"
                         + "         / (uProj.w + uProj.z - (2.0 * d - 1.0) * (uProj.w - uProj.z));\n"
@@ -3740,12 +3828,62 @@ final class VkTerrainRenderer {
                         // of a slider; the setting that looked right at half of
                         // the old scale is the whole of this one.
                         + "    float ao = 1.0 - uStrength * (occlusion * 0.125) * 0.6;\n"
-                        + "    gl_FragColor = vec4(clamp(ao, 0.0, 1.0));\n"
+                        // A short shadow along the ground towards the sun, from
+                        // the same depth image and the same reconstructed
+                        // position. What this adds over the sixteen samples
+                        // above is a direction: occlusion asks how enclosed a
+                        // point is and answers the same whatever the hour,
+                        // while this asks whether one particular thing stands
+                        // between the point and the sun, so it moves as the sun
+                        // does. It is the cheap half of a shadow — it can only
+                        // find an occluder that is itself on the screen, and
+                        // only within a step or so of the surface — but that is
+                        // exactly the half that is missing here, because a
+                        // chest, a mob and another mod's machine are all in
+                        // this depth image and in none of the traced ones.
+                        + "    float contact = 0.0;\n"
+                        + "    if (uContact > 0.0 && dot(uSun, uSun) > 0.25 && dot(n, uSun) > 0.0) {\n"
+                        // Started off the surface along its own normal, or the
+                        // first step lands back on the surface it came from and
+                        // every lit face shadows itself.
+                        + "        vec3 rp = p + n * (0.05 + 0.002 * (-p.z));\n"
+                        + "        float jitter = fract(a * 0.1591549);\n"
+                        + "        for (int i = 1; i <= 8; i++) {\n"
+                        + "            vec3 s = rp + uSun * (CONTACT_STEP * (float(i) + jitter));\n"
+                        // Behind the eye, where there is no pixel to ask.
+                        + "            if (s.z > -uProj.z) break;\n"
+                        + "            vec2 sn = vec2(s.x / (uProj.x * -s.z), s.y / (uProj.y * -s.z));\n"
+                        + "            vec2 suv = sn * 0.5 + 0.5;\n"
+                        // Off the edge of the screen, which is the honest limit
+                        // of the technique rather than a shadow ending.
+                        + "            if (suv.x < 0.0 || suv.x > 1.0 || suv.y < 0.0 || suv.y > 1.0) break;\n"
+                        + "            float sd = texture2D(uSource, suv).r;\n"
+                        + "            if (sd >= 0.9999) continue;\n"
+                        + "            float depthHere = linearZ(sd);\n"
+                        + "            float rayHere = -s.z;\n"
+                        + "            float gap = rayHere - depthHere;\n"
+                        // In front of the ray, and thin enough to be a thing
+                        // standing there rather than the far side of the world.
+                        // Without the thickness test every pixel with any
+                        // geometry nearer to the camera anywhere along the line
+                        // counts, and a hillside puts the whole valley in shade.
+                        + "            if (gap > 0.03 && gap < CONTACT_THICK) {\n"
+                        // Strongest against the thing casting it and gone by
+                        // the end of the reach, which is what makes it read as
+                        // contact rather than as a second helping of occlusion.
+                        + "                contact = max(contact, 1.0 - float(i) / 8.0);\n"
+                        + "            }\n"
+                        + "        }\n"
+                        + "    }\n"
+                        + "    float lit = clamp(ao, 0.0, 1.0) * (1.0 - uContact * contact * 0.75);\n"
+                        + "    gl_FragColor = vec4(clamp(lit, 0.0, 1.0));\n"
                         + "}\n");
         aoInvSize = GL20C.glGetUniformLocation(aoProgram, "uInvSize");
         aoProjUniform = GL20C.glGetUniformLocation(aoProgram, "uProj");
         aoRadiusUniform = GL20C.glGetUniformLocation(aoProgram, "uRadius");
         aoStrengthUniform = GL20C.glGetUniformLocation(aoProgram, "uStrength");
+        aoSunUniform = GL20C.glGetUniformLocation(aoProgram, "uSun");
+        aoContactUniform = GL20C.glGetUniformLocation(aoProgram, "uContact");
     }
 
     private void destroyAoTargets() {
@@ -4283,7 +4421,7 @@ final class VkTerrainRenderer {
      * into a corner does not care whose geometry made it.
      */
     void applySceneOcclusion(int sceneTexture) {
-        if (!sceneOcclusion || aoFailed || aoStrength <= 0.0f || sceneTexture == 0
+        if (!sceneOcclusion || aoFailed || !aoWanted() || sceneTexture == 0
                 || width <= 0 || height <= 0) {
             return;
         }
@@ -5866,6 +6004,7 @@ final class VkTerrainRenderer {
         toneWarmth = clampPercent(intProperty("vulkanmod112.sceneWarmth", 50)) * 2.0f - 1.0f;
         bloomStrength = clampPercent(intProperty("vulkanmod112.bloom", 0));
         aoStrength = clampPercent(intProperty("vulkanmod112.ambientOcclusion", 0));
+        contactShadows = clampPercent(intProperty("vulkanmod112.contactShadows", 0));
         skyGradient = clampPercent(intProperty("vulkanmod112.skyGradient", 0));
         sceneOcclusion = Boolean.parseBoolean(
                 System.getProperty("vulkanmod112.sceneOcclusion", "false"));

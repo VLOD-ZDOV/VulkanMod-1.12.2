@@ -2046,6 +2046,40 @@ final class VulkanOptions {
                                         VulkanConfig.setSceneOcclusion(value);
                                     }
                                 }),
+                        new VRangeOption("Contact Shadows",
+                                "A short shadow where a thing meets the ground, cast towards the "
+                                        + "sun. This is the gap the traced shadows leave: they "
+                                        + "come from the acceleration structures, which hold "
+                                        + "terrain and creatures, so a chest, a sign and every "
+                                        + "modded machine cast nothing at all. This is worked out "
+                                        + "from the depth of the finished picture instead, where "
+                                        + "all of them are, and nothing is taken away from any "
+                                        + "mod to get it — the picture is already drawn and this "
+                                        + "only reads it. What it cannot do is the other half: an "
+                                        + "occluder has to be on the screen and within about a "
+                                        + "block of the surface, so this fills in the contact and "
+                                        + "the long shadows stay the traced ones' work. Rides the "
+                                        + "ambient occlusion pass, so it costs a loop rather than "
+                                        + "a pass of its own, and fades out as the sun reaches "
+                                        + "the horizon, where a shadow along the ground would "
+                                        + "stretch past everything on the screen. Turn on "
+                                        + "Occlusion Over Everything with it, or it sees blocks "
+                                        + "and nothing else.",
+                                Cost.of(Level.NONE, Level.LOW, Level.NONE),
+                                "Needs the sun above the horizon. Turn on Occlusion Over "
+                                        + "Everything for it to reach anything but blocks.",
+                                0, 100, 5, "%", "Off",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getContactShadows();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setContactShadows(value);
+                                    }
+                                }),
                         new VRangeOption("Sky Gradient",
                                 "Deepens the sky away from the horizon. Vanilla's is one colour "
                                         + "from the horizon to straight overhead, and every "
