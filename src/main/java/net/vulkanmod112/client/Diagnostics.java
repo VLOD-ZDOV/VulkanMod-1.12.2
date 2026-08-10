@@ -498,6 +498,21 @@ public final class Diagnostics {
             out.println("  " + ResourcePackIcons.describe());
         }
         out.println("  memory: " + used() + " MiB used of " + max() + " MiB");
+        // Said positively, and not only when it is wrong.
+        //
+        // Whether the game's frame is floating was readable from this file only
+        // by its absence — the "on but doing nothing" line names high dynamic
+        // range when it is off, so a file that does not mention it means it is
+        // on. A reader chasing a black world should not have to infer the state
+        // of the thing most likely to have caused it from a sentence that is
+        // not there.
+        out.println("  game frame: "
+                + (Boolean.getBoolean("vulkanmod112.hdrFrameActive")
+                        ? "sixteen bits a channel, floating"
+                        : Boolean.getBoolean("vulkanmod112.hdrFrameRefused")
+                                ? "eight bits — the driver refused a floating one"
+                                : "eight bits a channel")
+                + (VulkanConfig.isHdrFrame() ? ", asked for floating" : ", floating not asked for"));
         out.println("  jvm: " + jvmLine());
         out.println();
     }
