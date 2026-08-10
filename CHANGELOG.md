@@ -36,6 +36,43 @@
 
 - **The primed TNT cube is recorded once instead of rebuilt per charge per frame.** The game looks the model up and issues seven draw calls for every lit charge in every frame; five hundred charges is three and a half thousand of them describing one identical cube. The picture is the same to the pixel — the list is recorded from the game's own call.
 
+- **A short shadow where a thing meets the ground.** Every object in the game floats a little
+  without one: a chest on a floor, a mob on grass, another mod's machine on stone. This is walked
+  over the finished picture towards the sun rather than traced, so it lands on everything that got
+  drawn, including whatever a mod put there — and it costs nothing to know what that thing was.
+
+- **Sunlight visible in the air.** The walk from a pixel towards the sun adds up what the sky shows
+  through on the way, so a gap in a canopy leaves a bright lane and anything standing in the way
+  leaves a dark one. No geometry and no rays are involved, which is why it cannot break another
+  mod, and whatever a mod drew casts its own shafts for free.
+
+- **The clouds overhead throw their shade on the world.** Read out of the very sheet the game draws
+  its clouds from, at the height the world reports and with the drift the game itself counts — so
+  the dark patch lands under the cloud that cast it rather than beside it. A sky with clouds that
+  leave no mark on the ground is a sky nobody believes.
+
+- **The game's frame gets room above white.** Its colour buffer is converted to sixteen bits a
+  channel, and the pass that grades the picture brings the range back down with a film curve
+  instead of clipping it — so a highlight on water keeps the ripple inside it and a torch keeps a
+  core instead of becoming a flat white patch. It touches one object rather than every framebuffer
+  in the game, and it puts the frame back to eight bits by itself the moment the pass that would
+  close the range down is not going to run, because a floating frame with nothing to resolve it
+  would burn every highlight in the game. An **Exposure** slider comes with it.
+
+- **A round, warm sun and moon**, drawn at runtime rather than shipped, so their size, their colour
+  and the softness of their edge are sliders. Nothing is copied from anybody: a disc with a warm
+  falloff is arithmetic. If another mod draws the sky in the world you are in — several do — the
+  mod now says so instead of leaving the switch on and doing nothing.
+
+- **Living creatures are drawn in a subpass of their own**, so they hide one another by depth
+  rather than by the order they were listed in, they land in the depth the water reflects against,
+  and they cast a shadow of their own shape instead of the round patch under them.
+
+- **The log says how much of a slow frame belonged to the machine.** The game runs on a virtual
+  machine whose collector stops every thread when it decides to, which is the one explanation that
+  fits a stall on an unchanged scene — and it was the one thing never measured. The worst frame now
+  reports how many collections landed inside it, and so does the interval.
+
 ### Experimental
 
 - **Creatures are drawn by Vulkan properly, and now have depth.** They were switched off and labelled broken in 0.8.0, and the reason was one thing: the pass they were drawn in is the one built for particles, whose depth attachment is declared read-only because the water shader samples that same image for its reflections. No pipeline in such a pass may write depth, whatever it asks for — so a mob did not hide the mob behind it, the far side of a head was drawn over the near side, and water covered a creature standing above it. The layout of a depth attachment is declared per subpass rather than per pass, so there is now a subpass before the old one: creatures are drawn there with depth writes on, everything else follows in the second with depth read-only exactly as before. Face culling stays off, which is vanilla's decision rather than this mod's — it turns culling off for the whole of every living creature it draws, and the models are built with no promise about which way a face points.
@@ -47,6 +84,34 @@
   Still missing, and the switch says so: the red flash when something is hurt, and the shimmer on enchanted armour.
 
 ### Fixed
+
+- **Switching the material tags on rebuilt nothing.** What a block is made of is recorded into its
+  geometry while the chunk is built, so the world was left half tagged — grass swaying in whatever
+  chunks happened to be rebuilt since and standing still in the rest, with the glow, the shading
+  and every water and ice effect patchy the same way. That reads as an effect that half works
+  rather than as a stale chunk.
+
+- **Contact shadows flickered indoors on the smallest movement.** The jitter that offsets their ray
+  was read from which pixel a point landed on, and this march takes a maximum over a hard threshold
+  with nothing downstream to average it — so turning the head a fraction of a degree moved where
+  the threshold fell. It is read from where the point is in the world now.
+
+- **The Beautiful preset asked for thirty-two chunks of render distance**, which bought it nothing:
+  its effects are paid per pixel, while rebuilding chunks at that range is what turned a
+  four-millisecond frame into a thirty-millisecond one every twentieth frame. It caps at twelve
+  now, and sizes the chunk-building pool from the processor like the presets named for speed always
+  did. Its button also had no word on it.
+
+- **Grass kept swaying long after the sway was smaller than a pixel.** It fades out by how big the
+  movement would be on screen rather than by distance — which means the zoom key needs no special
+  case at all: narrowing the field of view enlarges everything, and the grass starts again exactly
+  where it becomes visible.
+
+- **A wait for the graphics card was being counted as time spent recording commands**, so a frame
+  reporting thirty-eight milliseconds of this renderer's work was reporting a processor doing
+  nothing at all. The wait is timed on its own now; real recording has never exceeded half a
+  millisecond.
+
 
 - **Light comes through a canopy.** A ray does not read textures, so a leaf block stopped a shadow ray exactly as stone does, and a tree that is mostly holes threw a solid slab of shade — which is the single thing that tells this apart from a shader pack at a glance. Carrying the atlas, the texture coordinates and a buffer address into every shadow test would be a great deal of machinery on the one path in this shader with no room left in it, so a quad is not asked *where* its holes are: it is asked *how much* of it is holes, and light passes with that probability. Averaged across the frames the accumulation pass already blends, that comes out as dapple. Grass and flowers cast a shadow at all for the first time — they were not in the structures — and a light one. The water path keeps the old, cheaper test: the same loop costs that pipeline six per cent more code, and six per cent of that pipeline is what lost the graphics device once.
 
