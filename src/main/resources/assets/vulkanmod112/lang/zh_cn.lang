@@ -12,6 +12,7 @@ vulkanmod112.ui.cpu=CPU
 vulkanmod112.ui.gpu=GPU
 vulkanmod112.ui.vram=VRAM
 vulkanmod112.ui.vulkan_unavailable=Vulkan 不可用
+vulkanmod112.ui.search_settings=搜索设置
 vulkanmod112.ui.profiles=配置
 vulkanmod112.ui.save_as=另存为
 vulkanmod112.ui.load=加载
@@ -322,3 +323,7 @@ vulkanmod112.applies.motion_over_world=仅在显示运动矢量开启时才有�
 vulkanmod112.option.show_reflections=显示反射
 vulkanmod112.tooltip.show_reflections=只用反射光线找到的内容给水面上色，不掺杂任何其他东西：没有菲涅尔效应来决定显示多少反射，底下也没有水本身的颜色，凡是光线什么都没找到的地方，一律显示深蓝色。哪怕反射完全正确，水面上的倒影看起来也是被拉伸的——一双高出水面一两米的眼睛，会让反射光线以非常小的角度射出，于是它要走很远才会碰到东西，对岸的一棵树到达时会变成一条长长的条纹，而不是一棵树的样子。这意味着这个功能是否正常工作，没法靠水面看起来怎么样来判断，而正确的判断方法就是这个。
 vulkanmod112.applies.show_reflections=需要屏幕反射大于零。
+
+vulkanmod112.page.search=搜索
+vulkanmod112.group.search_results=搜索结果
+vulkanmod112.group.nothing_found=无结果

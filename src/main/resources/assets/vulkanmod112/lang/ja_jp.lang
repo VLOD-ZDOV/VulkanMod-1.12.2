@@ -8,6 +8,7 @@ vulkanmod112.ui.cpu=CPU
 vulkanmod112.ui.gpu=GPU
 vulkanmod112.ui.vram=VRAM
 vulkanmod112.ui.vulkan_unavailable=Vulkanが利用できません
+vulkanmod112.ui.search_settings=設定を検索
 vulkanmod112.ui.profiles=プロファイル
 vulkanmod112.ui.save_as=名前を付けて保存
 vulkanmod112.ui.load=読み込む
@@ -318,3 +319,7 @@ vulkanmod112.applies.motion_over_world=モーションベクトルを表示が�
 vulkanmod112.option.show_reflections=反射を表示
 vulkanmod112.tooltip.show_reflections=反射光線が見つけたものだけで水を塗り、それ以外は何も加えない：どれだけ反射を見せるかを決めるフレネルもなく、下にある水の色もなく、光線が何も見つけられなかった場所はすべて濃い青になる。反射が完全に正しく計算されていても、水面上の反射は引き伸ばされたように見える——水面から1〜2メートル上にある目からは、反射光線が非常に浅い角度で放たれるため、何かに到達するまでに長い距離を進むことになり、対岸の木は木の形ではなく長い1本の筋として届く。つまり、これが正しく機能しているかどうかは水面の見た目だけでは判断できないということであり、代わりにこれで判断する。
 vulkanmod112.applies.show_reflections=スクリーン反射が0より大きい必要がある。
+
+vulkanmod112.page.search=検索
+vulkanmod112.group.search_results=検索結果
+vulkanmod112.group.nothing_found=該当なし

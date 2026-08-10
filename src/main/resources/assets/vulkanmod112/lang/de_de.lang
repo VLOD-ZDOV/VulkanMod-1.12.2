@@ -18,6 +18,7 @@ vulkanmod112.ui.cpu=CPU
 vulkanmod112.ui.gpu=GPU
 vulkanmod112.ui.vram=VRAM
 vulkanmod112.ui.vulkan_unavailable=Vulkan nicht verfügbar
+vulkanmod112.ui.search_settings=Einstellung suchen
 vulkanmod112.ui.profiles=Profile
 vulkanmod112.ui.save_as=Speichern unter
 vulkanmod112.ui.load=Laden
@@ -357,3 +358,7 @@ vulkanmod112.applies.motion_over_world=Wirkt sich nur aus, solange „Bewegungsv
 vulkanmod112.option.show_reflections=Reflexionen anzeigen
 vulkanmod112.tooltip.show_reflections=Malt das Wasser nur mit dem, was der reflektierte Strahl gefunden hat, und mit nichts sonst: kein Fresnel, der entscheidet, wie viel davon gezeigt wird, keine Wasserfarbe darunter, und tiefes Blau überall dort, wo der Strahl gar nichts gefunden hat. Eine Spiegelung auf Wasser ist gestreckt, selbst wenn sie vollkommen korrekt ist — ein Auge ein bis zwei Meter über der Oberfläche schickt den reflektierten Strahl in einem sehr flachen Winkel los, sodass er einen langen Weg zurücklegt, bevor er irgendetwas erreicht, und ein Baum am gegenüberliegenden Ufer kommt als langer Streifen an statt als Baum. Das bedeutet, dass sich die Frage, ob dies funktioniert, nicht daran entscheiden lässt, wie es über dem Wasser aussieht — und so entscheidet man sie stattdessen.
 vulkanmod112.applies.show_reflections=Wirkt sich nur aus, solange Bildschirmreflexionen über 0 liegt.
+
+vulkanmod112.page.search=Suche
+vulkanmod112.group.search_results=Suchergebnisse
+vulkanmod112.group.nothing_found=Nichts gefunden

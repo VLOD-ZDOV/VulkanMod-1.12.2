@@ -17,6 +17,7 @@ vulkanmod112.ui.cpu=CPU
 vulkanmod112.ui.gpu=GPU
 vulkanmod112.ui.vram=VRAM
 vulkanmod112.ui.vulkan_unavailable=Vulkan no disponible
+vulkanmod112.ui.search_settings=Buscar ajustes
 vulkanmod112.ui.profiles=Perfiles
 vulkanmod112.ui.save_as=Guardar Como
 vulkanmod112.ui.load=Cargar
@@ -327,3 +328,7 @@ vulkanmod112.applies.motion_over_world=Solo hace algo mientras Mostrar Vectores 
 vulkanmod112.option.show_reflections=Mostrar Reflejos
 vulkanmod112.tooltip.show_reflections=Pinta el agua con lo que el rayo reflejado encontró y nada más: sin fresnel decidiendo cuánto mostrar de eso, sin color de agua debajo, y azul profundo allí donde el rayo no encontró absolutamente nada. Un reflejo sobre el agua sale estirado incluso cuando es perfectamente correcto — un ojo situado uno o dos metros por encima de la superficie envía el rayo reflejado en un ángulo muy rasante, así que recorre una gran distancia antes de alcanzar algo, y un árbol en la orilla opuesta llega como una larga franja en lugar de como un árbol. Lo que significa que la pregunta de si esto funciona no se puede resolver por el aspecto que tiene sobre el agua, y así es como se resuelve en su lugar.
 vulkanmod112.applies.show_reflections=Necesita Reflejos en Pantalla superiores a 0.
+
+vulkanmod112.page.search=Búsqueda
+vulkanmod112.group.search_results=Resultados de la búsqueda
+vulkanmod112.group.nothing_found=Sin resultados

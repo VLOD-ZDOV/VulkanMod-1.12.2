@@ -17,6 +17,7 @@ vulkanmod112.ui.cpu=CPU
 vulkanmod112.ui.gpu=GPU
 vulkanmod112.ui.vram=VRAM
 vulkanmod112.ui.vulkan_unavailable=Vulkan indisponible
+vulkanmod112.ui.search_settings=Rechercher un paramètre
 vulkanmod112.ui.profiles=Profils
 vulkanmod112.ui.save_as=Enregistrer sous
 vulkanmod112.ui.load=Charger
@@ -327,3 +328,7 @@ vulkanmod112.applies.motion_over_world=N'a d'effet que si Afficher les vecteurs 
 vulkanmod112.option.show_reflections=Afficher les reflets
 vulkanmod112.tooltip.show_reflections=Peint l'eau avec ce que le rayon réfléchi a trouvé et rien d'autre : aucun effet de fresnel pour décider combien en montrer, aucune couleur d'eau en dessous, et un bleu profond partout où le rayon n'a rien trouvé du tout. Un reflet sur l'eau est étiré même lorsqu'il est parfaitement correct — un œil situé à un ou deux mètres au-dessus de la surface envoie le rayon réfléchi selon un angle très rasant, si bien qu'il parcourt une longue distance avant d'atteindre quoi que ce soit, et un arbre sur la rive opposée arrive sous la forme d'une longue traînée plutôt que d'un arbre. Ce qui veut dire que la question de savoir si cela fonctionne ne peut pas se régler d'après l'apparence au-dessus de l'eau, et voici comment la régler à la place.
 vulkanmod112.applies.show_reflections=Nécessite Reflets à l'écran supérieurs à 0.
+
+vulkanmod112.page.search=Recherche
+vulkanmod112.group.search_results=Résultats de recherche
+vulkanmod112.group.nothing_found=Aucun résultat

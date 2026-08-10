@@ -8,6 +8,7 @@ vulkanmod112.ui.cpu=CPU
 vulkanmod112.ui.gpu=GPU
 vulkanmod112.ui.vram=VRAM
 vulkanmod112.ui.vulkan_unavailable=Vulkan indisponível
+vulkanmod112.ui.search_settings=Pesquisar Configurações
 vulkanmod112.ui.profiles=Perfis
 vulkanmod112.ui.save_as=Salvar Como
 vulkanmod112.ui.load=Carregar
@@ -318,3 +319,7 @@ vulkanmod112.applies.motion_over_world=Só faz alguma coisa enquanto Mostrar Vet
 vulkanmod112.option.show_reflections=Mostrar Reflexos
 vulkanmod112.tooltip.show_reflections=Pinta a água só com o que o raio refletido encontrou e nada além disso: sem Fresnel decidindo quanto disso mostrar, sem cor da água por baixo, e azul profundo onde quer que o raio não tenha encontrado nada. Um reflexo na água fica esticado mesmo quando está perfeitamente correto — um olho um ou dois metros acima da superfície lança o raio refletido em um ângulo bem raso, então ele percorre um longo caminho antes de alcançar qualquer coisa, e uma árvore na margem distante chega como uma listra comprida em vez de uma árvore. O que significa que a pergunta se isto está funcionando não pode ser respondida por como a coisa fica sobre a água, e é assim que se responde a isso em vez disso.
 vulkanmod112.applies.show_reflections=Precisa de Reflexos de Tela acima de zero.
+
+vulkanmod112.page.search=Pesquisa
+vulkanmod112.group.search_results=Resultados da Pesquisa
+vulkanmod112.group.nothing_found=Nada Encontrado

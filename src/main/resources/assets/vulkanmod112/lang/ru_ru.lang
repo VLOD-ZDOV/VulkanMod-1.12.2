@@ -18,6 +18,7 @@ vulkanmod112.ui.cpu=CPU
 vulkanmod112.ui.gpu=GPU
 vulkanmod112.ui.vram=VRAM
 vulkanmod112.ui.vulkan_unavailable=Vulkan недоступен
+vulkanmod112.ui.search_settings=Найти настройку
 vulkanmod112.ui.profiles=Профили
 vulkanmod112.ui.save_as=Сохранить как
 vulkanmod112.ui.load=Загрузить
@@ -357,3 +358,7 @@ vulkanmod112.applies.motion_over_world=Действует, только пока
 vulkanmod112.option.show_reflections=Показать отражения
 vulkanmod112.tooltip.show_reflections=Раскрашивать воду только тем, что нашёл отражённый луч, и ничем больше: без френеля, решающего, сколько от этого показать, без цвета воды под ней, и тёмно-синим там, где луч вообще ничего не нашёл. Отражение на воде растянуто, даже когда оно совершенно правильное — глаз в метре-двух над поверхностью отправляет отражённый луч под очень пологим углом, поэтому он проходит долгий путь, прежде чем до чего-то доберётся, и дерево на дальнем берегу приходит длинной полосой, а не деревом. А значит, вопрос, работает ли это, нельзя решить по тому, как это выглядит над водой, — и вот способ решить его иначе.
 vulkanmod112.applies.show_reflections=Действует, только пока «Экранные отражения» больше 0.
+
+vulkanmod112.page.search=Поиск
+vulkanmod112.group.search_results=Результаты поиска
+vulkanmod112.group.nothing_found=Ничего не найдено

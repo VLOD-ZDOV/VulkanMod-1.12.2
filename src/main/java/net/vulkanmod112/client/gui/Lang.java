@@ -133,6 +133,20 @@ public final class Lang {
             "That name is taken", "Could not write that profile", "Could not read that profile",
             "No profiles yet — type a name below and press Save As",
             "Everything this mod owns, plus the game's own settings that decide the frame rate",
+            "Search settings",
+    };
+
+    /**
+     * The page and headings the search builds, which no page object carries.
+     *
+     * Everything else here is dumped by walking the live options, precisely so
+     * that it cannot drift — but the search's results are assembled on the fly
+     * and belong to no page, so walking finds nothing. Written out by hand is
+     * the only way they reach a language file at all, and the alternative is
+     * three rows of English in the middle of a translated screen.
+     */
+    private static final String[] SEARCH_STRINGS = {
+            "Search", "Search results", "Nothing found",
     };
 
     /**
@@ -159,6 +173,9 @@ public final class Lang {
         for (String ui : UI_STRINGS) {
             emit(out, UI, ui, ui);
         }
+        emit(out, PAGE, SEARCH_STRINGS[0], SEARCH_STRINGS[0]);
+        emit(out, GROUP, SEARCH_STRINGS[1], SEARCH_STRINGS[1]);
+        emit(out, GROUP, SEARCH_STRINGS[2], SEARCH_STRINGS[2]);
         for (VOption.Level level : VOption.Level.values()) {
             emit(out, COST, level.label, level.label);
         }
