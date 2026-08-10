@@ -158,7 +158,7 @@ public final class Diagnostics {
                 return;
             }
             synchronized (LOCK) {
-                writeSnapshot(out);
+                emitSnapshot(out);
                 out.flush();
             }
         } catch (Throwable t) {
@@ -362,6 +362,70 @@ public final class Diagnostics {
                     result.profilerName, result.usePercentage, ofFrame * 100.0));
             appendProfilerSection(out, mc, path + "." + result.profilerName, depth + 1, ofFrame);
         }
+    }
+
+    /**
+     * The last snapshot, line by line, so the next one can print only what moved.
+     */
+    private static String[] previousSnapshot;
+    private static int snapshotsSinceFull;
+    /**
+     * How often the whole picture is written out anyway.
+     *
+     * A file of differences alone is unreadable to somebody who opened it in
+     * the middle, and the interesting part of a report is usually the end. Ten
+     * is about a minute and a half at the shipped interval, which is short
+     * enough that scrolling up from any point reaches a full snapshot quickly
+     * and long enough that the repetition is not what the file is made of.
+     */
+    private static final int FULL_EVERY = 10;
+
+    /**
+     * Writes a snapshot as the difference from the one before it.
+     *
+     * Most of a snapshot never changes: the graphics card, the limits it
+     * reports, the size of the targets, and the sixty-odd settings the session
+     * was configured with are the same line for line, minute after minute. A
+     * two-hundred-kilobyte file of them is not more information than a
+     * twenty-kilobyte one — it is the same information, spread far enough apart
+     * that reading it means scrolling past what has not moved to find what has.
+     *
+     * Rendered into memory first and compared line by line, rather than each
+     * line deciding for itself whether to print. A line does not know what it
+     * said last time, and teaching every one of them to remember would put the
+     * bookkeeping in sixty places instead of one.
+     */
+    private static void emitSnapshot(PrintWriter out) {
+        java.io.StringWriter buffer = new java.io.StringWriter(8192);
+        PrintWriter into = new PrintWriter(buffer);
+        writeSnapshot(into);
+        into.flush();
+        // Split on either ending: println uses the platform separator, and a
+        // carriage return left on the end of every line would still compare
+        // equal but would be written out twice on Windows.
+        String[] lines = buffer.toString().split("\r?\n", -1);
+        boolean full = previousSnapshot == null || ++snapshotsSinceFull >= FULL_EVERY;
+        if (full) {
+            snapshotsSinceFull = 0;
+            for (String line : lines) {
+                out.println(line);
+            }
+        } else {
+            int unchanged = 0;
+            for (int i = 0; i < lines.length; i++) {
+                String was = i < previousSnapshot.length ? previousSnapshot[i] : null;
+                // The timestamp at the head of a snapshot changes every time,
+                // so each block still begins with the line that dates it.
+                if (lines[i].equals(was)) {
+                    unchanged++;
+                    continue;
+                }
+                out.println(lines[i]);
+            }
+            out.println("  (" + unchanged + " lines the same as last time, "
+                    + (FULL_EVERY - snapshotsSinceFull) + " to the next full one)");
+        }
+        previousSnapshot = lines;
     }
 
     private static void writeSnapshot(PrintWriter out) {
