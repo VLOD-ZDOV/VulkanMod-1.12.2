@@ -4825,6 +4825,7 @@ final class VkTerrainRenderer {
                     GL11C.glViewport(0, 0, width, height);
                     GL20C.glUseProgram(sceneOcclusionProgram);
                     GL20C.glUniform2f(sceneOcclusionInvSize, 1.0f / width, 1.0f / height);
+                    GL20C.glUniform1f(sceneOcclusionAoOnly, showOcclusion ? 1.0f : 0.0f);
                     GL13C.glActiveTexture(GL13C.GL_TEXTURE1);
                     GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, aoTexture);
                     GL13C.glActiveTexture(GL13C.GL_TEXTURE0);
@@ -4877,6 +4878,7 @@ final class VkTerrainRenderer {
     private int sceneCopyFbo;
     private int sceneOcclusionProgram;
     private int sceneOcclusionInvSize;
+    private int sceneOcclusionAoOnly;
     private int sceneTargetsWidth;
     private int sceneTargetsHeight;
     /** Whether the corners of the whole picture are darkened instead of the blocks'. */
@@ -5227,10 +5229,18 @@ final class VkTerrainRenderer {
                     "uniform sampler2D uColor;\n"
                             + "uniform sampler2D uAo;\n"
                             + "uniform vec2 uInvSize;\n"
+                            // Flat grey instead of the darkened world, for the
+                            // same diagnostic the simpler composite path has
+                            // through uAo_only — this path had no equivalent,
+                            // so the switch changed nothing here and a black
+                            // screen with it on proved only that the picture
+                            // was already black, not that this pass made it so.
+                            + "uniform float uAoOnly;\n"
                             + "void main() {\n"
                             + "    vec2 uv = gl_FragCoord.xy * uInvSize;\n"
                             + "    vec3 c = texture2D(uColor, uv).rgb;\n"
-                            + "    gl_FragColor = vec4(c * texture2D(uAo, uv).r, 1.0);\n"
+                            + "    vec3 ao = vec3(texture2D(uAo, uv).r);\n"
+                            + "    gl_FragColor = vec4(mix(c * ao, ao, uAoOnly), 1.0);\n"
                             + "}\n");
             int prev = GL11C.glGetInteger(GL20C.GL_CURRENT_PROGRAM);
             GL20C.glUseProgram(sceneOcclusionProgram);
@@ -5238,6 +5248,8 @@ final class VkTerrainRenderer {
             GL20C.glUniform1i(GL20C.glGetUniformLocation(sceneOcclusionProgram, "uAo"), 1);
             sceneOcclusionInvSize =
                     GL20C.glGetUniformLocation(sceneOcclusionProgram, "uInvSize");
+            sceneOcclusionAoOnly =
+                    GL20C.glGetUniformLocation(sceneOcclusionProgram, "uAoOnly");
             GL20C.glUseProgram(prev);
         }
         sceneTargetsWidth = width;
