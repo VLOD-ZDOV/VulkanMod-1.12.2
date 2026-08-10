@@ -85,6 +85,64 @@ public final class MaterialRuns {
      */
     public static final int LEAVES = 9;
     /**
+     * Ore, so that flat colours do not turn it into stone.
+     *
+     * The Potato preset replaces every face with one colour taken from the end
+     * of the mip chain, and an ore block is stone with specks in it: averaged
+     * down to a single texel, iron and stone come out the same grey. That is
+     * not a loss of prettiness — it is a preset meant to be played on where
+     * the ore cannot be found, which is the game.
+     *
+     * Found by asking the ore dictionary rather than by a list of blocks or by
+     * the class a block extends. A modded ore need not extend anything in
+     * particular, but it does have to register itself as an ore for any recipe
+     * or any other mod to see it, and that registration is the one thing every
+     * ore in every pack has in common. The answer is cached per block: the
+     * dictionary lookup allocates an item stack, and this is asked once per
+     * block face while a chunk is built.
+     */
+    public static final int ORE = 10;
+
+    /**
+     * Whether a block is an ore, remembered.
+     *
+     * Identity rather than equality, because blocks are singletons and this is
+     * asked from the chunk-building threads: an identity hash is a field read
+     * where equals on a registry entry is not.
+     */
+    private static final Map<Block, Boolean> ORE_BLOCKS =
+            new ConcurrentHashMap<Block, Boolean>();
+
+    private static boolean isOre(Block block) {
+        Boolean known = ORE_BLOCKS.get(block);
+        if (known != null) {
+            return known.booleanValue();
+        }
+        boolean ore = false;
+        try {
+            net.minecraft.item.Item item = net.minecraft.item.Item.getItemFromBlock(block);
+            if (item != net.minecraft.init.Items.AIR) {
+                int[] ids = net.minecraftforge.oredict.OreDictionary.getOreIDs(
+                        new net.minecraft.item.ItemStack(item, 1,
+                                net.minecraftforge.oredict.OreDictionary.WILDCARD_VALUE));
+                for (int i = 0; i < ids.length && !ore; i++) {
+                    String name = net.minecraftforge.oredict.OreDictionary.getOreName(ids[i]);
+                    // "oreIron", "oreCopper", "oreDenseIron" — the convention
+                    // every pack follows, and the only one there is. Matched on
+                    // the prefix rather than on a list, so an ore this build
+                    // has never heard of is still an ore.
+                    ore = name.length() > 3 && name.startsWith("ore")
+                            && Character.isUpperCase(name.charAt(3));
+                }
+            }
+        } catch (Throwable t) {
+            // A block that cannot be asked is not worth failing a chunk over.
+            ore = false;
+        }
+        ORE_BLOCKS.put(block, Boolean.valueOf(ore));
+        return ore;
+    }
+    /**
      * The block's own light level, 0 to 15, in the upper four bits.
      *
      * Beside the material rather than one more value of it, because the two are
@@ -445,6 +503,14 @@ public final class MaterialRuns {
         }
         if (material == Material.ICE || material == Material.PACKED_ICE) {
             return ICE;
+        }
+        // Last, and only for the materials an ore is ever made of, so that the
+        // dictionary is not asked about every leaf and every plank the first
+        // time a world is built.
+        if ((material == Material.ROCK || material == Material.IRON
+                || material == Material.GROUND || material == Material.SAND)
+                && isOre(state.getBlock())) {
+            return ORE;
         }
         return PLAIN;
     }

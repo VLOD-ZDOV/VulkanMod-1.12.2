@@ -6126,11 +6126,23 @@ final class VkTerrainRenderer {
                 // obvious-looking way to make textures cheap — does the reverse,
                 // sending distant chunks to read the full-size atlas at random.
                 //
-                // Fifteen rather than "no clamp": the level count of a
-                // 512-pixel atlas cannot reach it, so it always lands on the
-                // last level there is, and it still reads as a number rather
-                // than as a sentinel that means the opposite on the other field.
-                .minLod(flatBlockColours() ? 15.0f : 0.0f)
+                // One level short of the end rather than the end itself.
+                //
+                // The last level is a single texel per sprite, and an ore block
+                // is stone with specks in it: averaged that far down, iron and
+                // stone come out the same grey, and the preset this belongs to
+                // is the one meant to be played on. Losing the ore there is not
+                // losing prettiness, it is losing the game. One level back is
+                // four texels — enough that ore reads as speckled and every
+                // other block still reads as one colour with a hint of its own
+                // pattern, and it is the block's real texture rather than a
+                // second colour invented for it.
+                //
+                // Worked out from the atlas rather than written as a number: how
+                // many levels there are depends on the pack, and clamping past
+                // the end silently lands on the end, which is exactly the value
+                // this is trying not to use.
+                .minLod(flatBlockColours() ? Math.max(0, atlasLevels - 2) : 0.0f)
                 .addressModeU(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
                 .addressModeV(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
                 .addressModeW(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
