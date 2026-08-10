@@ -4819,6 +4819,9 @@ final class VkTerrainRenderer {
                     }
                 }
                 GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo);
+                if (!sceneColourUsable) {
+                    return;
+                }
 
                 if (wantOcclusion && aoPass(sceneDepthTexture)) {
                     GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo);
@@ -5337,8 +5340,11 @@ final class VkTerrainRenderer {
                         + " tone pass is off for this session — it writes back what it read, and"
                         + " reading an empty copy paints the world black",
                         Integer.toHexString(error));
+                org.lwjgl.opengl.GL11.glPopAttrib();
                 GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo);
                 GL20C.glUseProgram(prevProgram);
+                GL13C.glActiveTexture(prevActive);
+                GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, prevTexture);
                 return;
             }
         }
@@ -5364,6 +5370,10 @@ final class VkTerrainRenderer {
         // end of the whole-scene occlusion pass.
         GL13C.glActiveTexture(prevActive);
         GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, prevTexture);
+    }
+
+    boolean isSceneToneAvailable() {
+        return !toneFailed;
     }
 
     private int toneTexture;

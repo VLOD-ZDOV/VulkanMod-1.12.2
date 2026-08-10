@@ -177,6 +177,17 @@ public interface VulkanBridge {
 
     void applySceneTone(int sceneGlTexture);
 
+    /**
+     * Whether the tone pass can still resolve a floating frame back into
+     * range, or has failed for good this session.
+     *
+     * True until a driver refuses the blit the tone pass needs, or its
+     * targets fail to come up. Whatever decides the game's own frame format
+     * has to ask this: a floating frame with a dead tone pass burns every
+     * highlight above white instead of drawing them.
+     */
+    boolean isSceneToneAvailable();
+
     /** Tells the Vulkan side which GL texture holds the 16x16 lightmap. */
     void setLightmap(int lightmapGlTextureId);
 

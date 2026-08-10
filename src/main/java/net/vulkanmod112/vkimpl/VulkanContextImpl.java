@@ -1118,6 +1118,11 @@ public final class VulkanContextImpl implements VulkanBridge {
     }
 
     @Override
+    public boolean isSceneToneAvailable() {
+        return terrainRenderer == null || terrainRenderer.isSceneToneAvailable();
+    }
+
+    @Override
     public synchronized void updateAtlasRegions(int[] header, int headerCount,
                                                 int[] pixels, int pixelCount) {
         if (!initialized || terrainRenderer == null) {

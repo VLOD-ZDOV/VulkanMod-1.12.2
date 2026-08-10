@@ -103,7 +103,6 @@ public final class Diagnostics {
 
     /** The shape of the run being folded, and what it has swallowed so far. */
     private static String repeatShape;
-    private static String repeatFirstLine;
     private static String repeatLastLine;
     private static int repeatCount;
 
@@ -113,10 +112,10 @@ public final class Diagnostics {
      * The timing lines are the bulk of this file and no two of them are equal,
      * so an exact-match fold catches none of them — what repeats is the
      * sentence, not the line. Digits are replaced by a mark to get at that
-     * sentence, and a run of lines sharing one becomes three: the first, the
-     * last, and how many there were between them with the times they spanned.
-     * Both ends are kept because the interesting thing about a run of
-     * measurements is usually how it started and how it ended.
+     * sentence; the first line of a run is written out as-is by the caller,
+     * and a run of lines sharing its shape is folded down to a count and the
+     * last of them, so a reader sees how the run started and how it ended
+     * without every measurement in between.
      *
      * Only consecutive lines fold. Anything else appearing between them is
      * itself the reason to stop folding — it is the event the run was the
@@ -133,7 +132,6 @@ public final class Diagnostics {
         }
         flushRepeat();
         repeatShape = shape;
-        repeatFirstLine = text;
         repeatLastLine = null;
         repeatCount = 0;
         return false;
@@ -148,7 +146,6 @@ public final class Diagnostics {
         }
         repeatCount = 0;
         repeatShape = null;
-        repeatFirstLine = null;
         repeatLastLine = null;
     }
 

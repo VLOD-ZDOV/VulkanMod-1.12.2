@@ -740,7 +740,8 @@ public final class TerrainHooks {
      * than the same condition written twice.
      */
     public static boolean sceneEffectsWillRun() {
-        return liveBridge() != null && VulkanConfig.isTerrainEnabled();
+        VulkanBridge bridge = liveBridge();
+        return bridge != null && VulkanConfig.isTerrainEnabled() && bridge.isSceneToneAvailable();
     }
 
     public static void applySceneBloom() {
