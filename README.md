@@ -38,7 +38,7 @@ This is not yet a complete replacement for the modern VulkanMod renderer.
 ## Requirements
 
 - Forge 14.23.5.2857 (or compatible 1.12.2 Forge) / Minecraft 1.12.2.
-- MixinBooter 10.7 in the instance `mods` directory when installing the released JAR manually. It is a required runtime dependency and no launcher resolves it for you.
+- MixinBooter 10.7 or newer in the instance `mods` directory when installing the released JAR manually. It is a required runtime dependency and no launcher resolves it for you. Without it the launch ends during coremod discovery on `ClassNotFoundException: zone.rong.mixinbooter.IEarlyMixinLoader`; that message means MixinBooter and nothing else.
 - A 64-bit Windows or Linux Vulkan driver.
 - Matching OpenGL and Vulkan external-memory/semaphore extensions for the terrain path: `GL_EXT_memory_object_fd` / `GL_EXT_semaphore_fd` with `VK_KHR_external_memory_fd` / `VK_KHR_external_semaphore_fd` on Linux, and the `_win32` variants of the same four on Windows. The mod selects the pair for the host platform automatically. Without them it loads safely but leaves terrain in OpenGL.
 
@@ -95,7 +95,9 @@ every active renderer path, the frame cost breakdown and resource counts.
 
 OptiFine, legacy shader mods and Sodium-derived renderers for 1.12.2 — Celeritas, and Actinium which ships it — replace the same renderer classes this mod rewrites. When one of them is installed, the terrain mixins are not registered at all, so the game boots on that renderer while this mod's settings screen and game-side optimisations stay active. Sharing terrain rendering between the two is not possible: the vertex format and pass order differ, and with a shader pack loaded the format changes again.
 
-Any Forge build for 1.12.2 works; the only hard dependency is MixinBooter 10.7 or newer, which Forge now reports itself if missing.
+Any Forge build for 1.12.2 works; the only hard dependency is MixinBooter 10.7 or newer. Forge reads this mod's declared dependencies only after the coremod class has loaded, and that class cannot load without MixinBooter, so a missing MixinBooter is never reported as a missing dependency — it is the `ClassNotFoundException` named under Requirements above.
+
+Older large packs may carry mods that bundle Mixin 0.7.11 themselves; malisiscore and Phosphor are the two that turn up most. Forge adds coremod jars to the classpath in file-name order, so whichever sorts first owns the `org.spongepowered.asm` package for everyone, and MixinBooter's newer copy then dies on the older one with `NoSuchMethodError: org.spongepowered.asm.util.VersionNumber.getMajor()S`. Renaming the MixinBooter jar so that it sorts first — `aaa_mixinbooter-*.jar` — settles that. Not every configuration written for 0.7.11 survives the upgrade afterwards: Phosphor's `MixinChunk$Vanilla` fails its injection check and stops the game, and an individual configuration can be switched off through `blacklistedConfigs` in `config/mixinbooter.cfg`.
 
 Cleanroom is supported and tested: the renderer starts, draws, and its mod list picks up this mod's logo, licence and issue tracker from `mcmod.info`. That loader runs a modern JVM and an LWJGL of its own, which is what `-Dvulkanmod112.javaCeiling` and the private prefix the native libraries are unpacked under exist for.
 
