@@ -128,6 +128,16 @@ public final class VulkanPresets {
         look.animations = true;
         look.flatBlockColours = false;
         look.framesInFlight = 3;
+        // Set here too, and not only by the presets named for speed. Building
+        // chunks costs no pixels, so the size of that pool is not a looks
+        // question and never was — and this is the preset that asks for
+        // thirty-two chunks of render distance, which is the setting that
+        // makes the pool the thing the frame waits for. Left alone it came
+        // out of vanilla's arithmetic over the heap: measured in a heavy pack
+        // at this distance, half the frames took four milliseconds and one in
+        // twenty took thirty, which reads as a stutter rather than as the two
+        // hundred frames the average claims.
+        look.chunkBuildThreads = VulkanConfig.coresForChunkBuilding();
         look.particles = 0;
         look.fancy = true;
         look.ambientOcclusion = 2;
@@ -187,6 +197,9 @@ public final class VulkanPresets {
         look.animations = true;
         look.flatBlockColours = false;
         look.framesInFlight = 2;
+        // Same reasoning as in Beautiful: free of pixels, and this preset caps
+        // the render distance at the same thirty-two.
+        look.chunkBuildThreads = VulkanConfig.coresForChunkBuilding();
         look.particles = 1;
         look.fancy = true;
         look.ambientOcclusion = 2;
