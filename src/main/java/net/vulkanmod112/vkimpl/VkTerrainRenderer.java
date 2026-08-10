@@ -1179,6 +1179,15 @@ final class VkTerrainRenderer {
     private static final int TIMING_WINDOW = 600;
     private long fenceWaitNanos;
     private long recordNanos;
+    /**
+     * Time spent waiting for the card before the translucent pass, apart.
+     *
+     * Kept out of the recording figure rather than added to it: the two say
+     * opposite things about where a slow frame went, and adding them together
+     * makes the sum mean neither.
+     */
+    private long translucentWaitNanos;
+    private long previousTranslucentWaitNanos;
     private long submitCompositeNanos;
     private long timingWindowStartNanos;
     // GPU-side cost of the terrain pass, read back from timestamp queries one
@@ -1597,8 +1606,11 @@ final class VkTerrainRenderer {
                 return false;
             }
             long t = System.nanoTime();
+            long waitBefore = translucentWaitNanos;
             boolean taken = renderTranslucent(chunks, chunkCount, mvp, viewX, viewY, viewZ, mirror);
-            recordNanos += System.nanoTime() - t;
+            // Minus the wait, which this pass does first thing and which is not
+            // work at all.
+            recordNanos += System.nanoTime() - t - (translucentWaitNanos - waitBefore);
             return taken;
         }
         if (layerOrdinal == 0) {
@@ -1686,6 +1698,7 @@ final class VkTerrainRenderer {
     private long worstGapFence;
     private long worstGapRecord;
     private long worstGapSubmit;
+    private long worstGapWait;
     /** How long the render thread waits for the mirror's monitor. */
     private long mirrorLookupNanos;
     private long mirrorLookups;
@@ -1699,9 +1712,11 @@ final class VkTerrainRenderer {
         long end = System.nanoTime();
         long fence = fenceWaitNanos - previousFenceWaitNanos;
         long record = recordNanos - previousRecordNanos;
+        long waited = translucentWaitNanos - previousTranslucentWaitNanos;
         long submit = submitCompositeNanos - previousSubmitNanos;
         previousFenceWaitNanos = fenceWaitNanos;
         previousRecordNanos = recordNanos;
+        previousTranslucentWaitNanos = translucentWaitNanos;
         previousSubmitNanos = submitCompositeNanos;
         if (frameThrottled) {
             // The gap about to be measured contains a sleep this renderer asked
@@ -1723,6 +1738,7 @@ final class VkTerrainRenderer {
                 worstGapFrame = frameCounter;
                 worstGapFence = fence;
                 worstGapRecord = record;
+                worstGapWait = waited;
                 worstGapSubmit = submit;
             }
         }
@@ -1764,15 +1780,17 @@ final class VkTerrainRenderer {
                 p95 / 1e6, 1e9 / Math.max(1, p95),
                 p99 / 1e6, 1e9 / Math.max(1, p99)));
         sb.append(String.format(
-                "    worst frame %.1f ms at frame %d (of it: fence wait %.2f, record %.2f, "
-                        + "submit+composite %.2f); %d frames over three times the median\n",
+                "    worst frame %.1f ms at frame %d (of it: fence wait %.2f, "
+                        + "translucent wait %.2f, record %.2f, submit+composite %.2f); "
+                        + "%d frames over three times the median\n",
                 worstGapNanos / 1e6, worstGapFrame, worstGapFence / 1e6,
-                worstGapRecord / 1e6, worstGapSubmit / 1e6, overThreshold));
+                worstGapWait / 1e6, worstGapRecord / 1e6, worstGapSubmit / 1e6,
+                overThreshold));
         // What is left when our three numbers are taken off the worst frame is
         // everything else in it — the game's own work, the driver, the operating
         // system. Printed as one number because it is one question: was the
         // worst frame ours at all?
-        long ours = worstGapFence + worstGapRecord + worstGapSubmit;
+        long ours = worstGapFence + worstGapWait + worstGapRecord + worstGapSubmit;
         sb.append(String.format("    of that worst frame, %.0f%% was this renderer\n",
                 100.0 * ours / Math.max(1, worstGapNanos)));
         sb.append(String.format(
@@ -1817,9 +1835,19 @@ final class VkTerrainRenderer {
         timingWindowStartNanos = now;
         fenceWaitNanos = 0;
         recordNanos = 0;
+        translucentWaitNanos = 0;
         submitCompositeNanos = 0;
         gpuNanos = 0;
         gpuSamples = 0;
+        // The marks the per-frame breakdown subtracts from have to go back to
+        // zero with the totals they are subtracted from. Left behind, the first
+        // frame after every window computed a large total minus a larger mark
+        // and reported a negative share of itself — once per window, for as
+        // long as the line has existed.
+        previousFenceWaitNanos = 0;
+        previousRecordNanos = 0;
+        previousTranslucentWaitNanos = 0;
+        previousSubmitNanos = 0;
     }
 
     /**
@@ -3019,8 +3047,22 @@ final class VkTerrainRenderer {
         int slot = activeFrameSlot;
         boolean sprites;
         try (MemoryStack stack = stackPush()) {
+            // Timed apart from everything after it, and that separation is the
+            // whole point of this counter.
+            //
+            // This wait sat inside the number the log prints as "our command
+            // recording". A blocking wait for the card is not recording — it is
+            // the opposite, the processor doing nothing at all — and one frame
+            // that reported thirty-eight milliseconds of recording out of
+            // forty-three was almost certainly this line. A number that answers
+            // a different question than its name says is worse than no number:
+            // it sent the search into the recording code, where there was
+            // nothing to find, and the alternative was written off in the notes
+            // as excluded without ever being measured.
+            long waitStart = System.nanoTime();
             check(vkWaitForFences(device(), translucentFences[slot], true, Long.MAX_VALUE),
                     "vkWaitForFences(translucent)");
+            translucentWaitNanos += System.nanoTime() - waitStart;
             check(vkResetFences(device(), translucentFences[slot]), "vkResetFences(translucent)");
 
             // Both the buffer this writes and the index buffer it may resize
