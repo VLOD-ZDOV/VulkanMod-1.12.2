@@ -2,10 +2,12 @@ package net.vulkanmod112.client;
 
 import net.minecraft.client.gui.GuiButton;
 import net.minecraft.client.gui.GuiScreen;
+import net.minecraft.client.gui.GuiTextField;
 import net.minecraft.client.resources.I18n;
 import net.vulkanmod112.client.gui.Lang;
 import net.vulkanmod112.VulkanBridge;
 import net.vulkanmod112.VulkanLoader;
+import net.vulkanmod112.client.gui.OptionSearch;
 import net.vulkanmod112.client.gui.VOption;
 import net.vulkanmod112.client.gui.VOptionBlock;
 import net.vulkanmod112.client.gui.VOptionPage;
@@ -47,6 +49,7 @@ public final class GuiVulkanSettings extends GuiScreen {
     private static final int TOOLTIP_MIN_WIDTH = 150;
 
     private final GuiScreen parent;
+    private static final int SEARCH_FIELD = 9001;
     private VOptionPage[] pages;
     private int currentPage;
 
@@ -60,6 +63,15 @@ public final class GuiVulkanSettings extends GuiScreen {
     private int scroll;
     private int contentHeight;
     private VOption hovered;
+    /**
+     * Type here and the list stops being a page and becomes an answer.
+     *
+     * Held as a page rather than as a mode: everything below already knows how
+     * to draw, scroll, hover and click one, and a second path through all of
+     * that is a second path to keep in step.
+     */
+    private GuiTextField search;
+    private VOptionPage searchPage;
     private VOption dragging;
 
     public GuiVulkanSettings(GuiScreen parent) {
@@ -74,7 +86,7 @@ public final class GuiVulkanSettings extends GuiScreen {
             vulkanmod112$dumpLang();
         }
 
-        this.listTop = TOP;
+        this.listTop = TOP + 20;
         this.listBottom = this.height - BOTTOM_GAP;
         this.listLeft = MARGIN + TAB_WIDTH + 8;
 
@@ -94,6 +106,16 @@ public final class GuiVulkanSettings extends GuiScreen {
             this.buttonList.add(new GuiButton(PAGE_BUTTON_BASE + i, MARGIN, TOP + i * (ROW_HEIGHT + 2),
                     TAB_WIDTH, ROW_HEIGHT, this.pages[i].title()));
         }
+        String typed = this.search == null ? "" : this.search.getText();
+        this.search = new GuiTextField(SEARCH_FIELD, this.fontRenderer,
+                this.listLeft, TOP - 1, this.listWidth, 16);
+        this.search.setMaxStringLength(48);
+        this.search.setText(typed);
+        // Focused from the start: this screen is opened to change something,
+        // and the row wanted is more often found by name than by tab. The
+        // arrow keys and the mouse still work, so nothing is taken away by it.
+        this.search.setFocused(true);
+        refreshSearch();
         this.buttonList.add(new GuiButton(RESET, this.width / 2 - 154, this.height - 27, 100, 20,
                 Lang.tr(Lang.UI, "Reset")));
         this.buttonList.add(new GuiButton(DONE, this.width / 2 - 50, this.height - 27, 150, 20,
@@ -128,6 +150,11 @@ public final class GuiVulkanSettings extends GuiScreen {
             VulkanConfig.resetToDefaults();
         } else if (button.id >= PAGE_BUTTON_BASE) {
             this.currentPage = button.id - PAGE_BUTTON_BASE;
+            // Picking a tab is a way of saying the search is over. Leaving the
+            // results up while the tab beside them looks pressed is two
+            // different answers to "where am I" on one screen.
+            this.search.setText("");
+            refreshSearch();
             this.scroll = 0;
             updateTabHighlight();
             clampScroll();
@@ -137,6 +164,35 @@ public final class GuiVulkanSettings extends GuiScreen {
     // ------------------------------------------------------------------
     // Layout and drawing
     // ------------------------------------------------------------------
+
+    /** The page being shown: the search's answer while there is one. */
+    private VOptionPage activePage() {
+        return this.searchPage != null ? this.searchPage : this.pages[this.currentPage];
+    }
+
+    /**
+     * Rebuilt on every keystroke rather than debounced.
+     *
+     * It walks a hundred rows and their descriptions, which is a few thousand
+     * short strings — less work than one frame of this screen already does to
+     * draw itself, and a search that lags behind the typing is worse than no
+     * search at all.
+     */
+    private void refreshSearch() {
+        VOptionPage was = this.searchPage;
+        this.searchPage = OptionSearch.page(this.pages, this.search.getText());
+        if (was != this.searchPage) {
+            this.scroll = 0;
+        }
+        for (Object button : this.buttonList) {
+            if (button instanceof GuiButton) {
+                GuiButton b = (GuiButton) button;
+                if (b.id >= PAGE_BUTTON_BASE && b.id < PAGE_BUTTON_BASE + this.pages.length) {
+                    b.enabled = this.searchPage != null || b.id - PAGE_BUTTON_BASE != this.currentPage;
+                }
+            }
+        }
+    }
 
     @Override
     public void drawScreen(int mouseX, int mouseY, float partialTicks) {
@@ -159,11 +215,16 @@ public final class GuiVulkanSettings extends GuiScreen {
 
         drawRect(this.listLeft - 2, this.listTop - 2, this.listLeft + this.listWidth + 2,
                 this.listBottom + 2, 0x50000000);
+        this.search.drawTextBox();
+        if (this.search.getText().isEmpty()) {
+            this.fontRenderer.drawString(Lang.tr(Lang.UI, "Search settings"),
+                    this.listLeft + 5, TOP + 3, 0x707070);
+        }
 
         boolean insideList = mouseX >= this.listLeft && mouseX <= this.listLeft + this.listWidth
                 && mouseY >= this.listTop && mouseY <= this.listBottom;
         int y = this.listTop - this.scroll;
-        for (VOptionBlock block : this.pages[this.currentPage].blocks) {
+        for (VOptionBlock block : activePage().blocks) {
             if (y + BLOCK_TITLE_HEIGHT > this.listTop && y < this.listBottom) {
                 this.fontRenderer.drawString(block.heading(), this.listLeft + 2, y + 3, 0xC0C0C0);
             }
@@ -353,7 +414,35 @@ public final class GuiVulkanSettings extends GuiScreen {
     }
 
     @Override
+    public void updateScreen() {
+        super.updateScreen();
+        this.search.updateCursorCounter();
+    }
+
+    /**
+     * Escape clears the search before it closes the screen.
+     *
+     * Somebody who has typed a word and cannot see the row they wanted presses
+     * Escape to get rid of the word, not to leave — and having the screen shut
+     * on them costs the whole trip back through Options and Video Settings.
+     */
+    @Override
+    protected void keyTyped(char typed, int key) throws IOException {
+        if (key == org.lwjgl.input.Keyboard.KEY_ESCAPE && !this.search.getText().isEmpty()) {
+            this.search.setText("");
+            refreshSearch();
+            return;
+        }
+        if (this.search.textboxKeyTyped(typed, key)) {
+            refreshSearch();
+            return;
+        }
+        super.keyTyped(typed, key);
+    }
+
+    @Override
     protected void mouseClicked(int mouseX, int mouseY, int mouseButton) throws IOException {
+        this.search.mouseClicked(mouseX, mouseY, mouseButton);
         VOption option = optionAt(mouseX, mouseY);
         if (option != null) {
             option.activate(mouseButton == 1 ? -1 : 1,
@@ -389,7 +478,7 @@ public final class GuiVulkanSettings extends GuiScreen {
             return null;
         }
         int y = this.listTop - this.scroll;
-        for (VOptionBlock block : this.pages[this.currentPage].blocks) {
+        for (VOptionBlock block : activePage().blocks) {
             y += BLOCK_TITLE_HEIGHT;
             for (VOption option : block.options) {
                 if (mouseY >= y && mouseY < y + ROW_HEIGHT) {
