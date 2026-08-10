@@ -102,6 +102,46 @@ vec2 swayOffset(vec2 p, float t) {
     return o * (1.0 / 1.45);
 }
 
+/**
+ * How small a sway may get on screen before it is not worth moving, in
+ * clip-space height. Roughly a pixel on a window about a thousand tall, and
+ * the band below is twice that, so the fade is finished before the motion is
+ * subpixel rather than after.
+ */
+const float SWAY_FADE_CLIP = 0.0020;
+
+/**
+ * How much of the sway survives at this vertex, from how big it would be on
+ * screen.
+ *
+ * A distance would have been the obvious thing to fade by, and it is the wrong
+ * quantity: what makes far-away sway not worth computing is that it is smaller
+ * than a pixel, and how many pixels a blade of grass covers is a question about
+ * the projection, not about the distance. Asking it this way means the zoom key
+ * needs no special case at all — narrowing the field of view enlarges
+ * everything, so grass that had stopped moving starts again exactly where it
+ * becomes visible, and nothing here has to know that a zoom exists.
+ *
+ * The vertical scale is read out of the combined matrix rather than passed in:
+ * the matrix is a projection times a rotation and a translation, so its second
+ * column of the upper three-by-three is that scale times a row of the rotation,
+ * and a rotation's rows are unit length.
+ *
+ * The four corners of one quad get slightly different answers, because their
+ * distances differ. Over one block that difference is a thousandth of the band,
+ * against an amplitude that is by then about a pixel — far below what a seam
+ * would need to open by. Fading per chunk instead would be exactly constant
+ * within a quad and would put a step between neighbouring chunks, which is the
+ * visible failure rather than the invisible one.
+ */
+float swayVisible(vec3 relative, float reach) {
+    float scaleY = length(vec3(frame.mvp[0].y, frame.mvp[1].y, frame.mvp[2].y));
+    float clipW = dot(vec4(relative, 1.0),
+            vec4(frame.mvp[0].w, frame.mvp[1].w, frame.mvp[2].w, frame.mvp[3].w));
+    float onScreen = scaleY * reach / max(clipW, 0.05);
+    return clamp(onScreen / SWAY_FADE_CLIP - 1.0, 0.0, 1.0);
+}
+
 void main() {
     // Every indirect command has exactly one instance; firstInstance is the
     // index of this chunk's camera-relative origin in the storage buffer.
@@ -136,9 +176,9 @@ void main() {
             // sixteen blocks wide that difference is about a hundredth of a
             // block at this reach — under a pixel at any distance worth
             // looking at, and the canopy breathes without coming apart.
+            float reach = LEAF_REACH * frame.water.w * swayVisible(relative, LEAF_REACH);
             vec2 field = relative.xz + frame.water.yz;
-            relative.xz += swayOffset(field, frame.frameInfo.x)
-                    * (LEAF_REACH * frame.water.w);
+            relative.xz += swayOffset(field, frame.frameInfo.x) * reach;
         } else if (inMaterial == MATERIAL_PLANT
                 || inMaterial == MATERIAL_PLANT_TALL_LOWER
                 || inMaterial == MATERIAL_PLANT_TALL_UPPER) {
@@ -153,9 +193,10 @@ void main() {
                     ? (top ? 2.0 : 1.0)
                     : (top ? 1.0 : 0.0);
             if (along > 0.0) {
+                float reach = SWAY_REACH * frame.water.w * along
+                        * swayVisible(relative, SWAY_REACH);
                 vec2 field = relative.xz + frame.water.yz;
-                relative.xz += swayOffset(field, frame.frameInfo.x)
-                        * (SWAY_REACH * frame.water.w * along);
+                relative.xz += swayOffset(field, frame.frameInfo.x) * reach;
             }
         }
     }
