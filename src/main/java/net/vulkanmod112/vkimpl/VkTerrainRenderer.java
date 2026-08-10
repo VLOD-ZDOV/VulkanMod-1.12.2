@@ -4774,6 +4774,29 @@ final class VkTerrainRenderer {
                 GL30C.glBindFramebuffer(GL30C.GL_DRAW_FRAMEBUFFER, sceneDepthFbo);
                 GL30C.glBlitFramebuffer(0, 0, width, height, 0, 0, width, height,
                         GL11C.GL_DEPTH_BUFFER_BIT, GL11C.GL_NEAREST);
+                // Asked, not assumed. Every effect below reads this depth, and
+                // a refused blit leaves it at zero rather than leaving it alone
+                // — so the failure is not "no shading" but "everything in
+                // shadow", which is the one wrong answer that looks like the
+                // renderer itself is broken. Once is enough: the formats do not
+                // change during a session, and a message per frame is not a
+                // message.
+                if (!sceneDepthBlitChecked) {
+                    sceneDepthBlitChecked = true;
+                    int error = GL11C.glGetError();
+                    if (error != GL11C.GL_NO_ERROR) {
+                        sceneDepthUsable = false;
+                        LOGGER.warn("The frame's depth would not copy into a texture (GL error"
+                                + " 0x{}), so scene occlusion, contact shadows, cloud shadows and"
+                                + " light shafts are off for this session — they all read it,"
+                                + " and reading it empty puts the whole world in shadow",
+                                Integer.toHexString(error));
+                    }
+                }
+                if (!sceneDepthUsable) {
+                    GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo);
+                    return;
+                }
                 // And the colour, because the pass below reads what it writes.
                 GL30C.glBindFramebuffer(GL30C.GL_DRAW_FRAMEBUFFER, sceneCopyFbo);
                 GL30C.glBlitFramebuffer(0, 0, width, height, 0, 0, width, height,
@@ -4825,6 +4848,9 @@ final class VkTerrainRenderer {
         }
     }
 
+    /** Asked once, because the formats cannot change while a session runs. */
+    private boolean sceneDepthBlitChecked;
+    private boolean sceneDepthUsable = true;
     private int sceneDepthTexture;
     private int sceneDepthFbo;
     private int sceneCopyTexture;
@@ -5120,8 +5146,25 @@ final class VkTerrainRenderer {
         destroySceneOcclusionTargets();
         sceneDepthTexture = GL11C.glGenTextures();
         GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, sceneDepthTexture);
-        GL11C.glTexImage2D(GL11C.GL_TEXTURE_2D, 0, GL30C.GL_DEPTH_COMPONENT24, width, height,
-                0, GL11C.GL_DEPTH_COMPONENT, GL11C.GL_UNSIGNED_INT, (java.nio.ByteBuffer) null);
+        // The same twenty-four bits the game's own depth has, unless this card
+        // has not got them.
+        //
+        // A depth blit is the one copy OpenGL will not convert for: source and
+        // destination formats have to match exactly, and this is a second place
+        // that rule reaches after the first one cost a release. Where the driver
+        // gives no sampleable twenty-four-bit depth — every AMD card — this
+        // renderer's targets are thirty-two-bit float, the frame's depth
+        // arrives in that, and a blit into a twenty-four-bit texture is refused
+        // silently. What is then read is a texture full of zeroes, which
+        // reconstructs as every pixel sitting on the near plane, which makes
+        // the occlusion pass shade everything against everything. The symptom
+        // is not a wrong shade: it is a black world with the hand still visible,
+        // because the hand is drawn after this.
+        boolean depth24 = depthFormat == VK_FORMAT_X8_D24_UNORM_PACK32;
+        GL11C.glTexImage2D(GL11C.GL_TEXTURE_2D, 0,
+                depth24 ? GL30C.GL_DEPTH_COMPONENT24 : GL30C.GL_DEPTH_COMPONENT32F,
+                width, height, 0, GL11C.GL_DEPTH_COMPONENT,
+                depth24 ? GL11C.GL_UNSIGNED_INT : GL11C.GL_FLOAT, (java.nio.ByteBuffer) null);
         GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_MIN_FILTER, GL11C.GL_NEAREST);
         GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_MAG_FILTER, GL11C.GL_NEAREST);
         GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_WRAP_S, GL12C.GL_CLAMP_TO_EDGE);
