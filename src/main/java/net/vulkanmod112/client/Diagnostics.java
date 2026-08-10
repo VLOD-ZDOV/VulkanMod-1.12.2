@@ -101,6 +101,79 @@ public final class Diagnostics {
         }
     }
 
+    /** The shape of the run being folded, and what it has swallowed so far. */
+    private static String repeatShape;
+    private static String repeatFirstLine;
+    private static String repeatLastLine;
+    private static int repeatCount;
+
+    /**
+     * Folds a run of lines that say the same thing with different numbers.
+     *
+     * The timing lines are the bulk of this file and no two of them are equal,
+     * so an exact-match fold catches none of them — what repeats is the
+     * sentence, not the line. Digits are replaced by a mark to get at that
+     * sentence, and a run of lines sharing one becomes three: the first, the
+     * last, and how many there were between them with the times they spanned.
+     * Both ends are kept because the interesting thing about a run of
+     * measurements is usually how it started and how it ended.
+     *
+     * Only consecutive lines fold. Anything else appearing between them is
+     * itself the reason to stop folding — it is the event the run was the
+     * background to.
+     *
+     * @return true when the line has been swallowed and must not be written
+     */
+    private static boolean foldRepeat(String text) {
+        String shape = shapeOf(text);
+        if (shape.equals(repeatShape)) {
+            repeatCount++;
+            repeatLastLine = text;
+            return true;
+        }
+        flushRepeat();
+        repeatShape = shape;
+        repeatFirstLine = text;
+        repeatLastLine = null;
+        repeatCount = 0;
+        return false;
+    }
+
+    /** Writes out whatever a finished run swallowed. Call before anything else. */
+    private static void flushRepeat() {
+        if (repeatCount > 0 && writer != null) {
+            writer.println("  ... the line above repeated " + repeatCount
+                    + " more times, the last of them:");
+            writer.println(repeatLastLine);
+        }
+        repeatCount = 0;
+        repeatShape = null;
+        repeatFirstLine = null;
+        repeatLastLine = null;
+    }
+
+    /**
+     * A line with its numbers and its timestamp taken out, which is what makes
+     * two readings of the same measurement look alike.
+     */
+    private static String shapeOf(String text) {
+        StringBuilder out = new StringBuilder(text.length());
+        boolean inNumber = false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c >= '0' && c <= '9' || (inNumber && (c == '.' || c == ':'))) {
+                if (!inNumber) {
+                    out.append('#');
+                    inNumber = true;
+                }
+            } else {
+                out.append(c);
+                inNumber = false;
+            }
+        }
+        return out.toString();
+    }
+
     private static void mirror(org.apache.logging.log4j.core.LogEvent event) {
         String name = event.getLoggerName();
         if (name == null || !name.startsWith("VulkanMod112")) {
@@ -120,6 +193,9 @@ public final class Diagnostics {
         String text = line.toString();
         synchronized (LOCK) {
             if (writer != null) {
+                if (foldRepeat(text)) {
+                    return;
+                }
                 writer.println(text);
                 writer.flush();
             } else if (BACKLOG.size() < BACKLOG_LIMIT) {
@@ -158,6 +234,7 @@ public final class Diagnostics {
                 return;
             }
             synchronized (LOCK) {
+                flushRepeat();
                 emitSnapshot(out);
                 out.flush();
             }
