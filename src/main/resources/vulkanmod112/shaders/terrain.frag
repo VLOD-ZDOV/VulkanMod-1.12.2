@@ -144,6 +144,22 @@ bool isFoliage(uint material) {
  */
 const float REFRACT_REACH = 1.6;
 
+/**
+ * How little water the refraction fetch below needs to find between the
+ * surface and whatever is behind it before it stops trusting that sample, in
+ * blocks.
+ *
+ * This pass fixes its picture of the opaque world before creatures are
+ * drawn, so a squid or a pair of villager legs under the surface is not in
+ * it — only the lake bed underneath them is. The two cannot be told apart by
+ * depth alone, but they do not need to be: a creature sits close under the
+ * surface, and so does a shallow bed, so treating "not much water here" as
+ * "do not trust this sample" catches the one this pass cannot see without
+ * costing the one it can. On a lake bed several blocks down this changes
+ * nothing.
+ */
+const float CREATURE_LIKELY_DEPTH = 3.0;
+
 /*
  * WHY_NOT_WITH_RAY_QUERY
  *
@@ -1032,6 +1048,63 @@ vec4 traceReflection(vec3 origin, vec3 dir) {
     return vec4(0.0);
 }
 
+// Not built into the tracing variant, for the same reason the glint that
+// calls this is not: there is no acceleration structure to ask here without
+// RAY_QUERY, and no glint to shadow in the build that has one. See
+// WHY_NOT_WITH_RAY_QUERY.
+#ifndef RAY_QUERY
+// How far the march below is allowed to travel, in blocks. A mountain that
+// blocks the sun is not bounded by GLINT_REACH — that constant fades the
+// glint by the water's distance from the eye, an unrelated axis, since the
+// march runs from the water towards the sun rather than towards the camera.
+// Wide enough for a hill at the edge of ordinary render distance; a step
+// count this low cannot afford to also cover the horizon.
+const float SUN_OCCLUSION_REACH = 160.0;
+
+/**
+ * Whether the sun or moon this fragment is about to glint for is standing
+ * behind something, read off the same depth buffer traceReflection already
+ * reads — the picture already on screen is the only record of the terrain
+ * this pass has, so a mountain shows up here exactly because it was drawn
+ * opaque earlier in the frame.
+ *
+ * Deliberately coarser than traceReflection: a reflection has to land on the
+ * right pixel, a shadow only needs one bit. There is no bisection and no
+ * thickness test, so the step that first lands behind the depth buffer is
+ * taken as the hit, short of the true surface by up to that step's own
+ * length. That is the wrong end to round on for a mirror; it is the cheap
+ * and correct end here, since a miss leaves the streak this function exists
+ * to remove and a false hit only shades one pixel that was headed for
+ * shadow anyway.
+ *
+ * Called only where the glint is already nonzero — most of a lake is outside
+ * the specular lobe on any given frame, and this has nothing to add there.
+ */
+bool sunOccluded(vec3 origin, vec3 dir) {
+    float t = 0.5;
+    float step = 1.0;
+    for (int i = 0; i < 14; i++) {
+        vec4 clip = frame.mvp * vec4(origin + dir * t, 1.0);
+        if (clip.w <= 0.0001) {
+            return false;
+        }
+        vec3 onScreen = vec3(clip.xy / clip.w * 0.5 + 0.5, clip.z / clip.w);
+        if (onScreen.x < 0.0 || onScreen.x > 1.0 || onScreen.y < 0.0 || onScreen.y > 1.0) {
+            return false;
+        }
+        if (onScreen.z > textureLod(sceneDepth, onScreen.xy, 0.0).r) {
+            return true;
+        }
+        t += step;
+        if (t > SUN_OCCLUSION_REACH) {
+            return false;
+        }
+        step *= 1.6;
+    }
+    return false;
+}
+#endif
+
 float fresnel(vec3 normal) {
     float facing = clamp(dot(normal, normalize(-vRelative)), 0.0, 1.0);
     float f = 1.0 - facing;
@@ -1491,8 +1564,17 @@ void main() {
                 // surface, and smearing that across the water is the artefact
                 // every refraction gets wrong first: a reed on the bank waving
                 // about inside the pond.
-                if (textureLod(sceneDepth, shifted, 0.0).r < here) {
+                float behindDepth = textureLod(sceneDepth, shifted, 0.0).r;
+                if (behindDepth < here) {
                     shifted = uv;
+                    // Re-read for the pixel actually being used now, not the
+                    // tilted one the check above was for. Only in the build
+                    // that goes on to use it — see the mix() a few lines
+                    // down, which is the one place this second sample pays
+                    // for itself.
+#ifndef RAY_QUERY
+                    behindDepth = textureLod(sceneDepth, uv, 0.0).r;
+#endif
                 }
                 vec3 behind = textureLod(sceneColor, shifted, 0.0).rgb;
                 // The bed, banded by the surface above it.
@@ -1559,13 +1641,12 @@ void main() {
                 // water shows the sand almost as it is and deep water is a
                 // colour of its own with nothing of the bed left in it.
                 //
-                // The thickness comes free: the depth of the bed is already
-                // being sampled a few lines up to decide whether the refracted
-                // sample is really behind the surface, and the depth of the
-                // surface is `here`. The difference between them, in blocks,
-                // is how much water is in the way.
-                float bedDepth = textureLod(sceneDepth, shifted, 0.0).r;
-                float through = max(distanceOf(bedDepth) - distanceOf(here), 0.0);
+                // The thickness comes free: the depth of the bed was already
+                // sampled a few lines up, as `behindDepth`, to decide whether
+                // the refracted sample is really behind the surface, and the
+                // depth of the surface is `here`. The difference between
+                // them, in blocks, is how much water is in the way.
+                float through = max(distanceOf(behindDepth) - distanceOf(here), 0.0);
                 // Per block, and each channel its own. Not physical constants:
                 // the sea in this game is a handful of blocks deep, so the real
                 // ones would do nothing at all over that distance.
@@ -1592,10 +1673,34 @@ void main() {
                             shore * shore * ripple * frame.lightShadow.w * FOAM_MAX);
                 }
 #endif
+                // How far behind the surface this depth actually is. Trusted
+                // fully once there is real water between the two — a lake bed
+                // several blocks down — and faded out as that gap closes to
+                // nothing. See CREATURE_LIKELY_DEPTH: a creature under the
+                // surface and a shallow lake bed look identical to this pass,
+                // and only the second one is actually sitting in `behind`.
+                // Fading the forced opacity below over the gap, instead of
+                // forcing it outright, lets the game's own blend show
+                // whatever is really there the rest of the time.
+                //
+                // Not built into the tracing variant: it is one more sample
+                // and a smoothstep on the one pass already found to have no
+                // room left for exactly that kind of cost. There the old,
+                // unconditional opacity stays — a creature under the surface
+                // keeps being redrawn over there, same as before this fix.
+                // See WHY_NOT_WITH_RAY_QUERY.
+#ifndef RAY_QUERY
+                float trustBehind = smoothstep(0.0, CREATURE_LIKELY_DEPTH,
+                        distanceOf(behindDepth) - distanceOf(here));
+#endif
                 // Exactly what the blend would have done, done here: the frame
                 // times what the water lets through, plus the water itself.
                 shaded = shaded * alpha + behind * (1.0 - alpha);
+#ifndef RAY_QUERY
+                alpha = mix(alpha, 1.0, trustBehind);
+#else
                 alpha = 1.0;
+#endif
             }
         }
         // Ice, which has carried a material tag since this pass was written
@@ -1735,6 +1840,14 @@ void main() {
             float g = material == MATERIAL_WATER
                     ? celestialGlint(normal, WATER_GLINT_SHARPNESS, toLight, above)
                     : celestialGlint(normal, ICE_GLINT_SHARPNESS, toLight, above);
+            // The angles alone cannot tell a clear horizon from a sun sitting
+            // behind a mountain — both return the same lobe. Checked only
+            // here, after the lobe is known nonzero, so the march below runs
+            // on the sliver of a lake that is actually glinting rather than
+            // on every wet pixel on screen.
+            if (g > 0.0 && sunOccluded(vRelative, toLight)) {
+                g = 0.0;
+            }
             g *= glintStrength * mix(GLINT_MAX_LDR, GLINT_MAX_HDR, frame.world.z)
                     * vLight.y * (byDay ? 1.0 : MOON_SHARE);
             if (g > 0.0) {
