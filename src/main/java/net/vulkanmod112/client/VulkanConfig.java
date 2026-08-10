@@ -2403,6 +2403,16 @@ public final class VulkanConfig {
         publish("vulkanmod112.weatherControl", Integer.toString(weatherControl));
         publish("vulkanmod112.dynamicLights", Boolean.toString(dynamicLights));
         publish("vulkanmod112.dynamicLightDistance", Integer.toString(dynamicLightDistance));
+        // The sun and moon are drawn on the game's side and nothing behind the
+        // bridge reads these five. They are published because the block above
+        // them calls itself "all of them", and a report about a sun that is
+        // still square could not be told from a report about a switch that was
+        // never on — which is the entire question that report asks.
+        publish("vulkanmod112.roundSun", Boolean.toString(roundSun));
+        publish("vulkanmod112.roundMoon", Boolean.toString(roundMoon));
+        publish("vulkanmod112.sunSize", Integer.toString(sunSize));
+        publish("vulkanmod112.sunWarmth", Integer.toString(sunWarmth));
+        publish("vulkanmod112.skinPack", skinPack.isEmpty() ? "none" : skinPack);
     }
 
     /**

@@ -100,8 +100,23 @@ public final class SessionLog {
                 // working game queued a line that nothing ever printed.
                 RenderNotice.flushRestartToChat();
                 LangDump.onceIfAsked();
+                // Asked on a clock as well as when a setting moves, because
+                // not everything this answers is a setting. Whether another
+                // mod has taken the sky is a property of the world, and a
+                // world is loaded long after the switch was set — checking
+                // only on change means the one session that needed the
+                // sentence is the one that never printed it. It builds a
+                // short string once a second and says nothing unless the
+                // answer changed.
+                if (++healthTicks >= 20) {
+                    healthTicks = 0;
+                    SettingsHealth.check();
+                }
             }
         }
+
+        /** Ticks since the last {@link SettingsHealth#check()}. */
+        private int healthTicks;
 
         @SubscribeEvent
         public void onWorldLoad(WorldEvent.Load event) {

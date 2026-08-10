@@ -90,6 +90,47 @@ public final class SettingsHealth {
     }
 
     /**
+     * Why the sun and moon are still the game's own.
+     *
+     * The picture is put on them by redirecting the texture bind inside
+     * vanilla's own sky method, which is the narrowest change available — and
+     * that narrowness is also the whole of the exposure. Forge lets a world
+     * provider replace the sky outright, and vanilla's method returns on its
+     * first line when one has, so the bind never happens and there is nothing
+     * to redirect. Nothing breaks and nothing happens, which is the worse of
+     * the two ways to fail: the switch is on, the preset that set it says it
+     * set it, and the sky overhead is somebody else's.
+     *
+     * Asked of the world rather than of a mod list. Which mod took the sky
+     * does not change the answer, and a list of the ones that might would be
+     * wrong the first time a new one appeared.
+     */
+    private static String describeSkyTaken() {
+        StringBuilder names = new StringBuilder();
+        add(names, "the round sun", VulkanConfig.isRoundSun());
+        add(names, "the round moon", VulkanConfig.isRoundMoon());
+        add(names, "borrowed sun and moon pictures", !VulkanConfig.getSkinPack().isEmpty());
+        if (names.length() == 0 || !skyBelongsToSomebodyElse()) {
+            return null;
+        }
+        return names + " — another mod draws the sky in this world, and the sun "
+                + "and moon come with it";
+    }
+
+    /** Whether this world's provider has had its sky renderer replaced. */
+    private static boolean skyBelongsToSomebodyElse() {
+        try {
+            net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getMinecraft();
+            return mc != null && mc.world != null
+                    && mc.world.provider.getSkyRenderer() != null;
+        } catch (Throwable t) {
+            // No world, or a provider that will not answer: not a case worth
+            // a warning about, and certainly not one worth an exception.
+            return false;
+        }
+    }
+
+    /**
      * The settings that are on and cannot act, and why, or null when none are.
      *
      * @return a sentence meant to be read by whoever is looking at the screen
@@ -150,6 +191,17 @@ public final class SettingsHealth {
                 out.append("; ");
             }
             out.append(hdr);
+        }
+        // Separate again, and for the same reason: this one has nothing to do
+        // with our renderer either. It is true with the renderer drawing
+        // perfectly and false with it switched off, so folding it in with the
+        // rest would put a cause in front of the reader that is not theirs.
+        String sky = describeSkyTaken();
+        if (sky != null) {
+            if (out.length() > 0) {
+                out.append("; ");
+            }
+            out.append(sky);
         }
         return out.length() == 0 ? null : out.toString();
     }
