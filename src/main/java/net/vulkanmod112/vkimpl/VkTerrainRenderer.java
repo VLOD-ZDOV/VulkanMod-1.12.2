@@ -806,6 +806,7 @@ final class VkTerrainRenderer {
     private int aoCloudShadowUniform = -1;
     private int aoCloudUvUniform = -1;
     private int aoSunWorldUniform = -1;
+    private int aoCamWrapUniform = -1;
     private int aoCol0Uniform = -1;
     private int aoCol1Uniform = -1;
     private int aoCol2Uniform = -1;
@@ -3617,6 +3618,10 @@ final class VkTerrainRenderer {
             GL20C.glUniform4f(aoProjUniform, 1.0f / m0, 1.0f / m5, near, far);
             GL20C.glUniform1f(aoRadiusUniform, aoRadius);
             GL20C.glUniform1f(aoStrengthUniform, aoStrength);
+            if (aoCamWrapUniform >= 0) {
+                GL20C.glUniform3f(aoCamWrapUniform, wrapForJitter(viewWorldX),
+                        wrapForJitter(viewWorldY), wrapForJitter(viewWorldZ));
+            }
             writeContactSun();
             writeCloudShadow();
             GL13C.glActiveTexture(GL13C.GL_TEXTURE0);
@@ -3662,6 +3667,23 @@ final class VkTerrainRenderer {
      * world as the player walks, which is the classic way this goes wrong and
      * looks like the shadows lagging rather than like the wrong maths.
      */
+    /**
+     * How wide the lattice is that the camera's world position is folded over
+     * before a hash sees it.
+     *
+     * Wide enough that no two places a player can see at once land on the same
+     * fold, and narrow enough that the number handed to the shader keeps a
+     * fraction of a block: a float has about seven digits, and a coordinate in
+     * the millions spends all of them on the whole part. This is the same
+     * reason the waves and the sway fold their lattice, written out here
+     * because the value differs.
+     */
+    private static final double JITTER_LATTICE = 4096.0;
+
+    private static float wrapForJitter(double world) {
+        return (float) (world - Math.floor(world / JITTER_LATTICE) * JITTER_LATTICE);
+    }
+
     private void writeContactSun() {
         if (aoContactUniform < 0 || aoSunUniform < 0) {
             return;
@@ -3819,6 +3841,11 @@ final class VkTerrainRenderer {
                         + "uniform vec3 uCol0;\n"
                         + "uniform vec3 uCol1;\n"
                         + "uniform vec3 uCol2;\n"
+                        // Where the camera is in the world, reduced modulo a
+                        // lattice so that single precision still tells one
+                        // block from the next. Only the contact march reads it,
+                        // and only to seed a hash.
+                        + "uniform vec3 uCamWrap;\n"
                         // How far a contact shadow reaches, in blocks, split
                         // over eight steps — and how thick a thing has to be
                         // before it is treated as standing in the way rather
@@ -4020,7 +4047,35 @@ final class VkTerrainRenderer {
                         + "    float contact = 0.0;\n"
                         + "    if (uContact > 0.0 && dot(uSun, uSun) > 0.25 && dot(n, uSun) > 0.0) {\n"
                         + "        vec3 rp = rayStart;\n"
-                        + "        float jitter = fract(a * 0.1591549);\n"
+                        // Anchored to the world, and not to the pixel like the
+                        // occlusion's rotation above it.
+                        //
+                        // They look like the same kind of noise and they are
+                        // not, because of what is done with the answer. The
+                        // occlusion averages sixteen samples and is blurred
+                        // afterwards, so a pattern fixed to the screen washes
+                        // out and staying still is what makes it wash out
+                        // evenly. This march takes a maximum over a hard
+                        // threshold — a step either crosses the surface or it
+                        // does not — and nothing downstream averages that. With
+                        // the jitter fixed to the pixel, turning the head a
+                        // fraction of a degree moves every surface point onto a
+                        // different pixel, hands it a different offset, and
+                        // moves where the threshold falls: reported twice as
+                        // shadows flickering indoors on the smallest movement,
+                        // walking or looking around.
+                        //
+                        // So the offset is read from where the point is in the
+                        // world instead. The camera's own position arrives
+                        // already reduced modulo a lattice, the same trick the
+                        // waves and the sway use and for the same reason: a
+                        // hash needs a number it can tell apart from its
+                        // neighbour, and a single-precision world coordinate at
+                        // Minecraft's range cannot give it one.
+                        + "        vec3 rel = vec3(dot(uCol0, p), dot(uCol1, p), dot(uCol2, p));\n"
+                        + "        vec3 wh = fract((uCamWrap + rel) * vec3(0.4127, 0.4013, 0.3971));\n"
+                        + "        wh += dot(wh, wh.yzx + 33.33);\n"
+                        + "        float jitter = fract((wh.x + wh.y) * wh.z);\n"
                         + "        for (int i = 1; i <= 8; i++) {\n"
                         + "            vec3 s = rp + uSun * (CONTACT_STEP * (float(i) + jitter));\n"
                         // Behind the eye, where there is no pixel to ask.
@@ -4129,6 +4184,7 @@ final class VkTerrainRenderer {
         aoCloudShadowUniform = GL20C.glGetUniformLocation(aoProgram, "uCloudShadow");
         aoCloudUvUniform = GL20C.glGetUniformLocation(aoProgram, "uCloudUv");
         aoSunWorldUniform = GL20C.glGetUniformLocation(aoProgram, "uSunWorld");
+        aoCamWrapUniform = GL20C.glGetUniformLocation(aoProgram, "uCamWrap");
         aoCol0Uniform = GL20C.glGetUniformLocation(aoProgram, "uCol0");
         aoCol1Uniform = GL20C.glGetUniformLocation(aoProgram, "uCol1");
         aoCol2Uniform = GL20C.glGetUniformLocation(aoProgram, "uCol2");
