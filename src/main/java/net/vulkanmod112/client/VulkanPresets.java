@@ -18,12 +18,15 @@ import net.minecraft.client.settings.GameSettings;
  * anyone had tried that session, with no row on the screen admitting it. The
  * lists below are therefore deliberately repetitive.
  *
- * Render distance is the one value treated differently, and which way depends
- * on what the preset is for. The ones that trade looks for frames cap it and
- * never raise it, because raising a distance somebody chose takes frames away
- * without saying so. Beautiful sets it outright — asking for the best-looking
- * world and being left at eight chunks would be the same failure in the other
- * direction.
+ * Render distance is the one value treated differently: every preset caps it
+ * and none of them raises it, because raising a distance somebody chose takes
+ * frames away without saying so. Beautiful used to be the exception and set
+ * thirty-two outright, on the theory that asking for the best-looking world
+ * and being left at eight chunks was the failure in the other direction. It
+ * was not: measured, the distance bought that preset nothing — its effects are
+ * paid per pixel — while the chunk rebuilding at thirty-two is exactly what
+ * turns a four-millisecond frame into a thirty-millisecond one every twentieth
+ * frame, which is the stutter the preset was blamed for.
  */
 public final class VulkanPresets {
 
@@ -144,7 +147,22 @@ public final class VulkanPresets {
         look.clouds = 2;
         look.entityShadows = true;
         look.mipmap = 4;
-        look.renderDistanceExact = 32;
+        // Twelve, and a cap rather than an exact number.
+        //
+        // Thirty-two was this preset's own idea of "the machine can afford it",
+        // and on a card that can it still stutters: at that distance the frame
+        // waits for chunks being rebuilt, not for anything drawn, so half the
+        // frames come in at four milliseconds and one in twenty at thirty. The
+        // effects here cost per pixel and barely notice the distance, so the
+        // distance was buying nothing this preset is for.
+        //
+        // A cap and not an exact value because the two failures are not
+        // symmetric. Coming down from a distance somebody chose costs them
+        // sharpness far away and gives back the smoothness they came here for;
+        // raising somebody who deliberately sits at eight would spend their
+        // frames on chunks they did not ask for and hide the effects behind a
+        // stutter.
+        look.renderDistanceCap = 12;
         look.fpsLimit = 260;
         look.vsync = false;
 
