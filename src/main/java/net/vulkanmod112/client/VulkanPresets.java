@@ -145,7 +145,10 @@ public final class VulkanPresets {
         look.heightFog = 20;
         look.waterReflection = 70;
         look.waterWaves = 50;
-        look.foliageSway = 55;
+        // Quieter than it was: at fifty-five a field reads as wind rather
+        // than as grass, and the point of the preset is a world that looks
+        // right standing still as well as in motion.
+        look.foliageSway = 38;
         look.bloom = 45;
         look.screenReflections = 35;
         look.shaderAmbientOcclusion = 60;
@@ -162,7 +165,7 @@ public final class VulkanPresets {
         look.sceneOcclusion = true;
         look.leafShadows = 100;
         look.contactShadows = 60;
-        look.cloudShadows = 55;
+        look.cloudShadows = 45;
         look.godRays = 45;
         look.hdrFrame = true;
         look.roundSun = true;

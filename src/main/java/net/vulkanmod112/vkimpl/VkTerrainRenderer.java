@@ -3837,6 +3837,22 @@ final class VkTerrainRenderer {
                         + "    vec2 ndc = uv * 2.0 - 1.0;\n"
                         + "    return vec3(ndc.x * uProj.x * z, ndc.y * uProj.y * z, -z);\n"
                         + "}\n"
+                        // One texel of the cloud sheet is twelve blocks wide and the
+                        // sheet is filtered by nearest texel, so the edge of a cloud
+                        // is a cliff twelve blocks across. The point this shadow is
+                        // read at travels hundreds of blocks sideways on its way up to
+                        // the cloud layer, so the smallest turn of the head walks it
+                        // over that cliff and the shade snaps on and off. Four taps a
+                        // texel apart average that cliff into a slope — which is also
+                        // what a real cloud edge looks like.
+                        + "const float CLOUD_TEXEL = 0.00390625;\n"
+                        + "float cloudAt(vec2 uv2) {\n"
+                        + "    float h = CLOUD_TEXEL * 0.5;\n"
+                        + "    return 0.25 * (texture2D(uClouds, fract(uv2 + vec2(h, h))).a\n"
+                        + "                 + texture2D(uClouds, fract(uv2 + vec2(-h, h))).a\n"
+                        + "                 + texture2D(uClouds, fract(uv2 + vec2(h, -h))).a\n"
+                        + "                 + texture2D(uClouds, fract(uv2 + vec2(-h, -h))).a);\n"
+                        + "}\n"
                         + "void main() {\n"
                         + "    vec2 uv = gl_FragCoord.xy * uInvSize;\n"
                         + "    float d = texture2D(uSource, uv).r;\n"
@@ -3995,12 +4011,15 @@ final class VkTerrainRenderer {
                         // exactly the half that is missing here, because a
                         // chest, a mob and another mod's machine are all in
                         // this depth image and in none of the traced ones.
-                        + "    float contact = 0.0;\n"
-                        + "    if (uContact > 0.0 && dot(uSun, uSun) > 0.25 && dot(n, uSun) > 0.0) {\n"
                         // Started off the surface along its own normal, or the
                         // first step lands back on the surface it came from and
-                        // every lit face shadows itself.
-                        + "        vec3 rp = p + n * (0.05 + 0.002 * (-p.z));\n"
+                        // every lit face shadows itself. Shared by both marches
+                        // below, which start from the same place for the same
+                        // reason.
+                        + "    vec3 rayStart = p + n * (0.05 + 0.002 * (-p.z));\n"
+                        + "    float contact = 0.0;\n"
+                        + "    if (uContact > 0.0 && dot(uSun, uSun) > 0.25 && dot(n, uSun) > 0.0) {\n"
+                        + "        vec3 rp = rayStart;\n"
                         + "        float jitter = fract(a * 0.1591549);\n"
                         + "        for (int i = 1; i <= 8; i++) {\n"
                         + "            vec3 s = rp + uSun * (CONTACT_STEP * (float(i) + jitter));\n"
@@ -4052,8 +4071,28 @@ final class VkTerrainRenderer {
                         // through the cloud layer.
                         + "        if (climb > 0.0) {\n"
                         + "            vec2 hit = rel.xz + uSunWorld.xz * (climb / uSunWorld.y);\n"
-                        + "            vec2 uv2 = fract(uCloudUv.xy + hit * uCloudUv.z);\n"
-                        + "            cloud = texture2D(uClouds, uv2).a;\n"
+                        + "            cloud = cloudAt(uCloudUv.xy + hit * uCloudUv.z);\n"
+                        // Nothing under a roof is in a cloud's shade, and the
+                        // sheet alone cannot know that: it is read at a point
+                        // hundreds of blocks away in the sky and says nothing
+                        // about what stands between. Without this the shade of
+                        // passing clouds swept across the floor of a closed
+                        // house. Six steps of two blocks towards the sun is
+                        // enough to find a ceiling and cheap enough to spend:
+                        // it is the same march the contact shadows do, walked
+                        // further and asked a coarser question.
+                        + "            vec3 up = rayStart;\n"
+                        + "            for (int k = 1; k <= 6; k++) {\n"
+                        + "                vec3 sk = up + uSun * (2.0 * float(k));\n"
+                        + "                if (sk.z > -uProj.z) break;\n"
+                        + "                vec2 kn = vec2(sk.x / (uProj.x * -sk.z), sk.y / (uProj.y * -sk.z));\n"
+                        + "                vec2 kuv = kn * 0.5 + 0.5;\n"
+                        + "                if (kuv.x < 0.0 || kuv.x > 1.0 || kuv.y < 0.0 || kuv.y > 1.0) break;\n"
+                        + "                float kd = texture2D(uSource, kuv).r;\n"
+                        + "                if (kd >= 0.9999) continue;\n"
+                        + "                float gap2 = -sk.z - linearZ(kd);\n"
+                        + "                if (gap2 > 0.05 && gap2 < 6.0) { cloud = 0.0; break; }\n"
+                        + "            }\n"
                         // Faded out with the sun near the horizon, where the
                         // journey to the cloud layer is long enough that the
                         // shadow lands a hundred blocks from anything overhead
@@ -4061,8 +4100,24 @@ final class VkTerrainRenderer {
                         + "            cloud *= clamp(uSunWorld.y * 3.0, 0.0, 1.0);\n"
                         + "        }\n"
                         + "    }\n"
-                        + "    float lit = clamp(ao, 0.0, 1.0) * (1.0 - uContact * contact * 0.75)\n"
-                        + "            * (1.0 - uCloudShadow * cloud);\n"
+                        // Faded towards the edge of the screen rather than stopped
+                        // at it. A ray from a pixel near the border leaves the
+                        // picture within a step or two and finds nothing, so the
+                        // shadow simply ended along a straight line down the side
+                        // of the view — and a straight line is the one thing the
+                        // eye never misses. The technique still cannot see past
+                        // the border; this only stops it announcing where the
+                        // border is. Wider fields of view show more of it, which
+                        // is why it was worse the wider the view got.
+                        + "    vec2 toEdge = min(uv, vec2(1.0) - uv);\n"
+                        + "    float edge = clamp(min(toEdge.x, toEdge.y) / 0.10, 0.0, 1.0);\n"
+                        + "    float lit = clamp(ao, 0.0, 1.0)\n"
+                        + "            * (1.0 - uContact * contact * 0.75 * edge)\n"
+                        // Half of what the slider says, because the sheet is a mask
+                        // of ones and zeros: the value read is the share of the sky
+                        // covered, not the share of light removed, and a cloud does
+                        // not take all of the light under it.
+                        + "            * (1.0 - uCloudShadow * cloud * 0.5);\n"
                         + "    gl_FragColor = vec4(clamp(lit, 0.0, 1.0));\n"
                         + "}\n");
         aoInvSize = GL20C.glGetUniformLocation(aoProgram, "uInvSize");

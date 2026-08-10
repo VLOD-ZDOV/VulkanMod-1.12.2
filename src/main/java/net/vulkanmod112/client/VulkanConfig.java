@@ -1398,9 +1398,39 @@ public final class VulkanConfig {
         return materialTags;
     }
 
+    /**
+     * Raised when the tags are switched, and lowered once the world is rebuilt.
+     *
+     * What a block is made of is recorded into its geometry while the chunk is
+     * built and read back out of it while the chunk is drawn — so switching
+     * this on changes nothing about a chunk already built, and the world ends
+     * up half tagged: grass sways in the chunks that happened to be rebuilt
+     * since and stands still in the rest, and the same goes for the glow, the
+     * shading and every water and ice effect. It reads as a broken effect
+     * rather than as a stale chunk, which is why nobody looked here.
+     *
+     * A flag rather than a rebuild on the spot, because this setter is called
+     * in the middle of applying a preset, which sets fifty of these in a row —
+     * rebuilding from inside one of them would rebuild the world several times
+     * over for a single button.
+     */
+    private static volatile boolean materialTagsNeedRebuild;
+
     public static void setMaterialTags(boolean value) {
+        if (materialTags != value) {
+            materialTagsNeedRebuild = true;
+        }
         materialTags = value;
         store(CATEGORY_OPTIMIZATION, "materialTags", value);
+    }
+
+    /** Asked once a frame; true only for the frame after the switch moved. */
+    public static boolean takeMaterialTagsRebuild() {
+        if (!materialTagsNeedRebuild) {
+            return false;
+        }
+        materialTagsNeedRebuild = false;
+        return true;
     }
 
     public static boolean isShowMaterials() {

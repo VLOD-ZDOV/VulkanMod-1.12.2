@@ -293,6 +293,29 @@ public final class TerrainHooks {
         }
     }
 
+    /**
+     * Rebuilds the world when the material tags are switched on or off.
+     *
+     * The tag is written into a chunk's geometry while it is built, so a
+     * chunk built before the switch carries none and one built after carries
+     * them. Without this the world is left half tagged and stays that way
+     * until each chunk happens to be rebuilt for some other reason — which
+     * looks like an effect that works in some places and not others, and sends
+     * the search into the effect rather than to the chunk it is reading.
+     */
+    private static void rebuildForMaterialTags() {
+        if (!VulkanConfig.takeMaterialTagsRebuild()) {
+            return;
+        }
+        Minecraft mc = Minecraft.getMinecraft();
+        if (mc.renderGlobal != null) {
+            LOGGER.info("Material tags {} — rebuilding every chunk, because what a block "
+                            + "is made of is recorded while the chunk is built",
+                    VulkanConfig.isMaterialTags() ? "switched on" : "switched off");
+            mc.renderGlobal.loadRenderers();
+        }
+    }
+
     /** Returns true when the Vulkan side took the layer and GL must skip it. */
     public static boolean renderChunkLayer(BlockRenderLayer layer, List<RenderChunk> chunks) {
         if (layer == BlockRenderLayer.SOLID) {
@@ -301,6 +324,7 @@ public final class TerrainHooks {
             // draw nothing: what vanilla offered still has to be visible then.
             lastVanillaChunks = chunks == null ? 0 : chunks.size();
             updateVanillaBufferDrop();
+            rebuildForMaterialTags();
         }
         // Leaving before packChunks matters when the layer is not taken: water
         // and glass make a long chunk list at high render distances, and every
@@ -594,6 +618,9 @@ public final class TerrainHooks {
      * water, lava, blindness, the void and render distance, and mods add more.
      */
     /** The sheet the game draws its clouds from, looked up once. */
+    /** The last drift handed over, so the clouds are never told to go back. */
+    private static float lastCloudDrift;
+
     private static final net.minecraft.util.ResourceLocation CLOUD_SHEET =
             new net.minecraft.util.ResourceLocation("textures/environment/clouds.png");
 
@@ -631,6 +658,16 @@ public final class TerrainHooks {
                     int ticks = ((net.vulkanmod112.mixin.RenderGlobalAccessor) mc.renderGlobal)
                             .vulkanmod112$cloudTicks();
                     drift = (float) ((ticks + mc.getRenderPartialTicks()) * 0.03);
+                    // Never backwards. The whole-tick part is stepped by the game
+                    // on its own clock and the fraction is read on ours, so the two
+                    // are sampled either side of a tick now and then and the sum
+                    // goes back by a tick's worth. Clouds cannot un-drift, and the
+                    // shadow of one jumping backwards is visible where a frame of
+                    // lag is not.
+                    if (drift < lastCloudDrift && lastCloudDrift - drift < 0.1f) {
+                        drift = lastCloudDrift;
+                    }
+                    lastCloudDrift = drift;
                 }
             }
         }
