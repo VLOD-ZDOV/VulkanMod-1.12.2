@@ -101,7 +101,10 @@ public final class OptionSearch {
         for (int i = 0; i < keep; i++) {
             found[i] = hits.get(i).option;
         }
-        String heading = found.length == 0 ? "Nothing found" : "Found " + hits.size();
+        // A fixed heading rather than one with the count in it: a heading is a
+        // translation key, and a key that changes with the answer is a key no
+        // language file can ever hold. How many there are is already on screen.
+        String heading = found.length == 0 ? "Nothing found" : "Search results";
         return new VOptionPage("Search", new VOptionBlock(heading, found));
     }
 
