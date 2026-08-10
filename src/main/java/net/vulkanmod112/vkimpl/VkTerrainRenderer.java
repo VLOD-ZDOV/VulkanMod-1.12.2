@@ -1699,6 +1699,21 @@ final class VkTerrainRenderer {
     private long worstGapRecord;
     private long worstGapSubmit;
     private long worstGapWait;
+    /**
+     * Collector pauses inside the worst frame, and across the interval.
+     *
+     * The one explanation that fits a stall on an unchanged scene once in a
+     * thousand frames, and the one nothing here ever measured. The machine
+     * stops every thread when it collects, so a frame that contains a
+     * collection is not this renderer's frame to explain — and every hour
+     * spent looking for the defect elsewhere was spent because nobody asked.
+     */
+    private long worstGapCollections;
+    private long worstGapCollectMillis;
+    private long previousCollections;
+    private long previousCollectMillis;
+    private long intervalCollections;
+    private long intervalCollectMillis;
     /** How long the render thread waits for the mirror's monitor. */
     private long mirrorLookupNanos;
     private long mirrorLookups;
@@ -1713,6 +1728,15 @@ final class VkTerrainRenderer {
         long fence = fenceWaitNanos - previousFenceWaitNanos;
         long record = recordNanos - previousRecordNanos;
         long waited = translucentWaitNanos - previousTranslucentWaitNanos;
+        long collections = net.vulkanmod112.client.JvmPauses.collections();
+        long collectMillis = net.vulkanmod112.client.JvmPauses.collectionMillis();
+        long collected = previousCollections == 0L ? 0L : collections - previousCollections;
+        long collectedMs = previousCollectMillis == 0L
+                ? 0L : collectMillis - previousCollectMillis;
+        previousCollections = collections;
+        previousCollectMillis = collectMillis;
+        intervalCollections += collected;
+        intervalCollectMillis += collectedMs;
         long submit = submitCompositeNanos - previousSubmitNanos;
         previousFenceWaitNanos = fenceWaitNanos;
         previousRecordNanos = recordNanos;
@@ -1739,6 +1763,8 @@ final class VkTerrainRenderer {
                 worstGapFence = fence;
                 worstGapRecord = record;
                 worstGapWait = waited;
+                worstGapCollections = collected;
+                worstGapCollectMillis = collectedMs;
                 worstGapSubmit = submit;
             }
         }
@@ -1793,6 +1819,15 @@ final class VkTerrainRenderer {
         long ours = worstGapFence + worstGapWait + worstGapRecord + worstGapSubmit;
         sb.append(String.format("    of that worst frame, %.0f%% was this renderer\n",
                 100.0 * ours / Math.max(1, worstGapNanos)));
+        // Asked of the machine rather than of this renderer, and printed even
+        // when it is zero: "no collection ran" is the answer that sends the
+        // search back here, and it is worth as much as the other one.
+        sb.append(String.format(
+                "    the collector ran %d times in that worst frame (%d ms), and %d times over the interval (%d ms)\n",
+                worstGapCollections, worstGapCollectMillis,
+                intervalCollections, intervalCollectMillis));
+        intervalCollections = 0L;
+        intervalCollectMillis = 0L;
         sb.append(String.format(
                 "    mirror lookup %.3f ms average over %d layer draws, worst %.1f ms%s\n",
                 mirrorLookupNanos / Math.max(1.0, mirrorLookups) / 1e6, mirrorLookups,

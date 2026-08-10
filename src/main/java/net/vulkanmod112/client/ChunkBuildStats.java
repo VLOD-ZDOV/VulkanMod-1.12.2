@@ -41,7 +41,8 @@ public final class ChunkBuildStats {
     private static final ThreadLocal<long[]> STARTED = new ThreadLocal<long[]>() {
         @Override
         protected long[] initialValue() {
-            return new long[4];
+            // start, x, y, z, processor time at start, collections at start
+            return new long[6];
         }
     };
 
@@ -78,6 +79,12 @@ public final class ChunkBuildStats {
     private static final long SLOW_LOG_INTERVAL_NANOS = 1_000_000_000L;
     private static final AtomicLong lastSlowLogNanos = new AtomicLong();
     private static final AtomicLong slowSeen = new AtomicLong();
+    /** Processor time the builds really used, against the wall time they took. */
+    private static final AtomicLong cpuNanos = new AtomicLong();
+    /** Builds over eight milliseconds that spent most of them not running. */
+    private static final AtomicLong stalled = new AtomicLong();
+    /** Builds over eight milliseconds with a collection inside them. */
+    private static final AtomicLong duringCollection = new AtomicLong();
 
     private ChunkBuildStats() {
     }
@@ -88,6 +95,8 @@ public final class ChunkBuildStats {
         started[1] = (long) x;
         started[2] = (long) y;
         started[3] = (long) z;
+        started[4] = JvmPauses.threadCpuNanos();
+        started[5] = JvmPauses.collections();
     }
 
     public static void end() {
@@ -100,9 +109,29 @@ public final class ChunkBuildStats {
             return;
         }
         long elapsed = System.nanoTime() - started[0];
+        // What the thread actually did with that time. Wall time alone
+        // cannot tell a hundred milliseconds of meshing from a hundred
+        // milliseconds of waiting to be allowed to mesh, and every reading
+        // of the meshing code in the world will not tell them apart either.
+        long cpu = JvmPauses.threadCpuNanos();
+        long ranFor = cpu >= 0L && started[4] >= 0L ? cpu - started[4] : -1L;
+        long collected = JvmPauses.collections() - started[5];
         started[0] = 0L;
         rebuilds.incrementAndGet();
         nanos.addAndGet(elapsed);
+        if (ranFor >= 0L) {
+            cpuNanos.addAndGet(ranFor);
+            // A build that spent less than half its time on a processor was
+            // mostly waiting. Counted rather than averaged: the average is
+            // dominated by the thousands of ordinary builds, and the question
+            // is about the handful of bad ones.
+            if (elapsed > 8_000_000L && ranFor * 2L < elapsed) {
+                stalled.incrementAndGet();
+            }
+        }
+        if (collected > 0L && elapsed > 8_000_000L) {
+            duringCollection.incrementAndGet();
+        }
         // Read-modify-write on a shared maximum, so a compare-and-set loop
         // rather than a compare followed by a store.
         long seen = worst.get();
@@ -116,11 +145,12 @@ public final class ChunkBuildStats {
             }
         }
         if (elapsed >= SLOW_NANOS) {
-            noteSlow(elapsed, started[1], started[2], started[3]);
+            noteSlow(elapsed, started[1], started[2], started[3], ranFor, collected);
         }
     }
 
-    private static void noteSlow(long elapsed, long x, long y, long z) {
+    private static void noteSlow(long elapsed, long x, long y, long z,
+                                 long ranFor, long collected) {
         long count = slowSeen.incrementAndGet();
         long now = System.nanoTime();
         long last = lastSlowLogNanos.get();
@@ -130,9 +160,16 @@ public final class ChunkBuildStats {
         if (!lastSlowLogNanos.compareAndSet(last, now)) {
             return;
         }
-        LOGGER.info("Slow chunk build: {} ms at block ({}, {}, {}) on {} — {} so far this session",
+        // The breakdown is the whole value of this line. "Ran for 3 ms of a
+        // 104 ms build" says the meshing is innocent and something held the
+        // thread; "ran for 98 of 104" says it really did that much work.
+        String spent = ranFor < 0L ? "thread time unknown"
+                : String.format("ran for %.0f ms of it", ranFor / 1_000_000.0);
+        LOGGER.info("Slow chunk build: {} ms at block ({}, {}, {}) on {} — {}{} — "
+                        + "{} so far this session",
                 String.format("%.0f", elapsed / 1_000_000.0), x, y, z,
-                Thread.currentThread().getName(), count);
+                Thread.currentThread().getName(), spent,
+                collected > 0L ? ", and the collector ran during it" : "", count);
     }
 
     /** Read and reset, for the diagnostics report. */
@@ -152,10 +189,22 @@ public final class ChunkBuildStats {
             }
             spread.append(names[i]).append(' ').append(n);
         }
+        long ran = cpuNanos.getAndSet(0L);
+        long waited = stalled.getAndSet(0L);
+        long collected = duringCollection.getAndSet(0L);
+        // Wall time and processor time side by side, because the gap between
+        // them is the answer to the question these buckets have been asking
+        // without being able to answer since they were written.
+        String running = !JvmPauses.cpuTimeReadable() ? "thread time unavailable here"
+                : String.format("%.1f ms of it on a processor (%.0f%%)",
+                        ran / 1_000_000.0, 100.0 * ran / Math.max(1L, total));
         return String.format(
                 "chunk builds: %d rebuilds, %.2f ms each on average, worst %.2f ms, "
-                        + "%.1f ms of thread time in total; spread %s; %d over %d ms this session",
+                        + "%.1f ms of wall time in total, %s; spread %s; "
+                        + "%d slow builds spent most of their time not running, "
+                        + "%d had a collection inside them; %d over %d ms this session",
                 count, total / (count * 1_000_000.0), slowest / 1_000_000.0,
-                total / 1_000_000.0, spread, slowSeen.get(), SLOW_NANOS / 1_000_000L);
+                total / 1_000_000.0, running, spread, waited, collected,
+                slowSeen.get(), SLOW_NANOS / 1_000_000L);
     }
 }
