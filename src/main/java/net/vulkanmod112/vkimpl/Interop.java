@@ -168,9 +168,44 @@ final class Interop {
             "VK_KHR_external_semaphore_win32"
     };
 
-    private static final long CLOSE_HANDLE = WINDOWS
-            ? Kernel32.getLibrary().getFunctionAddress("CloseHandle")
-            : 0L;
+    /**
+     * Looked up on first use rather than when this class loads.
+     *
+     * As a static field this was the very first thing that happened when the
+     * Vulkan side was touched at all, and asking LWJGL for kernel32 asks LWJGL
+     * for its own native library — which on Windows is not there yet at that
+     * moment. The whole renderer fell over on
+     * {@code UnsatisfiedLinkError: Failed to locate library: lwjgl.dll}, before
+     * a single Vulkan call, and reported itself as "Vulkan never started on
+     * this machine": an address needed once per exported handle decided whether
+     * the mod ran at all.
+     *
+     * Linux never saw it, because the condition is false there and the ternary
+     * has nothing to evaluate — which is exactly the shape of a fault that
+     * cannot be found on the machine it is written on.
+     *
+     * Zero means "not looked up yet"; a failed lookup is remembered as -1 so
+     * that a driver without the function is asked once rather than per handle.
+     */
+    private static long closeHandleAddress;
+
+    private static long closeHandleFunction() {
+        if (!WINDOWS) {
+            return 0L;
+        }
+        if (closeHandleAddress == 0L) {
+            try {
+                closeHandleAddress = Kernel32.getLibrary().getFunctionAddress("CloseHandle");
+            } catch (Throwable t) {
+                LOGGER.warn("CloseHandle could not be looked up: {}", t.toString());
+                closeHandleAddress = -1L;
+            }
+            if (closeHandleAddress == 0L) {
+                closeHandleAddress = -1L;
+            }
+        }
+        return closeHandleAddress == -1L ? 0L : closeHandleAddress;
+    }
 
     private Interop() {
     }
@@ -624,11 +659,12 @@ final class Interop {
         if (handle == 0L) {
             return;
         }
-        if (CLOSE_HANDLE == 0L) {
+        long closeHandle = closeHandleFunction();
+        if (closeHandle == 0L) {
             LOGGER.warn("CloseHandle unavailable; exported handle {} leaked", handle);
             return;
         }
-        if (JNI.callPI(handle, CLOSE_HANDLE) == 0) {
+        if (JNI.callPI(handle, closeHandle) == 0) {
             LOGGER.warn("CloseHandle failed for exported handle {}", handle);
         }
     }

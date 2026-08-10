@@ -434,6 +434,7 @@ public final class Diagnostics {
             out.println("  " + ResourcePackIcons.describe());
         }
         out.println("  memory: " + used() + " MiB used of " + max() + " MiB");
+        out.println("  jvm: " + jvmLine());
         out.println();
     }
 
@@ -471,6 +472,54 @@ public final class Diagnostics {
         if (inert != null) {
             out.println("    on but doing nothing: " + inert);
         }
+    }
+
+    /**
+     * How the virtual machine was started, and which collector it chose.
+     *
+     * Put here after a session spent looking for a stutter in this renderer
+     * that belonged to the machine: the instance had a thirty-two gigabyte
+     * heap and no arguments at all, so it ran the default collector, and one
+     * of its pauses was fifty-seven milliseconds. Nothing in a diagnostics file
+     * said so, and the one line that would have said it costs two reads of
+     * numbers the virtual machine already keeps.
+     *
+     * Empty arguments are printed as "none given" rather than as nothing,
+     * because "none given" is itself the answer more often than any particular
+     * flag is.
+     */
+    private static String jvmLine() {
+        StringBuilder out = new StringBuilder();
+        try {
+            java.lang.management.RuntimeMXBean runtime =
+                    java.lang.management.ManagementFactory.getRuntimeMXBean();
+            out.append(System.getProperty("java.version", "?"))
+                    .append(' ').append(System.getProperty("java.vm.name", "?"));
+            java.util.List<String> args = runtime.getInputArguments();
+            StringBuilder flags = new StringBuilder();
+            for (int i = 0; i < args.size(); i++) {
+                String arg = args.get(i);
+                // Paths and user names live in -D and -javaagent arguments, and
+                // this file is written to be sent to somebody else.
+                if (arg.startsWith("-D") || arg.startsWith("-javaagent")
+                        || arg.startsWith("-agentlib") || arg.contains("/")
+                        || arg.contains("\\")) {
+                    continue;
+                }
+                if (flags.length() > 0) {
+                    flags.append(' ');
+                }
+                flags.append(arg);
+            }
+            out.append(", args: ").append(flags.length() == 0 ? "none given" : flags);
+            for (java.lang.management.GarbageCollectorMXBean gc
+                    : java.lang.management.ManagementFactory.getGarbageCollectorMXBeans()) {
+                out.append(", collector: ").append(gc.getName());
+            }
+        } catch (Throwable t) {
+            out.append("could not be asked: ").append(t.toString());
+        }
+        return out.toString();
     }
 
     private static long used() {
