@@ -4801,6 +4801,23 @@ final class VkTerrainRenderer {
                 GL30C.glBindFramebuffer(GL30C.GL_DRAW_FRAMEBUFFER, sceneCopyFbo);
                 GL30C.glBlitFramebuffer(0, 0, width, height, 0, 0, width, height,
                         GL11C.GL_COLOR_BUFFER_BIT, GL11C.GL_NEAREST);
+                // Asked as well, and for the harder reason: a refused colour
+                // copy leaves this texture black, and the grading pass writes
+                // what it read back over the whole frame. That is a world that
+                // has gone black with the hand still on top of it — the hand
+                // being drawn after all of this — which reads as the renderer
+                // having failed rather than as one copy having been refused.
+                if (!sceneColourBlitChecked) {
+                    sceneColourBlitChecked = true;
+                    int error = GL11C.glGetError();
+                    if (error != GL11C.GL_NO_ERROR) {
+                        sceneColourUsable = false;
+                        LOGGER.warn("The frame's colour would not copy into a texture (GL error"
+                                + " 0x{}), so grading and light shafts are off for this session:"
+                                + " both read that copy, and reading it empty paints the world"
+                                + " black", Integer.toHexString(error));
+                    }
+                }
                 GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo);
 
                 if (wantOcclusion && aoPass(sceneDepthTexture)) {
@@ -4850,6 +4867,9 @@ final class VkTerrainRenderer {
 
     /** Asked once, because the formats cannot change while a session runs. */
     private boolean sceneDepthBlitChecked;
+    private boolean sceneColourBlitChecked;
+    private boolean toneBlitChecked;
+    private boolean sceneColourUsable = true;
     private boolean sceneDepthUsable = true;
     private int sceneDepthTexture;
     private int sceneDepthFbo;
@@ -5160,11 +5180,26 @@ final class VkTerrainRenderer {
         // the occlusion pass shade everything against everything. The symptom
         // is not a wrong shade: it is a black world with the hand still visible,
         // because the hand is drawn after this.
-        boolean depth24 = depthFormat == VK_FORMAT_X8_D24_UNORM_PACK32;
+        // Asked of the framebuffer this will be copied from, not worked out
+        // from what Vulkan chose.
+        //
+        // Deriving it from the renderer's own format was the obvious guess and
+        // it was backwards: where the driver has no sampleable twenty-four-bit
+        // depth the Vulkan targets are float, but the game's framebuffer is
+        // untouched and still twenty-four — so matching Vulkan created the
+        // mismatch instead of curing it, and the copy started failing with
+        // GL_INVALID_OPERATION where it had worked. The number of bits in the
+        // attachment about to be read is the only thing that decides this, and
+        // it can simply be asked for.
+        int depthBits = GL30C.glGetFramebufferAttachmentParameteri(GL30C.GL_FRAMEBUFFER,
+                GL30C.GL_DEPTH_ATTACHMENT, GL30C.GL_FRAMEBUFFER_ATTACHMENT_DEPTH_SIZE);
+        boolean depth32f = depthBits > 24;
         GL11C.glTexImage2D(GL11C.GL_TEXTURE_2D, 0,
-                depth24 ? GL30C.GL_DEPTH_COMPONENT24 : GL30C.GL_DEPTH_COMPONENT32F,
+                depth32f ? GL30C.GL_DEPTH_COMPONENT32F : GL30C.GL_DEPTH_COMPONENT24,
                 width, height, 0, GL11C.GL_DEPTH_COMPONENT,
-                depth24 ? GL11C.GL_UNSIGNED_INT : GL11C.GL_FLOAT, (java.nio.ByteBuffer) null);
+                depth32f ? GL11C.GL_FLOAT : GL11C.GL_UNSIGNED_INT, (java.nio.ByteBuffer) null);
+        LOGGER.info("Scene depth texture made {} bits to match the frame's own {}",
+                depth32f ? "32 float" : "24", depthBits);
         GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_MIN_FILTER, GL11C.GL_NEAREST);
         GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_MAG_FILTER, GL11C.GL_NEAREST);
         GL11C.glTexParameteri(GL11C.GL_TEXTURE_2D, GL11C.GL_TEXTURE_WRAP_S, GL12C.GL_CLAMP_TO_EDGE);
@@ -5272,6 +5307,29 @@ final class VkTerrainRenderer {
         GL30C.glBindFramebuffer(GL30C.GL_DRAW_FRAMEBUFFER, toneFbo);
         GL30C.glBlitFramebuffer(0, 0, width, height, 0, 0, width, height,
                 GL11C.GL_COLOR_BUFFER_BIT, GL11C.GL_NEAREST);
+        // The copy this pass then reads and writes over the frame. If it was
+        // refused the copy is black, and what gets written over the whole world
+        // is black — with the hand still on top, because the hand comes after
+        // this. There is no shade of wrong here that looks like a bug in the
+        // grading: it is all or nothing, so it is worth one question per
+        // session. Two things can refuse it, and both are invisible from the
+        // Java side: a format the driver will not convert between, and a
+        // multisampled frame, which cannot be blitted to a single-sampled one
+        // at a different size or format at all.
+        if (!toneBlitChecked) {
+            toneBlitChecked = true;
+            int error = GL11C.glGetError();
+            if (error != GL11C.GL_NO_ERROR) {
+                toneFailed = true;
+                LOGGER.warn("The frame would not copy for grading (GL error 0x{}), so the scene"
+                        + " tone pass is off for this session — it writes back what it read, and"
+                        + " reading an empty copy paints the world black",
+                        Integer.toHexString(error));
+                GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo);
+                GL20C.glUseProgram(prevProgram);
+                return;
+            }
+        }
 
         GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo);
         GL11C.glViewport(0, 0, width, height);
