@@ -2118,6 +2118,23 @@ final class VkTerrainRenderer {
             toneFrames = 0;
         }
         sb.append('\n');
+        // Named whether or not it is on, and the two copies it lives on named
+        // beside it. "Off" and "on but reading a copy the driver refused" are
+        // the same picture and opposite bugs, and the file had no way to tell
+        // them apart.
+        sb.append("  scene occlusion: ");
+        if (aoFailed) {
+            sb.append("off for this session (see the main log)");
+        } else if (!sceneOcclusion || !aoWanted()) {
+            sb.append("off");
+        } else {
+            sb.append(sceneOcclusionFrames).append(" frames shaded, depth copy ")
+                    .append(sceneDepthUsable ? "ok" : "REFUSED")
+                    .append(", colour copy ").append(sceneColourUsable ? "ok" : "REFUSED")
+                    .append(showOcclusion ? ", showing the occlusion term alone" : "");
+            sceneOcclusionFrames = 0;
+        }
+        sb.append('\n');
         sb.append("  frame accumulation: ");
         if (accumFailed) {
             sb.append("off for this session (see the main log)");
@@ -4834,6 +4851,7 @@ final class VkTerrainRenderer {
                     GL13C.glActiveTexture(GL13C.GL_TEXTURE0);
                     GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, sceneCopyTexture);
                     fullscreenQuad();
+                    sceneOcclusionFrames++;
                     // The copy again, because the shafts below read the colour
                     // and the darkening has just changed it. Shafts gathered
                     // from the undarkened copy would carry light the picture no
@@ -4875,6 +4893,18 @@ final class VkTerrainRenderer {
     private boolean toneBlitChecked;
     private boolean sceneColourUsable = true;
     private boolean sceneDepthUsable = true;
+    /**
+     * How many frames this pass actually darkened since the last snapshot.
+     *
+     * Counted at the draw rather than at the entry, because every interesting
+     * way this pass can fail leaves the entry reached and the draw not: a
+     * refused copy, a target that would not build, an occlusion term that had
+     * nothing to work from. Three sessions were spent asking whether this pass
+     * was painting a world black while the file it wrote said nothing about it
+     * at all — every other effect in that snapshot names itself, and the one
+     * under suspicion was the one that did not.
+     */
+    private int sceneOcclusionFrames;
     private int sceneDepthTexture;
     private int sceneDepthFbo;
     private int sceneCopyTexture;
@@ -5213,6 +5243,23 @@ final class VkTerrainRenderer {
         GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, sceneDepthFbo);
         GL30C.glFramebufferTexture2D(GL30C.GL_FRAMEBUFFER, GL30C.GL_DEPTH_ATTACHMENT,
                 GL11C.GL_TEXTURE_2D, sceneDepthTexture, 0);
+        // Depth only, and said out loud. A framebuffer object starts life
+        // drawing to colour attachment zero whether or not it has one, and by
+        // the rules a target named as a draw buffer and not attached makes the
+        // whole thing incomplete — so this said nothing and was incomplete for
+        // its entire existence, which makes the blit below undefined rather
+        // than merely empty. The depth target on the other side of this file
+        // already carries this line and the comment explaining it; this one is
+        // the copy that never got it.
+        //
+        // The order matters more than it looks: asking whether the target is
+        // complete before saying this would have been answered "no" on every
+        // driver alive, and standing the effect down everywhere would have
+        // looked exactly like curing it on the one card where it misbehaves.
+        GL20C.glDrawBuffers(GL11C.GL_NONE);
+        GL11C.glReadBuffer(GL11C.GL_NONE);
+        boolean sceneTargetsComplete = GL30C.glCheckFramebufferStatus(GL30C.GL_FRAMEBUFFER)
+                == GL30C.GL_FRAMEBUFFER_COMPLETE;
 
         sceneCopyTexture = GL11C.glGenTextures();
         GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, sceneCopyTexture);
@@ -5226,6 +5273,14 @@ final class VkTerrainRenderer {
         GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, sceneCopyFbo);
         GL30C.glFramebufferTexture2D(GL30C.GL_FRAMEBUFFER, GL30C.GL_COLOR_ATTACHMENT0,
                 GL11C.GL_TEXTURE_2D, sceneCopyTexture, 0);
+        sceneTargetsComplete &= GL30C.glCheckFramebufferStatus(GL30C.GL_FRAMEBUFFER)
+                == GL30C.GL_FRAMEBUFFER_COMPLETE;
+        if (!sceneTargetsComplete) {
+            LOGGER.error("Scene occlusion targets incomplete; the effect is off for this session");
+            destroySceneOcclusionTargets();
+            aoFailed = true;
+            return false;
+        }
 
         if (sceneOcclusionProgram == 0) {
             sceneOcclusionProgram = buildQuadProgram(
