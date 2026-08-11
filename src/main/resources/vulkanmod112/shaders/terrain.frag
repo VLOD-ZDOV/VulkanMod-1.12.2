@@ -1646,7 +1646,24 @@ void main() {
                 // the refracted sample is really behind the surface, and the
                 // depth of the surface is `here`. The difference between
                 // them, in blocks, is how much water is in the way.
-                float through = max(distanceOf(behindDepth) - distanceOf(here), 0.0);
+                // Straight down through the surface, not along the refracted
+                // line. These differ by more than a nicety at a shore: the
+                // shift is taken from the wave normal, a flat-topped water
+                // block carries very nearly one normal across its whole face,
+                // so an entire block's worth of fragments shift together and
+                // either land on the bed or clear the shore altogether. When
+                // they clear it they read the far bank or the sky, the water
+                // is reported as hundreds of blocks thick, absorption
+                // saturates, and shallow water over sand comes out the colour
+                // of an ocean — in flat rectangles with block-straight edges,
+                // because the whole face flipped at once.
+                //
+                // The refracted sample is still the right thing to *look*
+                // through, and is kept for that. It is the wrong thing to
+                // measure with: how much water is above this bed is a question
+                // about the column under this pixel.
+                float straightDepth = textureLod(sceneDepth, uv, 0.0).r;
+                float through = max(distanceOf(straightDepth) - distanceOf(here), 0.0);
                 // Per block, and each channel its own. Not physical constants:
                 // the sea in this game is a handful of blocks deep, so the real
                 // ones would do nothing at all over that distance.
