@@ -52,6 +52,18 @@ public final class VulkanPresets {
         int ambientOcclusion;
         int clouds;
         boolean entityShadows;
+        /**
+         * Whether creatures are drawn here rather than by the game.
+         *
+         * A preset has to have an opinion on this one, and until it did the
+         * shipped default reached every preset including the two that exist to
+         * give things up. It costs the processor — the pose is worked out there
+         * instead of on the card — and returns no frames at all; what it buys
+         * is a shadow of the creature's own shape and a creature that exists in
+         * this renderer's depth. Both of those are things the fast presets have
+         * already switched off, so on them it is cost without purchase.
+         */
+        boolean vulkanEntities;
         int mipmap;
         /** Never raised above what the player chose. */
         int renderDistanceCap;
@@ -146,6 +158,7 @@ public final class VulkanPresets {
         look.ambientOcclusion = 2;
         look.clouds = 2;
         look.entityShadows = true;
+        look.vulkanEntities = true;
         look.mipmap = 4;
         // Twelve, and a cap rather than an exact number.
         //
@@ -223,6 +236,7 @@ public final class VulkanPresets {
         look.ambientOcclusion = 2;
         look.clouds = 2;
         look.entityShadows = true;
+        look.vulkanEntities = true;
         look.mipmap = 4;
         look.renderDistanceCap = 32;
         look.fpsLimit = 260;
@@ -251,6 +265,7 @@ public final class VulkanPresets {
         look.ambientOcclusion = 0;
         look.clouds = 0;
         look.entityShadows = false;
+        look.vulkanEntities = false;
         look.mipmap = 4;
         look.renderDistanceCap = 16;
         look.fpsLimit = 260;
@@ -297,6 +312,7 @@ public final class VulkanPresets {
         look.ambientOcclusion = 0;
         look.clouds = 0;
         look.entityShadows = false;
+        look.vulkanEntities = false;
         look.mipmap = 4;
         look.renderDistanceCap = 8;
         look.fpsLimit = 60;
@@ -334,6 +350,7 @@ public final class VulkanPresets {
         VulkanConfig.setScreenReflections(look.screenReflections);
         VulkanConfig.setAmbientOcclusion(look.shaderAmbientOcclusion);
         VulkanConfig.setAoRadius(look.aoRadius);
+        VulkanConfig.setVulkanEntities(look.vulkanEntities);
         VulkanConfig.setMaterialTags(look.materialTags);
         VulkanConfig.setDynamicLights(look.dynamicLights);
         VulkanConfig.setSceneTone(look.sceneTone);
