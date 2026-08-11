@@ -1261,8 +1261,12 @@ public final class VulkanConfig {
         setTileEntityDistance(DEF_TILE_ENTITY_DISTANCE);
         setAnimationsEnabled(DEF_ANIMATIONS);
         setBackgroundFpsLimit(DEF_BACKGROUND_FPS);
-        setUltraLogEnabled(DEF_ULTRA_LOG);
-        setUltraLogSeconds(DEF_ULTRA_LOG_SECONDS);
+        // Ultra logging is deliberately not in this list. It changes nothing
+        // about the picture — it is the instrument somebody is holding while
+        // they work through the presets — and a reset that silently puts the
+        // instrument down leaves the next hour of testing producing a file
+        // that stops where the interesting part starts. The switch is on the
+        // same screen for anyone who wants it off.
         setDepthBlitEnabled(DEF_DEPTH_BLIT);
         setCullingEnabled(DEF_CULLING);
         setFlatBlockColours(false);

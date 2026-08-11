@@ -2115,6 +2115,9 @@ final class VkTerrainRenderer {
             sb.append(String.format("%.0f%% at %.0f%% warmth, %d frames graded, target %dx%d",
                     toneStrength * 100.0f, (toneWarmth + 1.0f) * 50.0f, toneFrames,
                     toneWidth, toneHeight));
+            if (toneProbe != null) {
+                sb.append("\n    centre pixel: ").append(toneProbe);
+            }
             toneFrames = 0;
         }
         sb.append('\n');
@@ -5413,6 +5416,23 @@ final class VkTerrainRenderer {
         GL11C.glDisable(GL11C.GL_BLEND);
         GL11C.glDepthMask(false);
 
+        // One frame, a few seconds in, this pass says what it was given and
+        // what it left. Three numbers from the middle of the screen: the frame
+        // as it arrived, the copy this pass will read, and the frame after the
+        // grading has been written over it.
+        //
+        // It is here because this is where the argument keeps stopping. The
+        // occlusion pass upstream reports that it shaded two and a half
+        // thousand frames with the state it needs, this one reports that it
+        // graded the same number, both copies were accepted, and the world is
+        // black anyway — so every remaining explanation is about the values
+        // rather than about whether the work happened, and no amount of asking
+        // the driver for error codes will produce one. A refused copy has been
+        // asked about for a session and a half; a copy that is accepted and
+        // black has never been asked about at all.
+        boolean probing = toneProbe == null && ++toneProbeFrames > 120;
+        String probeBefore = probing ? probeCentre(prevFbo) : null;
+
         // A copy first, because a texture cannot be read and written at once,
         // and the thing being graded is the very image being drawn into. The
         // hardware blit is cheaper than a pass that only moves pixels.
@@ -5447,6 +5467,8 @@ final class VkTerrainRenderer {
             }
         }
 
+        String probeCopy = probing ? probeCentre(toneFbo) : null;
+
         GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo);
         GL11C.glViewport(0, 0, width, height);
         GL20C.glUseProgram(toneProgram);
@@ -5459,6 +5481,10 @@ final class VkTerrainRenderer {
         GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, toneTexture);
         fullscreenQuad();
         toneFrames++;
+        if (probing) {
+            toneProbe = probeBefore + " -> copy " + probeCopy + " -> after " + probeCentre(prevFbo);
+            LOGGER.info("Scene tone, centre of the frame: {}", toneProbe);
+        }
 
         org.lwjgl.opengl.GL11.glPopAttrib();
         GL20C.glUseProgram(prevProgram);
@@ -5469,6 +5495,34 @@ final class VkTerrainRenderer {
         GL13C.glActiveTexture(prevActive);
         GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, prevTexture);
     }
+
+    /**
+     * One pixel from the middle of a framebuffer, as floats.
+     *
+     * Floats rather than bytes because the frame may be a floating one and the
+     * whole question is whether the numbers in it are sane: read as bytes, a
+     * value of eight would come back as one and a value that is not a number
+     * would come back as nought, which is the answer being looked for and
+     * therefore the last way to ask.
+     */
+    private String probeCentre(int fbo) {
+        try (MemoryStack stack = stackPush()) {
+            java.nio.FloatBuffer px = stack.mallocFloat(4);
+            GL30C.glBindFramebuffer(GL30C.GL_READ_FRAMEBUFFER, fbo);
+            GL11C.glReadPixels(width / 2, height / 2, 1, 1, GL11C.GL_RGBA, GL11C.GL_FLOAT, px);
+            float r = px.get(0);
+            float g = px.get(1);
+            float b = px.get(2);
+            String note = (Float.isNaN(r) || Float.isNaN(g) || Float.isNaN(b)) ? " NOT-A-NUMBER"
+                    : (Float.isInfinite(r) || Float.isInfinite(g) || Float.isInfinite(b))
+                            ? " INFINITE" : "";
+            return String.format("%.3f/%.3f/%.3f a%.2f%s", r, g, b, px.get(3), note);
+        }
+    }
+
+    /** Printed once a session, a couple of seconds after the pass starts. */
+    private String toneProbe;
+    private int toneProbeFrames;
 
     boolean isSceneToneAvailable() {
         return !toneFailed;
