@@ -282,9 +282,10 @@ public final class VulkanPresets {
         // left switched on — it is what flat colours are made of. Turning
         // mipmaps off is the obvious-looking way to make textures cheap and it
         // does the reverse: distant chunks then read the full-size atlas at
-        // random, which is what a texture cache is worst at. The last level of
-        // that same chain has each sprite reduced to one texel, so pinning the
-        // sampler there makes every face a single read.
+        // random, which is what a texture cache is worst at. The sampler is
+        // pinned near the end of that same chain instead, where a sprite is a
+        // handful of texels and the whole atlas fits in cache — one level short
+        // of the end, because at the end an ore block averages out into stone.
         look.flatBlockColours = true;
         // Two, not three. Frames in flight buy the processor room when it is
         // the thing holding the frame up — on this class of machine the card
