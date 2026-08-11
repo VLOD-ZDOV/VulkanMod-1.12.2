@@ -755,6 +755,23 @@ float lightBlocked(vec3 normal, vec3 toSource, float distance) {
  */
 vec3 faceNormal() {
     vec3 n = normalize(cross(dFdx(vRelative), dFdy(vRelative)));
+    // Turned to face the eye before anything is asked of it.
+    //
+    // The sign of a cross product of two screen-space derivatives follows the
+    // winding of the triangle as it landed on screen, not anything about the
+    // world. For a block face that costs nothing, because a face is only ever
+    // seen from the front. Foliage is drawn with culling off and is seen from
+    // both: the same blade of grass hands back opposite normals depending on
+    // which side of it the camera is, so it is lit from one direction and then
+    // from the other, and turning round darkens a field that nothing has
+    // happened to. Reported since the first version, and never about the
+    // light, because the light never moved.
+    //
+    // `vRelative` runs from the camera to the fragment, so a normal pointing
+    // the same way as it is pointing away from the eye.
+    if (dot(n, vRelative) > 0.0) {
+        n = -n;
+    }
     // Snapped to the axis it is nearest, and this is the difference between a
     // measurement and an answer.
     //
