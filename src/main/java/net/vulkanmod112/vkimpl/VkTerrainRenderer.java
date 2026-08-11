@@ -2132,6 +2132,9 @@ final class VkTerrainRenderer {
                     .append(sceneDepthUsable ? "ok" : "REFUSED")
                     .append(", colour copy ").append(sceneColourUsable ? "ok" : "REFUSED")
                     .append(showOcclusion ? ", showing the occlusion term alone" : "");
+            if (sceneStateAsFound != null) {
+                sb.append("\n    handed: ").append(sceneStateAsFound);
+            }
             sceneOcclusionFrames = 0;
         }
         sb.append('\n');
@@ -3266,29 +3269,41 @@ final class VkTerrainRenderer {
                 | org.lwjgl.opengl.GL11.GL_COLOR_BUFFER_BIT
                 | org.lwjgl.opengl.GL11.GL_VIEWPORT_BIT
                 | org.lwjgl.opengl.GL11.GL_POLYGON_BIT);
-        GL11C.glViewport(0, 0, width, height);
-        GL11C.glDisable(GL11C.GL_BLEND);
-        GL11C.glDisable(GL11C.GL_CULL_FACE);
-        GL11C.glDisable(GL11C.GL_SCISSOR_TEST);
-        GL11C.glDisable(org.lwjgl.opengl.GL11.GL_ALPHA_TEST);
-        GL11C.glColorMask(false, false, false, false);
-        // Every fragment replaces what is there: this is a copy wearing the
-        // clothes of a draw, so the test that would normally reject the far
-        // half of it has to be told to accept everything.
-        GL11C.glEnable(GL11C.GL_DEPTH_TEST);
-        GL11C.glDepthFunc(GL11C.GL_ALWAYS);
-        GL11C.glDepthMask(true);
+        // Everything between here and the pop is inside a try, and the reason
+        // is what this particular pass borrows. It is the only place in this
+        // renderer that switches colour writes off — it wants the depth of a
+        // full-screen quad and none of its colour — and a colour mask left
+        // shut is not a wrong picture, it is no picture: every draw after it
+        // computes correctly and writes nothing. On top of that this runs only
+        // where the shared depth is not in the game's format, which is to say
+        // on one make of card and not the other, so anything thrown here would
+        // have blackened a world that the machine it was written on could
+        // never reproduce.
+        try {
+            GL11C.glViewport(0, 0, width, height);
+            GL11C.glDisable(GL11C.GL_BLEND);
+            GL11C.glDisable(GL11C.GL_CULL_FACE);
+            GL11C.glDisable(GL11C.GL_SCISSOR_TEST);
+            GL11C.glDisable(org.lwjgl.opengl.GL11.GL_ALPHA_TEST);
+            GL11C.glColorMask(false, false, false, false);
+            // Every fragment replaces what is there: this is a copy wearing the
+            // clothes of a draw, so the test that would normally reject the far
+            // half of it has to be told to accept everything.
+            GL11C.glEnable(GL11C.GL_DEPTH_TEST);
+            GL11C.glDepthFunc(GL11C.GL_ALWAYS);
+            GL11C.glDepthMask(true);
 
-        GL20C.glUseProgram(depthImportProgram);
-        GL20C.glUniform2f(depthImportInvSizeUniform, 1.0f / width, 1.0f / height);
-        org.lwjgl.opengl.GL11.glBegin(org.lwjgl.opengl.GL11.GL_QUADS);
-        org.lwjgl.opengl.GL11.glVertex2f(-1.0f, -1.0f);
-        org.lwjgl.opengl.GL11.glVertex2f(1.0f, -1.0f);
-        org.lwjgl.opengl.GL11.glVertex2f(1.0f, 1.0f);
-        org.lwjgl.opengl.GL11.glVertex2f(-1.0f, 1.0f);
-        org.lwjgl.opengl.GL11.glEnd();
-
-        org.lwjgl.opengl.GL11.glPopAttrib();
+            GL20C.glUseProgram(depthImportProgram);
+            GL20C.glUniform2f(depthImportInvSizeUniform, 1.0f / width, 1.0f / height);
+            org.lwjgl.opengl.GL11.glBegin(org.lwjgl.opengl.GL11.GL_QUADS);
+            org.lwjgl.opengl.GL11.glVertex2f(-1.0f, -1.0f);
+            org.lwjgl.opengl.GL11.glVertex2f(1.0f, -1.0f);
+            org.lwjgl.opengl.GL11.glVertex2f(1.0f, 1.0f);
+            org.lwjgl.opengl.GL11.glVertex2f(-1.0f, 1.0f);
+            org.lwjgl.opengl.GL11.glEnd();
+        } finally {
+            org.lwjgl.opengl.GL11.glPopAttrib();
+        }
         GL30C.glBindFramebuffer(GL30C.GL_DRAW_FRAMEBUFFER, prevDraw);
         GL20C.glUseProgram(prevProgram);
         GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, prevTexture);
@@ -4765,6 +4780,26 @@ final class VkTerrainRenderer {
         int prevFbo = GL11C.glGetInteger(GL30C.GL_FRAMEBUFFER_BINDING);
         int prevTexture = GL11C.glGetInteger(GL11C.GL_TEXTURE_BINDING_2D);
         int prevActive = GL11C.glGetInteger(GL13C.GL_ACTIVE_TEXTURE);
+        // What this pass is handed, recorded once and before anything below
+        // overrides it. There are several ways a fragment can be computed
+        // correctly and never reach the frame — the colour write mask shut,
+        // the stencil test failing, the scissor holding an empty rectangle —
+        // and not one of them raises a GL error or looks any different from
+        // arithmetic that came out zero. A session was spent proving this
+        // pass could not produce black, which was true and did not matter,
+        // because the question was never what it computed.
+        if (sceneStateAsFound == null) {
+            try (MemoryStack stack = stackPush()) {
+                java.nio.ByteBuffer mask = stack.malloc(4);
+                GL11C.glGetBooleanv(GL11C.GL_COLOR_WRITEMASK, mask);
+                sceneStateAsFound = "colour write "
+                        + (mask.get(0) != 0 ? 'r' : '-') + (mask.get(1) != 0 ? 'g' : '-')
+                        + (mask.get(2) != 0 ? 'b' : '-') + (mask.get(3) != 0 ? 'a' : '-')
+                        + ", stencil test " + (GL11C.glIsEnabled(GL11C.GL_STENCIL_TEST) ? "ON" : "off")
+                        + ", scissor " + (GL11C.glIsEnabled(GL11C.GL_SCISSOR_TEST) ? "ON" : "off")
+                        + ", depth test " + (GL11C.glIsEnabled(GL11C.GL_DEPTH_TEST) ? "on" : "off");
+            }
+        }
         try {
             if (!ensureSceneOcclusionTargets()) {
                 return;
@@ -4783,6 +4818,12 @@ final class VkTerrainRenderer {
                 GL11C.glDisable(GL11C.GL_DEPTH_TEST);
                 GL11C.glDisable(GL11C.GL_BLEND);
                 GL11C.glDepthMask(false);
+                // The two that were left to whoever drew last. Both are saved
+                // by the push above, so this costs a restore that was already
+                // being paid, and both can swallow a full-screen quad whole
+                // while every other thing this pass checks says it is fine.
+                GL11C.glDisable(GL11C.GL_STENCIL_TEST);
+                GL11C.glColorMask(true, true, true, true);
 
                 // The game's depth into a texture, because a renderbuffer
                 // cannot be sampled and the game's is one. A blit does not care
@@ -4905,6 +4946,8 @@ final class VkTerrainRenderer {
      * under suspicion was the one that did not.
      */
     private int sceneOcclusionFrames;
+    /** The pipeline state this pass was handed the first time it ran. */
+    private String sceneStateAsFound;
     private int sceneDepthTexture;
     private int sceneDepthFbo;
     private int sceneCopyTexture;
