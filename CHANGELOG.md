@@ -85,6 +85,56 @@
 
 ### Fixed
 
+- **The world was black on AMD, with the hand and the interface still drawn over it.** One line, and
+  not the line anyone was looking at. `glDrawBuffers` and `glReadBuffer` read like a pair and are
+  not: the first acts on the framebuffer bound for drawing, the second on the one bound for reading.
+  A depth target built only on the draw binding therefore sent its `glReadBuffer(GL_NONE)` to the
+  game's own frame and left it there for the rest of the session. That target only ever writes, so
+  it paid nothing — every later copy taken *out* of the frame was refused instead: the depth for
+  scene occlusion, the colour for it, and the frame for grading. The grading pass writes back what
+  it read, so an empty copy went over the whole world, with the hand surviving because the hand is
+  drawn afterwards. It needed a card with no sampleable 24-bit depth to build that target at all,
+  and a preset that grades to make it visible, which is why it was one make of card on one preset.
+
+- **Grass darkened when you turned round.** The normal a surface is shaded from is measured from two
+  screen-space derivatives, and the sign of that measurement follows how the triangle happened to
+  land on screen. A block face is only ever seen from the front, so it never noticed; foliage is
+  drawn with its back faces kept, and the same blade of grass handed back opposite normals depending
+  on which side of it you stood — lit from one direction, then from the other, with nothing about
+  the light having moved. It now faces the eye before anything is asked of it.
+
+- **Shallow water at a shore was painted the colour of an ocean, in rectangles.** How much water the
+  light came through was measured along the refracted line rather than straight down, and the shift
+  comes from the wave normal — which a flat-topped water block carries almost unchanged across its
+  whole face. So a face's worth of fragments moved together, and at a shore they cleared it
+  entirely, read the far bank or the sky, and reported hundreds of blocks of water. The refracted
+  sample is still what the surface looks through; it is the wrong thing to measure a column with.
+
+- **The glow and the grading passes gave back what they borrowed only on the way out**, rather than
+  on any way out. Both take the attribute stack, the current program, a texture unit and the
+  framebuffer, and the grading pass writes over the whole picture — so anything thrown inside them
+  would have left the next thing to draw using this mod's viewport and blending for the entire
+  frame rather than for a corner of it.
+
+- **Ore looked like stone on the Potato preset.** That preset replaces every face with a colour read
+  from the end of the mip chain, where a sprite is a single texel — and an ore block is stone with
+  specks in it, so iron and stone averaged to the same grey. Losing the ore on the one preset meant
+  for playing on rather than looking at is losing the game. The sampler now stops one level short:
+  four texels instead of one, ore reads as speckled, everything else still reads as a colour, and it
+  is the block's own texture rather than a second one invented for it.
+
+- **Ultra logging was switched off by loading the Stable preset.** It changes nothing about the
+  picture; it is the instrument somebody is holding while they work through the presets, and a reset
+  that quietly puts the instrument down leaves the next hour of testing producing a file that stops
+  where the interesting part starts.
+
+- **The scene occlusion pass said nothing at all in the diagnostics.** Every other effect in that
+  file names itself and how many frames it ran for. The one under suspicion for a black world was
+  the one that did not, so a report from the machine where it happened could not answer whether the
+  pass had even run. It now says that, what it thinks of the two copies it reads, and the pipeline
+  state it was handed — which separates "off" from "on and reading a copy the driver refused",
+  two opposite faults that look identical on screen.
+
 - **Switching the material tags on rebuilt nothing.** What a block is made of is recorded into its
   geometry while the chunk is built, so the world was left half tagged — grass swaying in whatever
   chunks happened to be rebuilt since and standing still in the rest, with the glow, the shading
