@@ -1265,11 +1265,28 @@ final class VkTerrainRenderer {
         // The offsets in the header count pixels from the start of this tick's
         // array; they have to count from the start of everything waiting.
         int pixelsAlready = atlasPendingBytes / 4;
+        int kept = 0;
         for (int i = 0; i < headerCount; i += 6) {
-            System.arraycopy(header, i, atlasPendingHeader, atlasPendingHeaderCount + i, 5);
-            atlasPendingHeader[atlasPendingHeaderCount + i + 5] = header[i + 5] + pixelsAlready;
+            // Into this side's numbering, and dropped rather than remapped when
+            // it lands below the bottom of the mirror. Under flat colours the
+            // full-size levels are not in the image at all, so a copy still
+            // carrying the game's level number would write into whichever level
+            // happens to hold that number here — the wrong sprite, at the wrong
+            // size, once a tick.
+            int level = header[i] - atlasBaseLevel;
+            if (level < 0) {
+                continue;
+            }
+            int at = atlasPendingHeaderCount + kept;
+            atlasPendingHeader[at] = level;
+            atlasPendingHeader[at + 1] = header[i + 1];
+            atlasPendingHeader[at + 2] = header[i + 2];
+            atlasPendingHeader[at + 3] = header[i + 3];
+            atlasPendingHeader[at + 4] = header[i + 4];
+            atlasPendingHeader[at + 5] = header[i + 5] + pixelsAlready;
+            kept += 6;
         }
-        atlasPendingHeaderCount += headerCount;
+        atlasPendingHeaderCount += kept;
         atlasPendingBytes += bytes;
         atlasTicksQueued++;
     }
@@ -1482,6 +1499,10 @@ final class VkTerrainRenderer {
 
     synchronized void updateAtlas(int atlasGlId) {
         ctx.ensureGlCapabilities();
+        // Remembered so that the flat-colour switch can rebuild this copy on
+        // the spot. It decides how much of the chain is mirrored, which is not
+        // something a sampler can be told after the fact.
+        this.atlasGlId = atlasGlId;
         destroyAtlas();
         // The atlas is rebuilt on a resource reload, and so is every other
         // sheet the game owns: their GL names are handed out again from
@@ -1515,27 +1536,72 @@ final class VkTerrainRenderer {
                 atlasWidth, atlasHeight, atlasLevels);
     }
 
-    /** Reads level 0 plus every mip level the bound GL atlas actually has. */
+    /**
+     * Reads the mip levels of the bound GL atlas that this renderer will
+     * actually sample, and only those.
+     *
+     * Normally that is all of them. Under flat colours it is the last two: the
+     * sampler is pinned near the end of the chain, so everything below is
+     * copied into video memory to be read exactly never. On a bare game that
+     * waste is a megabyte and not worth a line of code; on a three-hundred-mod
+     * pack the atlas is 8192x4096 and the chain is 179 MB, of which the two
+     * levels in use are 2.6. The rest is 176 MB held against a machine whose
+     * whole reason for being on this preset is that it has none to spare —
+     * and on the integrated graphics that preset is written for, that memory
+     * is the system's, taken from the game rather than from a card.
+     *
+     * The count is taken first, by asking each level its width and reading no
+     * pixels, because the point is not to pull the full-size level across at
+     * all — not to pull it and then drop it.
+     */
     private ByteBuffer[] readAtlasLevels() {
-        java.util.List<ByteBuffer> levels = new java.util.ArrayList<ByteBuffer>();
+        int levelCount = 0;
         int w = atlasWidth;
         int h = atlasHeight;
-        int level = 0;
         while (w >= 1 && h >= 1) {
-            if (level > 0
-                    && GL11C.glGetTexLevelParameteri(GL11C.GL_TEXTURE_2D, level, GL11C.GL_TEXTURE_WIDTH) != w) {
+            if (levelCount > 0
+                    && GL11C.glGetTexLevelParameteri(GL11C.GL_TEXTURE_2D, levelCount,
+                            GL11C.GL_TEXTURE_WIDTH) != w) {
                 break; // mipmaps turned off in video settings, or the chain ends here
             }
-            ByteBuffer pixels = MemoryUtil.memAlloc(w * h * 4);
-            GL11C.glGetTexImage(GL11C.GL_TEXTURE_2D, level, GL11C.GL_RGBA, GL11C.GL_UNSIGNED_BYTE, pixels);
-            levels.add(pixels);
+            levelCount++;
             w /= 2;
             h /= 2;
-            level++;
         }
-        atlasLevels = levels.size();
-        return levels.toArray(new ByteBuffer[0]);
+        // One level short of the end, which is where the sampler sits: at the
+        // very end a sprite is a single texel and an ore block averages into
+        // stone. Two levels is what makes that four texels instead of one.
+        samplerFlatColours = flatBlockColours();
+        atlasBaseLevel = samplerFlatColours ? Math.max(0, levelCount - 2) : 0;
+        atlasLevels = levelCount - atlasBaseLevel;
+        // From here on these are the mirrored image's dimensions rather than
+        // the game's. Nothing that samples cares — texture coordinates are
+        // fractions of the whole sheet either way — and everything that writes
+        // a rectangle into it needs these and not the game's.
+        atlasWidth = Math.max(1, atlasWidth >> atlasBaseLevel);
+        atlasHeight = Math.max(1, atlasHeight >> atlasBaseLevel);
+        ByteBuffer[] levels = new ByteBuffer[atlasLevels];
+        w = atlasWidth;
+        h = atlasHeight;
+        for (int i = 0; i < atlasLevels; i++) {
+            ByteBuffer pixels = MemoryUtil.memAlloc(w * h * 4);
+            GL11C.glGetTexImage(GL11C.GL_TEXTURE_2D, atlasBaseLevel + i,
+                    GL11C.GL_RGBA, GL11C.GL_UNSIGNED_BYTE, pixels);
+            levels[i] = pixels;
+            w = Math.max(1, w / 2);
+            h = Math.max(1, h / 2);
+        }
+        return levels;
     }
+
+    /**
+     * The game's mip level that became level zero of the mirrored atlas.
+     *
+     * Zero unless flat colours trimmed the chain. Anything given a level number
+     * in the game's numbering has to come through this before it means anything
+     * here, and anything below it does not exist on this side at all.
+     */
+    private int atlasBaseLevel;
 
     synchronized void setLightmap(int glTextureId) {
         this.lightmapGlId = glTextureId;
@@ -6376,13 +6442,16 @@ final class VkTerrainRenderer {
                 // many levels there are depends on the pack, and clamping past
                 // the end silently lands on the end, which is exactly the value
                 // this is trying not to use.
-                .minLod(flatBlockColours() ? Math.max(0, atlasLevels - 2) : 0.0f)
+                // Nought in both cases now. Under flat colours the trimming of
+                // the mirror has already done what this used to do — the
+                // levels it clamped away are no longer in the image to clamp —
+                // and two mechanisms for one rule is how they drift apart.
+                .minLod(0.0f)
                 .addressModeU(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
                 .addressModeV(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
                 .addressModeW(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
         LongBuffer pSampler = stack.mallocLong(1);
         check(vkCreateSampler(device(), info, null, pSampler), "vkCreateSampler(atlas)");
-        samplerFlatColours = flatBlockColours();
         return pSampler.get(0);
     }
 
@@ -7120,8 +7189,10 @@ final class VkTerrainRenderer {
         dynamicLightCount = clamped;
     }
 
-    /** What the atlas sampler was built for, so a change to it can be noticed. */
+    /** What the mirrored atlas was built for, so a change to it can be noticed. */
     private boolean samplerFlatColours;
+    /** The game's name for the atlas, kept so the mirror can be rebuilt from it. */
+    private int atlasGlId;
 
     /**
      * Rebuilds the atlas sampler when the flat-colour setting has moved.
@@ -7139,21 +7210,18 @@ final class VkTerrainRenderer {
      * something else rebuilds the sampler.
      */
     private void refreshSamplerIfNeeded() {
-        if (atlasSampler == 0 || samplerFlatColours == flatBlockColours()) {
+        if (atlasImage == 0 || atlasGlId == 0 || samplerFlatColours == flatBlockColours()) {
             return;
         }
-        try (MemoryStack stack = stackPush()) {
-            vkDeviceWaitIdle(device());
-            vkDestroySampler(device(), atlasSampler, null);
-            atlasSampler = createAtlasSampler(stack);
-            // The device is already stopped by the line above, and nothing has
-            // been submitted since. Calling the waiting version here stopped it
-            // a second time in a row for no work in between — the heaviest
-            // synchronisation Vulkan has, twice, on one flick of a switch.
-            writeDescriptors();
-            LOGGER.info("Block texture sampling switched to {}",
-                    flatBlockColours() ? "one flat colour per face" : "the full atlas");
-        }
+        // The whole copy, not the sampler. What the setting decides now is how
+        // much of the game's mip chain is mirrored at all, and an image cannot
+        // grow levels it was not created with any more than a sampler can be
+        // edited. This is the same work a resource pack change does, on a
+        // switch nobody flicks twice a second.
+        updateAtlas(atlasGlId);
+        LOGGER.info("Block texture sampling switched to {}: {} of the atlas' {} mip level(s) mirrored",
+                flatBlockColours() ? "one flat colour per face" : "the full atlas",
+                atlasLevels, atlasLevels + atlasBaseLevel);
     }
 
     /**
