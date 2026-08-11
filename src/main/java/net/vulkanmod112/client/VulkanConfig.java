@@ -353,11 +353,17 @@ public final class VulkanConfig {
     /**
      * Draw creatures through Vulkan instead of letting the game draw them.
      *
-     * Off. This is the newest and largest thing the renderer takes over, it is
-     * the place mods reach into most, and unlike everything before it, it
-     * replaces vanilla's drawing rather than adding to it.
+     * On. It was off while it was the newest and largest thing this renderer
+     * takes over, and it is still the place mods reach into most and the only
+     * one that replaces vanilla's drawing rather than adding to it — but the
+     * split path turned out to cost more than the takeover does. With the game
+     * drawing creatures, the player reaches the shadow passes twice: once as
+     * captured geometry and once as something vanilla drew, and two shadows
+     * over one another leave a rim that reads as a trail of light following
+     * whoever is flying. Handing the drawing over removes the second of the
+     * two, and the trail with it.
      */
-    static final boolean DEF_VULKAN_ENTITIES = false;
+    static final boolean DEF_VULKAN_ENTITIES = true;
     /** A round, warm sun instead of vanilla's square one. */
     static final boolean DEF_ROUND_SUN = false;
     /** A round moon with real phases instead of vanilla's sheet. */
