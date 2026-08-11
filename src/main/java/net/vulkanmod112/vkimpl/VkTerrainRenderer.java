@@ -1661,7 +1661,13 @@ final class VkTerrainRenderer {
         if (layerOrdinal == 2) {
             long t1 = System.nanoTime();
             submitFrame();
+            // Before ours, so that "the world never arrived" and "this
+            // instrument is reading a buffer nobody is drawing into" stop
+            // looking the same. The game has drawn its sky by now, and a sky
+            // is never nothing.
+            probeOnce("the game's own sky, before anything of ours");
             composite();
+            probeOnce("the opaque composite");
             rememberFrame();
             submitCompositeNanos += System.nanoTime() - t1;
             frameCounter++;
@@ -2137,6 +2143,9 @@ final class VkTerrainRenderer {
                     .append(showOcclusion ? ", showing the occlusion term alone" : "");
             if (sceneStateAsFound != null) {
                 sb.append("\n    handed: ").append(sceneStateAsFound);
+            }
+            if (sceneEntryProbe != null) {
+                sb.append("\n    centre on arrival: ").append(sceneEntryProbe);
             }
             sceneOcclusionFrames = 0;
         }
@@ -3203,8 +3212,30 @@ final class VkTerrainRenderer {
                     "vkQueueSubmit(translucent)");
         }
         compositeTranslucent();
+        probeOnce("the translucent composite");
         return true;
     }
+
+    /**
+     * The centre pixel after a named step, once a session.
+     *
+     * The chain of passes over the finished frame has been cleared by
+     * measurement — the first of them is handed a frame that is already
+     * nothing — so the question moved to the two steps that put the world
+     * into that frame, and the same pixel read after each of them says which.
+     */
+    private void probeOnce(String label) {
+        if (++probeTicks < 300 || !probesDone.add(label)) {
+            return;
+        }
+        int fbo = GL11C.glGetInteger(GL30C.GL_FRAMEBUFFER_BINDING);
+        String centre = probeCentre(fbo);
+        GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, fbo);
+        LOGGER.info("Centre of the frame after {}: {} (frame {})", label, centre, fbo);
+    }
+
+    private final java.util.Set<String> probesDone = new java.util.HashSet<String>();
+    private int probeTicks;
 
     /**
      * Copies the depth the game now owns into the shared image, then tells
@@ -4800,8 +4831,20 @@ final class VkTerrainRenderer {
                         + (mask.get(2) != 0 ? 'b' : '-') + (mask.get(3) != 0 ? 'a' : '-')
                         + ", stencil test " + (GL11C.glIsEnabled(GL11C.GL_STENCIL_TEST) ? "ON" : "off")
                         + ", scissor " + (GL11C.glIsEnabled(GL11C.GL_SCISSOR_TEST) ? "ON" : "off")
-                        + ", depth test " + (GL11C.glIsEnabled(GL11C.GL_DEPTH_TEST) ? "on" : "off");
+                        + ", depth test " + (GL11C.glIsEnabled(GL11C.GL_DEPTH_TEST) ? "on" : "off")
+                        + ", frame " + prevFbo;
             }
+        }
+        // The same pixel the grading pass reads, one pass earlier. This is the
+        // first thing in the chain to touch the finished frame, so a centre
+        // that is already nothing here says the world never arrived, and a
+        // centre that holds a colour here and nothing later says one of the
+        // passes between the two threw it away. Nothing else separates those,
+        // and they are repaired in different files.
+        if (sceneEntryProbe == null && ++sceneProbeFrames > 120) {
+            sceneEntryProbe = probeCentre(prevFbo);
+            GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo);
+            LOGGER.info("Frame handed to the scene passes, centre: {}", sceneEntryProbe);
         }
         try {
             if (!ensureSceneOcclusionTargets()) {
@@ -4951,6 +4994,9 @@ final class VkTerrainRenderer {
     private int sceneOcclusionFrames;
     /** The pipeline state this pass was handed the first time it ran. */
     private String sceneStateAsFound;
+    /** The centre pixel as this pass found it, before anything here touched it. */
+    private String sceneEntryProbe;
+    private int sceneProbeFrames;
     private int sceneDepthTexture;
     private int sceneDepthFbo;
     private int sceneCopyTexture;
@@ -5508,8 +5554,36 @@ final class VkTerrainRenderer {
     private String probeCentre(int fbo) {
         try (MemoryStack stack = stackPush()) {
             java.nio.FloatBuffer px = stack.mallocFloat(4);
+            // A value the frame cannot hold, so that "the read did not happen"
+            // and "the pixel really is black" stop reading the same. The first
+            // version of this had zeroes for both and spent an afternoon
+            // reporting a black world that was an unwritten array.
+            px.put(0, -1.0f).put(1, -1.0f).put(2, -1.0f).put(3, -1.0f);
+            // Two things silently swallow this read. A bound pack buffer turns
+            // the array into an offset into that buffer, so the array keeps
+            // whatever it had; and a multisampled frame cannot be read a pixel
+            // at a time at all. Neither says anything unless asked.
+            int prevPack = GL11C.glGetInteger(
+                    org.lwjgl.opengl.GL21C.GL_PIXEL_PACK_BUFFER_BINDING);
+            if (prevPack != 0) {
+                org.lwjgl.opengl.GL15C.glBindBuffer(
+                        org.lwjgl.opengl.GL21C.GL_PIXEL_PACK_BUFFER, 0);
+            }
             GL30C.glBindFramebuffer(GL30C.GL_READ_FRAMEBUFFER, fbo);
+            int samples = GL11C.glGetInteger(GL30C.GL_SAMPLES);
+            while (GL11C.glGetError() != GL11C.GL_NO_ERROR) {
+                // Whatever came before is not what is being asked about.
+            }
             GL11C.glReadPixels(width / 2, height / 2, 1, 1, GL11C.GL_RGBA, GL11C.GL_FLOAT, px);
+            int readError = GL11C.glGetError();
+            if (prevPack != 0) {
+                org.lwjgl.opengl.GL15C.glBindBuffer(
+                        org.lwjgl.opengl.GL21C.GL_PIXEL_PACK_BUFFER, prevPack);
+            }
+            if (readError != GL11C.GL_NO_ERROR || samples > 1 || prevPack != 0) {
+                return "UNREADABLE (GL error 0x" + Integer.toHexString(readError)
+                        + ", " + samples + " samples, pack buffer " + prevPack + ")";
+            }
             float r = px.get(0);
             float g = px.get(1);
             float b = px.get(2);
@@ -8682,6 +8756,9 @@ final class VkTerrainRenderer {
     private void createDepthImportTargets() {
         int prevTexture = GL11C.glGetInteger(GL11C.GL_TEXTURE_BINDING_2D);
         int prevDraw = GL11C.glGetInteger(GL30C.GL_DRAW_FRAMEBUFFER_BINDING);
+        // The read binding as well, because the read buffer is set below and
+        // that setting lands on whichever framebuffer is bound for reading.
+        int prevRead = GL11C.glGetInteger(GL30C.GL_READ_FRAMEBUFFER_BINDING);
         try {
             gameDepthTexture = GL11C.glGenTextures();
             GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, gameDepthTexture);
@@ -8697,7 +8774,22 @@ final class VkTerrainRenderer {
                     GL11C.GL_DEPTH_COMPONENT, GL11C.GL_UNSIGNED_INT, (java.nio.ByteBuffer) null);
 
             glDepthWriteFbo = GL30C.glGenFramebuffers();
-            GL30C.glBindFramebuffer(GL30C.GL_DRAW_FRAMEBUFFER, glDepthWriteFbo);
+            // Both bindings, not just the one being drawn into. The two calls
+            // below are not a pair despite reading like one: glDrawBuffers
+            // lands on the framebuffer bound for drawing and glReadBuffer on
+            // the one bound for reading, so binding only the first sent the
+            // second to whatever was bound for reading — the game's own frame,
+            // whose read buffer it set to none and left there.
+            //
+            // What that costs is not this pass, which never reads. It is every
+            // later copy taken out of the game's frame: the depth for scene
+            // occlusion, the colour for occlusion, the frame for grading. Each
+            // is refused with GL_INVALID_OPERATION, each leaves its target as
+            // it found it, and the grading pass writes what it read back over
+            // the whole world — which is a black world with the hand still on
+            // top of it, on the one preset that grades and the one kind of card
+            // that takes this path at all.
+            GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, glDepthWriteFbo);
             GL30C.glFramebufferTexture2D(GL30C.GL_DRAW_FRAMEBUFFER, GL30C.GL_DEPTH_ATTACHMENT,
                     GL11C.GL_TEXTURE_2D, glDepthTexture, 0);
             // Depth only. Without saying so the target has no colour buffer to
@@ -8722,6 +8814,7 @@ final class VkTerrainRenderer {
             destroyDepthImportTargets();
         } finally {
             GL30C.glBindFramebuffer(GL30C.GL_DRAW_FRAMEBUFFER, prevDraw);
+            GL30C.glBindFramebuffer(GL30C.GL_READ_FRAMEBUFFER, prevRead);
             GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, prevTexture);
         }
     }
