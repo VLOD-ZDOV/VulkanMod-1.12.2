@@ -5420,6 +5420,16 @@ final class VkTerrainRenderer {
         if (!ensureToneTargets(prevFbo, prevTexture)) {
             return;
         }
+        // The last pass over the frame, and the one whose borrowed state costs
+        // most if it is not given back: it writes over the whole picture, so
+        // whoever draws next inherits its viewport, its blending and its
+        // texture unit for everything, not for a corner of the screen. The
+        // early return on a refused copy already had to hand all four back by
+        // hand, which is the sign that the giving back belongs in one place.
+        //
+        // The push stays out here, above the try. Inside it, a throw before the
+        // push had ever run would take the pop below with it and unbalance a
+        // stack that is shared with the game.
         org.lwjgl.opengl.GL11.glPushAttrib(org.lwjgl.opengl.GL11.GL_ENABLE_BIT
                 | org.lwjgl.opengl.GL11.GL_DEPTH_BUFFER_BIT
                 | org.lwjgl.opengl.GL11.GL_COLOR_BUFFER_BIT
@@ -5427,6 +5437,20 @@ final class VkTerrainRenderer {
                 | org.lwjgl.opengl.GL11.GL_CURRENT_BIT
                 | org.lwjgl.opengl.GL11.GL_POLYGON_BIT
                 | org.lwjgl.opengl.GL11.GL_VIEWPORT_BIT);
+        try {
+            toneInner(sceneTexture, prevFbo);
+        } finally {
+            org.lwjgl.opengl.GL11.glPopAttrib();
+            GL20C.glUseProgram(prevProgram);
+            GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo);
+            // The unit first and the binding second — see the same two lines at
+            // the end of the whole-scene occlusion pass.
+            GL13C.glActiveTexture(prevActive);
+            GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, prevTexture);
+        }
+    }
+
+    private void toneInner(int sceneTexture, int prevFbo) {
         GL11C.glDisable(org.lwjgl.opengl.GL11.GL_ALPHA_TEST);
         GL11C.glDisable(GL11C.GL_CULL_FACE);
         GL11C.glDisable(GL11C.GL_SCISSOR_TEST);
@@ -5476,11 +5500,8 @@ final class VkTerrainRenderer {
                         + " tone pass is off for this session — it writes back what it read, and"
                         + " reading an empty copy paints the world black",
                         Integer.toHexString(error));
-                org.lwjgl.opengl.GL11.glPopAttrib();
-                GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo);
-                GL20C.glUseProgram(prevProgram);
-                GL13C.glActiveTexture(prevActive);
-                GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, prevTexture);
+                // Nothing given back by hand here any more: the caller's
+                // finally does all five, on this path and on every other.
                 return;
             }
         }
@@ -5503,15 +5524,6 @@ final class VkTerrainRenderer {
             toneProbe = probeBefore + " -> copy " + probeCopy + " -> after " + probeCentre(prevFbo);
             LOGGER.info("Scene tone, centre of the frame: {}", toneProbe);
         }
-
-        org.lwjgl.opengl.GL11.glPopAttrib();
-        GL20C.glUseProgram(prevProgram);
-        // Both framebuffer targets, because the blit above bound them apart.
-        GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo);
-        // The unit first and the binding second — see the same two lines at the
-        // end of the whole-scene occlusion pass.
-        GL13C.glActiveTexture(prevActive);
-        GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, prevTexture);
     }
 
     /**
@@ -5719,6 +5731,24 @@ final class VkTerrainRenderer {
                 | org.lwjgl.opengl.GL11.GL_CURRENT_BIT
                 | org.lwjgl.opengl.GL11.GL_POLYGON_BIT
                 | org.lwjgl.opengl.GL11.GL_VIEWPORT_BIT);
+        // Split the way the terrain composite is split, and for the same
+        // reason: this borrows the attribute stack, the current program, the
+        // texture unit and the framebuffer, and it was the last full-screen
+        // pass here still handing all four back on the way out rather than on
+        // any way out. Everything else in this chain gives them back from a
+        // finally, and a frame drawn by whoever comes next with this pass's
+        // viewport and blending is not a wrong glow, it is a wrong everything.
+        try {
+            bloomInner(sceneTexture, prevFbo);
+        } finally {
+            org.lwjgl.opengl.GL11.glPopAttrib();
+            GL20C.glUseProgram(prevProgram);
+            GL13C.glActiveTexture(prevActive);
+            GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, prevFbo);
+        }
+    }
+
+    private void bloomInner(int sceneTexture, int prevFbo) {
         GL11C.glDisable(org.lwjgl.opengl.GL11.GL_ALPHA_TEST);
         GL11C.glDisable(GL11C.GL_CULL_FACE);
         GL11C.glDisable(GL11C.GL_SCISSOR_TEST);
@@ -5815,10 +5845,6 @@ final class VkTerrainRenderer {
         GL13C.glActiveTexture(GL13C.GL_TEXTURE0);
         GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, bloomTexture[0]);
         fullscreenQuad();
-
-        org.lwjgl.opengl.GL11.glPopAttrib();
-        GL20C.glUseProgram(prevProgram);
-        GL13C.glActiveTexture(prevActive);
     }
 
     private void fullscreenQuad() {
