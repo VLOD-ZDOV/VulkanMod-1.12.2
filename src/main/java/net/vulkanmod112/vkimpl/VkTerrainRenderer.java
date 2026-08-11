@@ -1661,13 +1661,7 @@ final class VkTerrainRenderer {
         if (layerOrdinal == 2) {
             long t1 = System.nanoTime();
             submitFrame();
-            // Before ours, so that "the world never arrived" and "this
-            // instrument is reading a buffer nobody is drawing into" stop
-            // looking the same. The game has drawn its sky by now, and a sky
-            // is never nothing.
-            probeOnce("the game's own sky, before anything of ours");
             composite();
-            probeOnce("the opaque composite");
             rememberFrame();
             submitCompositeNanos += System.nanoTime() - t1;
             frameCounter++;
@@ -3212,30 +3206,8 @@ final class VkTerrainRenderer {
                     "vkQueueSubmit(translucent)");
         }
         compositeTranslucent();
-        probeOnce("the translucent composite");
         return true;
     }
-
-    /**
-     * The centre pixel after a named step, once a session.
-     *
-     * The chain of passes over the finished frame has been cleared by
-     * measurement — the first of them is handed a frame that is already
-     * nothing — so the question moved to the two steps that put the world
-     * into that frame, and the same pixel read after each of them says which.
-     */
-    private void probeOnce(String label) {
-        if (++probeTicks < 300 || !probesDone.add(label)) {
-            return;
-        }
-        int fbo = GL11C.glGetInteger(GL30C.GL_FRAMEBUFFER_BINDING);
-        String centre = probeCentre(fbo);
-        GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, fbo);
-        LOGGER.info("Centre of the frame after {}: {} (frame {})", label, centre, fbo);
-    }
-
-    private final java.util.Set<String> probesDone = new java.util.HashSet<String>();
-    private int probeTicks;
 
     /**
      * Copies the depth the game now owns into the shared image, then tells
