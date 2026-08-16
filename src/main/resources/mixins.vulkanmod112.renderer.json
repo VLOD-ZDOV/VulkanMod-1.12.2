@@ -27,6 +27,7 @@
     "RebuildNearMixin",
     "FrustumTestMixin",
     "EntityBrightnessMixin",
+    "FogDistanceMixin",
     "ParticleBrightnessMixin",
     "ParticleRenderMixin",
     "ModelBoxAccessor",

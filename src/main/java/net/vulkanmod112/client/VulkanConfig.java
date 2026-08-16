@@ -477,6 +477,15 @@ public final class VulkanConfig {
      */
     static final int DEF_HEIGHT_FOG_DEPTH = 24;
     /**
+     * How far the game's own distance fog reaches, as a percentage of vanilla.
+     *
+     * A hundred is untouched. Above it the world stays clear further out, which
+     * is what anybody raising their render distance actually wanted — vanilla
+     * ties the fog to the distance, so twice the chunks arrive wrapped in twice
+     * the haze and look no further away than before.
+     */
+    static final int DEF_FOG_DISTANCE = 100;
+    /**
      * How much of a water surface turns into a reflection of the sky as you
      * look along it, in percent.
      *
@@ -628,6 +637,7 @@ public final class VulkanConfig {
     private static int directionalLight = DEF_DIRECTIONAL_LIGHT;
     private static int heightFog = DEF_HEIGHT_FOG;
     private static int heightFogDepth = DEF_HEIGHT_FOG_DEPTH;
+    private static int fogDistance = DEF_FOG_DISTANCE;
     private static int waterReflection = DEF_WATER_REFLECTION;
     private static int waterWaves = DEF_WATER_WAVES;
     private static int foliageSway = DEF_FOLIAGE_SWAY;
@@ -1167,6 +1177,12 @@ public final class VulkanConfig {
                 DEF_AO_RADIUS, 1, 6,
                 "How far a corner's shadow reaches, in blocks. Larger is softer and spreads "
                         + "further from the seam; smaller keeps the shading tight against it.");
+        fogDistance = config.getInt("fogDistance", CATEGORY_GENERAL, DEF_FOG_DISTANCE, 1, 400,
+                "How far the game's own distance fog reaches, as a percentage of what the game "
+                        + "chose. Raising it is what a raised render distance was for: vanilla "
+                        + "ties the haze to the distance, so more chunks arrive wrapped in more of "
+                        + "it and look no further away than before. Fog that tells you something "
+                        + "— blindness, being under water or in lava — is never rescaled.");
         fogEnabled = config.getBoolean("fog", CATEGORY_GENERAL, DEF_FOG,
                 "Fade Vulkan terrain into the distance the way the rest of the scene already does. "
                         + "Off leaves the world ending in a hard edge, which is a little faster.");
@@ -1273,6 +1289,7 @@ public final class VulkanConfig {
         // instrument down leaves the next hour of testing producing a file
         // that stops where the interesting part starts. The switch is on the
         // same screen for anyone who wants it off.
+        setFogDistance(DEF_FOG_DISTANCE);
         setDepthBlitEnabled(DEF_DEPTH_BLIT);
         setCullingEnabled(DEF_CULLING);
         setFlatBlockColours(false);
@@ -2035,6 +2052,16 @@ public final class VulkanConfig {
 
     public static int getHeightFogDepth() {
         return heightFogDepth;
+    }
+
+    public static int getFogDistance() {
+        return fogDistance;
+    }
+
+    public static void setFogDistance(int value) {
+        fogDistance = value;
+        store(CATEGORY_GENERAL, "fogDistance", value);
+        applySystemProperties();
     }
 
     public static void setHeightFogDepth(int value) {

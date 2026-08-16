@@ -1720,6 +1720,34 @@ final class VulkanOptions {
                                         VulkanConfig.setHeightFogDepth(value);
                                     }
                                 }),
+                        new VRangeOption("Fog Distance",
+                                "How far the game's own distance fog reaches, against what the "
+                                        + "game chose. This is what a raised render distance was "
+                                        + "for: vanilla ties the haze to the distance, so twice the "
+                                        + "chunks arrive wrapped in twice the fog and the horizon "
+                                        + "looks no further away than it did. Below a hundred does "
+                                        + "the opposite and closes the world in, down to one per "
+                                        + "cent, where the haze is against your face. Fog that is "
+                                        + "telling you something rather than showing you distance "
+                                        + "— blindness, being under water, being in lava — is never "
+                                        + "touched by this. It moves the fog for the whole scene "
+                                        + "and not only for this renderer's blocks: the terrain "
+                                        + "shader reads the game's fog rather than deciding its "
+                                        + "own, exactly so the two cannot disagree.",
+                                Cost.of(Level.NONE, Level.NONE, Level.NONE),
+                                null,
+                                1, 400, 1, "%", null,
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getFogDistance();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setFogDistance(value);
+                                    }
+                                }),
                         new VRangeOption("Dynamic Light Distance",
                                 "How far away a light source may be and still be drawn, in blocks. "
                                         + "This is not how far the light reaches — that comes from "
