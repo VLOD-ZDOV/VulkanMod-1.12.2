@@ -1102,6 +1102,23 @@ final class VulkanOptions {
                                     }
                                 })),
                 new VOptionBlock("Diagnostics",
+                        new VActionOption("Class Patches",
+                                "Which parts of this mod are allowed to rewrite the game's code, "
+                                        + "and which of them failed. A patch that cannot be applied "
+                                        + "stops the class it aimed at from loading at all, and the "
+                                        + "crash that follows names a vanilla class rather than "
+                                        + "this mod — so a group whose patch fails is switched off "
+                                        + "and listed here instead. This is also the quickest way "
+                                        + "to find out whether a fault is ours: turn one group off, "
+                                        + "restart, and see. Nothing here changes anything until "
+                                        + "the game is started again.",
+                                Cost.FREE, "Open",
+                                new VActionOption.Action() {
+                                    @Override
+                                    public void run() {
+                                        mc.displayGuiScreen(new GuiVulkanPatches(mc.currentScreen));
+                                    }
+                                }),
                         new VSwitchOption("Ultra Logging",
                                 "Write everything about the renderer, your mods and your settings to "
                                         + "logs/vulkanmod112-diagnostics.log. Turn this on before "

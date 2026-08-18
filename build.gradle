@@ -427,6 +427,42 @@ tasks.register('generateMixinJson') {
     }
 }
 
+/**
+ * Every mixin listed in a config has to be filed under a patch group.
+ *
+ * A group is what the settings screen can switch off, and VulkanPatchGroups
+ * files anything it does not recognise under "core", which is never switched
+ * off. That is the safe way to be wrong, but it is silently wrong: a new mixin
+ * added and not filed would simply never be switchable, and nobody would find
+ * out until somebody needed to turn its feature off and could not. So the two
+ * lists are compared here rather than trusted to stay in step.
+ */
+tasks.register('verifyPatchGroups') {
+    group 'verification'
+    description 'Checks that every mixin in a config is filed under a patch group.'
+    def configs = fileTree('src/main/resources').matching { include 'mixins.vulkanmod112*.json' }
+    def table = file('src/main/java/net/vulkanmod112/core/VulkanPatchGroups.java')
+    inputs.files configs
+    inputs.file table
+    doLast {
+        def filed = (table.text =~ /"([A-Za-z0-9_]+(?:Mixin|Accessor))"/).collect { it[1] } as Set
+        def listed = [] as Set
+        configs.each { config ->
+            listed.addAll((config.text =~ /"([A-Za-z0-9_$.]+(?:Mixin|Accessor))"/).collect { it[1] })
+        }
+        def unfiled = (listed - filed).toSorted()
+        def stale = (filed - listed).toSorted()
+        if (!unfiled.isEmpty()) {
+            throw new GradleException("Not filed under a patch group in VulkanPatchGroups: ${unfiled.join(', ')}")
+        }
+        if (!stale.isEmpty()) {
+            throw new GradleException("Filed under a patch group but in no mixin config: ${stale.join(', ')}")
+        }
+    }
+}
+
+tasks.named('check').configure { dependsOn 'verifyPatchGroups' }
+
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
     if (propertyBool('use_modern_java_syntax')) {

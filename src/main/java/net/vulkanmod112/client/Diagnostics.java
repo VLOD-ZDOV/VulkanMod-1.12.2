@@ -318,6 +318,18 @@ public final class Diagnostics {
         }
         out.println();
 
+        // Which of this mod's patch groups did not go in. Nearly always empty,
+        // and worth a line even then: a report saying an effect does nothing is
+        // answered here before anybody reads a shader.
+        java.util.List<String> skipped = net.vulkanmod112.core.VulkanPatchState.skippedThisLaunch();
+        if (!skipped.isEmpty()) {
+            out.println("class patches not installed:");
+            for (String line : skipped) {
+                out.println("  " + line);
+            }
+            out.println();
+        }
+
         out.println("opengl:");
         out.println("  renderer: " + safeGlString(org.lwjgl.opengl.GL11.GL_RENDERER));
         out.println("  vendor: " + safeGlString(org.lwjgl.opengl.GL11.GL_VENDOR));

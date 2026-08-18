@@ -2,6 +2,7 @@ package net.vulkanmod112.core;
 
 import net.minecraft.launchwrapper.Launch;
 import net.minecraftforge.fml.relauncher.IFMLLoadingPlugin;
+import org.spongepowered.asm.mixin.Mixins;
 import zone.rong.mixinbooter.IEarlyMixinLoader;
 
 import java.io.File;
@@ -56,6 +57,9 @@ public class VulkanCorePlugin implements IFMLLoadingPlugin, IEarlyMixinLoader {
 
     @Override
     public List<String> getMixinConfigs() {
+        // Before any config, so that a patch which fails while the very first
+        // one is prepared is still caught and written down.
+        Mixins.registerErrorHandlerClass(VulkanMixinErrorHandler.class.getName());
         List<String> configs = new ArrayList<String>();
         configs.add("mixins.vulkanmod112.json");
         String replacement = rendererReplacement();

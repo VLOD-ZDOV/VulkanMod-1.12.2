@@ -1,5 +1,6 @@
 {
   "package": "net.vulkanmod112.mixin",
+  "plugin": "net.vulkanmod112.core.VulkanMixinGate",
   "required": true,
   "refmap": "mixins.vulkanmod112.refmap.json",
   "target": "@env(DEFAULT)",
