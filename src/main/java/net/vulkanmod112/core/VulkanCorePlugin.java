@@ -32,7 +32,15 @@ public class VulkanCorePlugin implements IFMLLoadingPlugin, IEarlyMixinLoader {
             "optifine.OptiFineForgeTweaker",
             "optifine.OptiFineTweaker",
             "shadersmod.client.Shaders",
-            "shadersmodcore.transform.SMCClassTransformer"
+            "shadersmodcore.transform.SMCClassTransformer",
+            // Nothirium rewrites the chunk rendering engine, and Vulcanizator
+            // is a second Vulkan renderer: it patches ChunkRenderContainer for
+            // its own terrain and Display.update for its own presentation.
+            // Both were found in one crash report alongside this mod. Two
+            // renderers cannot own the terrain, and two of them cannot own the
+            // swapchain at all.
+            "meldexun.nothirium.mc.asm.NothiriumPlugin",
+            "net.vulkanmod.legacy.core.VulkanCorePlugin"
     };
     /**
      * Jar-name fragments of mods that replace the terrain renderer.
@@ -48,6 +56,7 @@ public class VulkanCorePlugin implements IFMLLoadingPlugin, IEarlyMixinLoader {
      */
     private static final String[] RENDERER_JAR_MARKERS = {
             "optifine", "shadersmod", "celeritas", "actinium",
+            "nothirium", "vulcanizator",
     };
     /**
      * Comma-separated extra jar-name fragments, for renderer replacements that

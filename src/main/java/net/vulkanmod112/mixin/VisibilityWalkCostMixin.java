@@ -75,8 +75,33 @@ public abstract class VisibilityWalkCostMixin implements SeedFacings {
      * whole point: the special cases around being sealed inside opaque blocks
      * and around spectator mode are easy to get wrong when rewritten and hard
      * to notice when broken.
+     *
+     * <h2>Why this one is allowed to find nothing</h2>
+     *
+     * Because there is nothing to do when it does. This replaces a call that
+     * copies an array with a read of the shared one, and the only way the call
+     * can be missing is that somebody already replaced it — this exact swap is
+     * a stock optimisation, and at least one widely used coremod performs it on
+     * every class it touches, announcing itself in the log as
+     * {@code Transforming EnumFacing::values() to EnumFacing::VALUES}. That
+     * runs before mixins do, so by the time this is applied the array copy is
+     * gone and this redirect has no call site left to redirect.
+     *
+     * Required, that reads as a crash. Not merely a crash in this class: a
+     * mixin that fails takes its target class down with it, so the game then
+     * reports {@code NoClassDefFoundError} on {@code RenderGlobal} — a vanilla
+     * class, naming neither this mod nor the reason. A pack lost its whole
+     * launch to an optimisation that had already been applied for us.
+     *
+     * So: not required. If the call is absent, what this wanted is already
+     * true. Mixin still logs one line saying it found nothing, which is the
+     * right amount of noise for "somebody beat us to it".
+     *
+     * This reasoning does not extend to the other injections here. They change
+     * what the walk computes rather than what it allocates, and one of those
+     * missing is a real fault that should be loud.
      */
-    @Redirect(method = "setupTerrain",
+    @Redirect(method = "setupTerrain", require = 0,
             at = @At(value = "INVOKE",
                     target = "Lnet/minecraft/util/EnumFacing;values()[Lnet/minecraft/util/EnumFacing;"))
     private EnumFacing[] vulkanmod112$sharedFacings() {
