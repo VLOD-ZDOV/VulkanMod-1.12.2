@@ -825,6 +825,13 @@ final class VkTerrainRenderer {
      */
     private float contactShadows;
     /**
+     * How much a creature's own faces shade themselves against the sun.
+     *
+     * Separate from every other shadow setting because it is not a shadow: it
+     * asks which way a face is turned, not what stands between it and the sun.
+     */
+    private float creatureLight;
+    /**
      * How dark the shadow of the game's own clouds may go on the world.
      *
      * Rides the occlusion pass for the same reason the contact shadows do,
@@ -991,6 +998,7 @@ final class VkTerrainRenderer {
     private final int[] compositeInvSizeUniforms = {-1, -1};
     /** Diagnostic: draw the occlusion on its own instead of applying it. */
     private boolean showOcclusion;
+    private boolean showCreatureLight;
     /**
      * Copying depth with glBlitFramebuffer instead of writing gl_FragDepth
      * lets the composite quad keep early-Z and skips a per-pixel depth export.
@@ -2967,7 +2975,18 @@ final class VkTerrainRenderer {
         // constants. Set 1 is the one that changes between batches.
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, spritePipelineLayout, 0,
                 stack.longs(drawDescriptorSets[slot * BATCHES_PER_FRAME + LAYER_TRANSLUCENT]), null);
-        ByteBuffer push = stack.calloc(16);
+        ByteBuffer push = stack.calloc(32);
+        // Everything in here except the alpha cutoff is the same for every
+        // batch of the call, so it is written once rather than per batch.
+        push.putFloat(4, creatures ? 1.0f : 0.0f);
+        push.putFloat(8, showCreatureLight ? 1.0f : 0.0f);
+        push.putFloat(16, sunDirection[0]);
+        push.putFloat(20, sunDirection[1]);
+        push.putFloat(24, sunDirection[2]);
+        // Faded out with the sun itself. Below the horizon there is no sky
+        // light left to shade, and holding the term on through dusk makes a
+        // creature's shading outlive the reason for it.
+        push.putFloat(28, creatureLight * Math.max(0.0f, Math.min(1.0f, sunDirection[1] * 5.0f)));
         // One allocation, reused: the stack frame is not popped until the whole
         // pass has been recorded, and a batch list can be thousands long.
         LongBuffer setHandle = stack.mallocLong(1);
@@ -7101,6 +7120,9 @@ final class VkTerrainRenderer {
         bloomStrength = clampPercent(intProperty("vulkanmod112.bloom", 0));
         aoStrength = clampPercent(intProperty("vulkanmod112.ambientOcclusion", 0));
         contactShadows = clampPercent(intProperty("vulkanmod112.contactShadows", 0));
+        creatureLight = clampPercent(intProperty("vulkanmod112.creatureLight", 0));
+        showCreatureLight = Boolean.parseBoolean(
+                System.getProperty("vulkanmod112.showCreatureLight", "false"));
         cloudShadows = clampPercent(intProperty("vulkanmod112.cloudShadows", 0));
         godRays = clampPercent(intProperty("vulkanmod112.godRays", 0));
         hdrFrame = Boolean.parseBoolean(
@@ -7894,7 +7916,13 @@ final class VkTerrainRenderer {
         VkPushConstantRange.Buffer pushRange = VkPushConstantRange.calloc(1, stack);
         pushRange.get(0)
                 .stageFlags(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
-                .offset(0).size(16);
+                // Two vec4: the per-batch parameters, and where the sun is.
+                // The sun could have come from the frame block this pass
+                // already binds, but reaching it there means declaring every
+                // field in front of it a second time, and a uniform block
+                // written out twice is a layout with two authors. It went wrong
+                // that way once already.
+                .offset(0).size(32);
         VkPipelineLayoutCreateInfo pipelineLayoutInfo = VkPipelineLayoutCreateInfo.calloc(stack)
                 .sType(VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO)
                 .pSetLayouts(stack.longs(descriptorSetLayout, spriteSetLayout))

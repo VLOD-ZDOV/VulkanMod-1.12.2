@@ -387,6 +387,9 @@ public final class VulkanConfig {
     static final int DEF_LEAF_SHADOWS = 0;
     /** How dark a short shadow towards the sun, over the finished picture. */
     static final int DEF_CONTACT_SHADOWS = 0;
+    /** How much a creature's own faces shade themselves against the sun. */
+    static final int DEF_CREATURE_LIGHT = 0;
+    static final boolean DEF_SHOW_CREATURE_LIGHT = false;
     /** How dark the shadow of the game's own clouds may go. */
     static final int DEF_CLOUD_SHADOWS = 0;
     /** How bright the shafts of light from the sun may be. */
@@ -609,6 +612,8 @@ public final class VulkanConfig {
     private static volatile boolean sceneOcclusion = DEF_SCENE_OCCLUSION;
     private static volatile int leafShadows = DEF_LEAF_SHADOWS;
     private static volatile int contactShadows = DEF_CONTACT_SHADOWS;
+    private static volatile int creatureLight = DEF_CREATURE_LIGHT;
+    private static boolean showCreatureLight = DEF_SHOW_CREATURE_LIGHT;
     private static volatile int cloudShadows = DEF_CLOUD_SHADOWS;
     private static volatile int godRays = DEF_GOD_RAYS;
     private static volatile boolean hdrFrame = DEF_HDR_FRAME;
@@ -941,6 +946,16 @@ public final class VulkanConfig {
         contactShadows = config.getInt("contactShadows", CATEGORY_GENERAL,
                 DEF_CONTACT_SHADOWS, 0, 100,
                 "How dark a short shadow cast along the ground towards the sun may go. It is worked out from the depth of the picture rather than from geometry, so whatever drew into that depth casts one - a chest, a creature, another mod's machine - and nothing is taken away from any mod to get it. It can only find something that is itself on the screen and within about a block of the surface, which is why it is a contact shadow and not a shadow: it fills the gap where a thing meets the floor, and the sun's own long shadows are the traced ones. Shares the ambient occlusion pass, so it costs a loop rather than a pass, and turn on Occlusion Over Everything for it to see anything but blocks.");
+        creatureLight = config.getInt("creatureLight", CATEGORY_GENERAL,
+                DEF_CREATURE_LIGHT, 0, 100,
+                "How much a creature shades its own faces against the sun, so that a cow in a lit world is lit like the world instead of flat against it. The face is taken from the geometry being drawn rather than from the depth of the picture, so it is exact and has no outline around it. Only the sky half of the game's own lighting is moved, never the block half - a creature in a cave beside a torch is left exactly as the game drew it, whatever this is set to, and that is by construction rather than by tuning. Needs Draw Creatures in Vulkan.");
+        showCreatureLight = config.getBoolean("showCreatureLight", CATEGORY_ADVANCED,
+                DEF_SHOW_CREATURE_LIGHT,
+                "Paint creatures with the shading term on its own, flat grey, and nothing else. "
+                        + "White is a face turned to the sun and dark grey one turned away. The "
+                        + "world around them is left alone, which is the point: it shows whether "
+                        + "the faces are being found at all, separately from whether the setting "
+                        + "is strong enough to notice.");
         sceneOcclusion = config.getBoolean("sceneOcclusion", CATEGORY_GENERAL, DEF_SCENE_OCCLUSION,
                 "Darken the corners of the whole picture rather than of the blocks alone. The "
                         + "occlusion is otherwise computed inside this mod's own pass, from a "
@@ -1273,6 +1288,8 @@ public final class VulkanConfig {
      */
     public static void resetToDefaults() {
         setContactShadows(DEF_CONTACT_SHADOWS);
+        setCreatureLight(DEF_CREATURE_LIGHT);
+        setShowCreatureLight(DEF_SHOW_CREATURE_LIGHT);
         setCloudShadows(DEF_CLOUD_SHADOWS);
         setGodRays(DEF_GOD_RAYS);
         setHdrFrame(DEF_HDR_FRAME);
@@ -1695,6 +1712,26 @@ public final class VulkanConfig {
     public static void setContactShadows(int value) {
         contactShadows = clamp(value, 0, 100);
         store(CATEGORY_GENERAL, "contactShadows", contactShadows);
+        applySystemProperties();
+    }
+
+    public static int getCreatureLight() {
+        return creatureLight;
+    }
+
+    public static void setCreatureLight(int value) {
+        creatureLight = clamp(value, 0, 100);
+        store(CATEGORY_GENERAL, "creatureLight", creatureLight);
+        applySystemProperties();
+    }
+
+    public static boolean isShowCreatureLight() {
+        return showCreatureLight;
+    }
+
+    public static void setShowCreatureLight(boolean value) {
+        showCreatureLight = value;
+        store(CATEGORY_ADVANCED, "showCreatureLight", value);
         applySystemProperties();
     }
 
@@ -2411,6 +2448,8 @@ public final class VulkanConfig {
         publish("vulkanmod112.sceneOcclusion", Boolean.toString(sceneOcclusion));
         publish("vulkanmod112.leafShadows", Integer.toString(leafShadows));
         publish("vulkanmod112.contactShadows", Integer.toString(contactShadows));
+        publish("vulkanmod112.creatureLight", Integer.toString(creatureLight));
+        publish("vulkanmod112.showCreatureLight", Boolean.toString(showCreatureLight));
         publish("vulkanmod112.cloudShadows", Integer.toString(cloudShadows));
         publish("vulkanmod112.godRays", Integer.toString(godRays));
         publish("vulkanmod112.hdrFrame", Boolean.toString(hdrFrame));

@@ -28,6 +28,13 @@ layout(location = 0) out vec4 vColor;
 layout(location = 1) out vec2 vUV;
 layout(location = 2) out vec2 vLight;
 layout(location = 3) out float vDistance;
+// The camera-relative position itself, not just its length.
+//
+// Creature geometry is shaded from the face it is showing, and the face is the
+// derivative of this across the quad. Particles and weather never read it —
+// a billboard has no face — but it costs one varying and the alternative was a
+// second pipeline for the sake of one vector.
+layout(location = 4) out vec3 vRelative;
 
 void main() {
     // Already relative to the camera when it arrives. The game builds particle
@@ -39,4 +46,5 @@ void main() {
     vUV = inUV;
     vLight = (inLight + 8.0) / 256.0;
     vDistance = length(inPos);
+    vRelative = inPos;
 }

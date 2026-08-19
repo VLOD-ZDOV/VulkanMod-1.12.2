@@ -1187,6 +1187,28 @@ final class VulkanOptions {
                                         VulkanConfig.setShowMaterials(value);
                                     }
                                 }),
+                        new VSwitchOption("Show Creature Light",
+                                "Paint creatures with their own shading term and nothing else, "
+                                        + "flat grey: white is a face turned to the sun, dark "
+                                        + "grey one turned away, and the world around them is "
+                                        + "left as it was. It answers the question the world "
+                                        + "cannot — whether the faces are being found at all — "
+                                        + "separately from whether the setting is strong enough "
+                                        + "to see. A creature that comes out one flat shade here "
+                                        + "is one whose geometry never reached this pass.",
+                                Cost.of(Level.NONE, Level.NONE, Level.NONE),
+                                "Needs Creature Light above zero.",
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return VulkanConfig.isShowCreatureLight();
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        VulkanConfig.setShowCreatureLight(value);
+                                    }
+                                }),
                         new VSwitchOption("Show Ambient Occlusion",
                                 "Draw the corner shading on its own, as flat grey, instead of "
                                         + "applying it to the world. Vanilla darkens the corners "
@@ -2097,6 +2119,34 @@ final class VulkanOptions {
                                     @Override
                                     public void set(boolean value) {
                                         VulkanConfig.setSceneOcclusion(value);
+                                    }
+                                }),
+                        new VRangeOption("Creature Light",
+                                "Let a creature shade its own faces against the sun, so that a "
+                                        + "cow standing in a lit world is lit like the world "
+                                        + "instead of standing flat against it. Everything else "
+                                        + "here shades the ground; this is the one that shades "
+                                        + "what walks on it, and the inconsistency between the "
+                                        + "two is most of why a shaded world can still look "
+                                        + "wrong. The face is taken from the geometry being "
+                                        + "drawn, not from the depth of the picture, so it is "
+                                        + "exact and carries no outline. Only the sky half of the "
+                                        + "game's own lighting is moved and never the block half, "
+                                        + "which is why a creature in a cave beside a torch comes "
+                                        + "out exactly as the game drew it at any setting: its "
+                                        + "sky light is zero there, and this multiplies it.",
+                                Cost.of(Level.NONE, Level.LOW, Level.NONE),
+                                "Needs Draw Creatures in Vulkan, and the sun above the horizon.",
+                                0, 100, 5, "%", "Off",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getCreatureLight();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setCreatureLight(value);
                                     }
                                 }),
                         new VRangeOption("Contact Shadows",
