@@ -196,6 +196,17 @@ public final class SettingsHealth {
         // with our renderer either. It is true with the renderer drawing
         // perfectly and false with it switched off, so folding it in with the
         // rest would put a cause in front of the reader that is not theirs.
+        // And again separate, with a cause of its own: this one is on, the
+        // renderer is drawing, tracing is irrelevant — and it still does
+        // nothing, because the creatures it shades are being drawn by the game.
+        // Exactly the shape of the ninety seconds this file was written for.
+        String creatures = describeCreatureLight();
+        if (creatures != null) {
+            if (out.length() > 0) {
+                out.append("; ");
+            }
+            out.append(creatures);
+        }
         String sky = describeSkyTaken();
         if (sky != null) {
             if (out.length() > 0) {
@@ -210,6 +221,29 @@ public final class SettingsHealth {
      * Everything that lives in the terrain shaders, which means everything that
      * needs the Vulkan renderer to be the one drawing the world.
      */
+    /**
+     * Why creatures are lit exactly as they always were.
+     *
+     * Two ways to be switched on and inert, and they read very differently to
+     * whoever is stuck. Turning the shading up while the game is still drawing
+     * the creatures changes nothing at all; turning the diagnostic on while
+     * the shading is off paints every creature flat white, which looks like a
+     * fault in the diagnostic rather than an empty question.
+     */
+    private static String describeCreatureLight() {
+        boolean lit = VulkanConfig.getCreatureLight() > 0;
+        if (lit && !VulkanConfig.isVulkanEntities()) {
+            return "creature light — the game is still drawing the creatures, and this "
+                    + "shades them in the pass that draws them here; switch on Draw "
+                    + "Creatures in Vulkan";
+        }
+        if (VulkanConfig.isShowCreatureLight() && !lit) {
+            return "show creature light — with the shading itself at zero there is nothing "
+                    + "for it to show, so every creature comes out the same flat white";
+        }
+        return null;
+    }
+
     private static void appendTerrainEffects(StringBuilder out) {
         add(out, "water waves", VulkanConfig.getWaterWaves());
         add(out, "water reflections", VulkanConfig.getWaterReflection());
@@ -233,6 +267,10 @@ public final class SettingsHealth {
         // held-item hooks all find an empty list and return what they were
         // given. This is the one that cost the ninety seconds.
         add(out, "dynamic lights", VulkanConfig.isDynamicLights());
+        // Belongs here for the same reason dynamic lights do: creatures are
+        // shaded in the pass that draws them here, and with the renderer off
+        // there is no such pass.
+        add(out, "creature light", VulkanConfig.getCreatureLight());
     }
 
     /**
