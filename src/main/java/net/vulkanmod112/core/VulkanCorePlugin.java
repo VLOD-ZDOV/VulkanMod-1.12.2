@@ -57,12 +57,20 @@ public class VulkanCorePlugin implements IFMLLoadingPlugin, IEarlyMixinLoader {
     private static final String[] RENDERER_JAR_MARKERS = {
             "optifine", "shadersmod", "celeritas", "actinium",
             "nothirium", "vulcanizator",
-            // The Sodium ports and their forks. Found by looking rather than by
-            // waiting for the crash report: every one of these replaces the
-            // chunk renderer, and a list of them that is only ever extended by
-            // people whose game already broke is a list that is always one
+            // The Sodium ports and the two forks of them, all three named as
+            // renderer replacements by a community optimisation guide that
+            // lists them as mutually exclusive with the others above. Found by
+            // looking rather than by waiting for the crash report: a list only
+            // ever extended by people whose game already broke is always one
             // release behind.
-            "vintagium", "relictium", "neonium", "magnesium",
+            //
+            // Magnesium was very nearly a fourth and is deliberately not here.
+            // The one source for it being a 1.12.2 renderer did not survive
+            // being checked, and the cost of a wrong name in this list is a
+            // renderer that silently does not load — which is a bad way to
+            // learn we guessed. If it turns out to belong, one line in the file
+            // below adds it without waiting for a release.
+            "vintagium", "relictium", "neonium",
     };
     /**
      * A file beside the settings where anyone can name one more.
