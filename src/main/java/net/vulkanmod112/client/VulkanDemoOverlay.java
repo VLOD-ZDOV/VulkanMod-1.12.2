@@ -29,7 +29,10 @@ public final class VulkanDemoOverlay {
     private static final int DRAW_SIZE = 96;
     /**
      * The demo triangle proved stages 2–3.1; now it just costs a submit and
-     * two semaphore hops per frame. Off unless -Dvulkanmod112.overlay=true.
+     * two semaphore hops per frame. Off by default, and turned on either from
+     * the settings screen — Diagnostic Overlay, which is stored in the config
+     * like any other switch — or with -Dvulkanmod112.overlay=true for a run
+     * that has no screen to reach.
      */
 
     private final VulkanBridge bridge;

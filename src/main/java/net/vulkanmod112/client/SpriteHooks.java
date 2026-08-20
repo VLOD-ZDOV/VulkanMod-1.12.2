@@ -79,14 +79,6 @@ public final class SpriteHooks {
     }
 
     /**
-     * Hands one finished batch over and empties the builder.
-     *
-     * The builder arrives still building; this closes it, which is what fixes
-     * its position and limit to exactly the vertices in it, and resets it so the
-     * caller may begin the next batch. Callers must not also call
-     * {@code Tessellator.draw()} — that would close it a second time and throw.
-     */
-    /**
      * Draws a batch the renderer would not take, exactly as the game would.
      *
      * The batch cannot be handed back to {@code Tessellator.draw()} — that
@@ -97,6 +89,14 @@ public final class SpriteHooks {
     private static final net.minecraft.client.renderer.WorldVertexBufferUploader UPLOADER =
             new net.minecraft.client.renderer.WorldVertexBufferUploader();
 
+    /**
+     * Hands one finished batch over and empties the builder.
+     *
+     * The builder arrives still building; this closes it, which is what fixes
+     * its position and limit to exactly the vertices in it, and resets it so the
+     * caller may begin the next batch. Callers must not also call
+     * {@code Tessellator.draw()} — that would close it a second time and throw.
+     */
     public static void submit(VulkanBridge bridge, BufferBuilder builder, int slot, float cutoff) {
         builder.finishDrawing();
         int vertices = builder.getVertexCount();

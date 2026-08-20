@@ -28,8 +28,9 @@ import java.util.Map;
  * <h2>Why a group and not a single patch</h2>
  *
  * Because half a feature is worse than none of it. Drawing creatures through
- * Vulkan takes five patches — one to know when the pass starts, three to read
- * the model, one to drop vanilla's blob shadow — and four of five means
+ * Vulkan takes six patches — one to know when the pass starts, three to read
+ * the model, one to drop vanilla's blob shadow, one to catch the colour the
+ * game lays over a creature that has been hurt — and five of six means
  * creatures captured and never drawn, or drawn without the shadow that was
  * supposed to replace the one just removed. So the unit that can be switched
  * off is the feature, and it goes off whole.

@@ -39,15 +39,20 @@ import static org.lwjgl.vulkan.VK10.*;
 /**
  * Acceleration structures over the terrain this renderer already owns.
  *
- * <h2>What this is for, and what it is not yet</h2>
+ * <h2>What this is for, and how it got here</h2>
  *
- * Nothing reads these structures. That is deliberate: the roadmap has carried
- * one sentence about ray tracing for weeks — that the structure has to be
- * rebuilt whenever a chunk is, and that rebuilding chunks is already the
- * largest cost in a moving frame — and it has never been a number. Writing the
- * shader first would mean finding out afterwards whether the thing it reads can
- * be maintained at all. So this builds them, keeps them, and reports what it
- * costs, and the answer decides whether there is a shader worth writing.
+ * These are traced against every frame: the terrain shader asks them whether
+ * anything stands between a surface and the sun, and since August whether
+ * anything creature-shaped does.
+ *
+ * They were built before anything read them, and deliberately. The roadmap had
+ * carried one sentence about ray tracing for weeks — that the structure has to
+ * be rebuilt whenever a chunk is, and that rebuilding chunks is already the
+ * largest cost in a moving frame — and it had never been a number. Writing the
+ * shader first would have meant finding out afterwards whether the thing it
+ * read could be maintained at all. So this built them, kept them, and reported
+ * what they cost, and the answer decided that there was a shader worth
+ * writing.
  *
  * <h2>How it maps onto what already exists</h2>
  *
@@ -140,7 +145,8 @@ final class VkRayTracing {
     private final java.util.HashMap<Integer, Blas> structures = new java.util.HashMap<Integer, Blas>();
     private final java.util.ArrayList<Blas> live = new java.util.ArrayList<Blas>();
 
-    // Everything below is measurement, and the only product of this class so far.
+    // Everything below is measurement, kept because the cost of these
+    // structures is the thing that decides whether tracing stays on.
     private int lastBuilt;
     private int lastInstances;
     private long lastBuildNanos;
@@ -855,7 +861,6 @@ final class VkRayTracing {
         }
     }
 
-    /** Supplied by the terrain renderer, which owns the shared quad indices. */
     /**
      * The creatures of the frame, as one structure over one run of vertices.
      *
@@ -890,6 +895,7 @@ final class VkRayTracing {
 
     private long indexBufferAddress;
 
+    /** Supplied by the terrain renderer, which owns the shared quad indices. */
     void setIndexBuffer(long buffer) {
         this.indexBufferAddress = bufferAddress(buffer);
     }

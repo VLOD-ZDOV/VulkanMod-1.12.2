@@ -109,7 +109,7 @@ public final class VulkanContextImpl implements VulkanBridge {
     private VkDevice device;
     private VkQueue graphicsQueue;
     private int graphicsQueueFamily = -1;
-    /** How many GPUs Vulkan enumerated; the interop check weighs its fallback on it. */
+    /** How many GPUs Vulkan enumerated; named in the interop mismatch message. */
     private int physicalDeviceCount;
     private boolean initialized;
 
@@ -969,7 +969,7 @@ public final class VulkanContextImpl implements VulkanBridge {
             vkGetPhysicalDeviceProperties(physicalDevice, props);
             sb.append("  limits: maxMemoryAllocationCount ")
                     .append(props.limits().maxMemoryAllocationCount() & 0xFFFFFFFFL)
-                    .append(" (the spec only guarantees 4096; the mirror uses one per chunk buffer)\n");
+                    .append(" (the spec only guarantees 4096; the mirror stays well under it by\n                            suballocating every chunk out of one device-local buffer)\n");
         }
         sb.append("  vram: ").append(vramMegabytes).append(" MiB device-local, geometry budget setting ")
                 .append(System.getProperty("vulkanmod112.geometryBudget", "0"))

@@ -161,10 +161,6 @@ public interface VulkanBridge {
     void applySceneBloom(int sceneGlTexture);
 
     /**
-     * Grades the finished frame — terrain, creatures, particles, weather and
-     * water together — where all of it exists at once. Does nothing at zero.
-     */
-    /**
      * Darkens the corners of the whole picture, not only of the blocks.
      *
      * The occlusion this renderer already had is computed inside its own pass,
@@ -175,6 +171,10 @@ public interface VulkanBridge {
      */
     void applySceneOcclusion(int sceneGlTexture);
 
+    /**
+     * Grades the finished frame — terrain, creatures, particles, weather and
+     * water together — where all of it exists at once. Does nothing at zero.
+     */
     void applySceneTone(int sceneGlTexture);
 
     /**
@@ -244,14 +244,6 @@ public interface VulkanBridge {
     boolean drawsTranslucent();
 
     /**
-     * Whether particles and weather can go through Vulkan on this machine.
-     *
-     * Always false where {@link #drawsTranslucent} is false, and for the same
-     * reason it is one question rather than two: sprites are drawn inside the
-     * translucent pass, and there is no second place to put them that would not
-     * cost another round trip of the game's depth.
-     */
-    /**
      * Which way the sun is, in the same camera-relative axes the terrain is
      * drawn in, plus how strongly its shadow should be believed.
      *
@@ -287,6 +279,14 @@ public interface VulkanBridge {
      */
     void updateClouds(int glTexture, float height, float driftBlocks);
 
+    /**
+     * Whether particles and weather can go through Vulkan on this machine.
+     *
+     * Always false where {@link #drawsTranslucent} is false, and for the same
+     * reason it is one question rather than two: sprites are drawn inside the
+     * translucent pass, and there is no second place to put them that would not
+     * cost another round trip of the game's depth.
+     */
     boolean drawsSprites();
 
     /**

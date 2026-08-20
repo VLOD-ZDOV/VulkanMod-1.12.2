@@ -976,7 +976,9 @@ final class VkChunkMirror {
      * zero once the GPU has finished reading what is already there, so a wrap
      * submits the pending copies and waits for them. That wait is the price of
      * not keeping a copy per chunk, and it only happens once the ring has been
-     * filled — with 32 MiB and ~50 KiB chunks, roughly every 600 uploads.
+     * filled — and the ring is at least 96 MiB, split in half between the two
+     * threads that fill it, so with ~50 KiB chunks that is roughly every
+     * thousand uploads on either side.
      */
     private long allocateStagingRange(int size) {
         long aligned = (size + 15L) & ~15L;
