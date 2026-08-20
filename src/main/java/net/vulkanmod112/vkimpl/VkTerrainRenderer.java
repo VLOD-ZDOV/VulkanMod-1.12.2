@@ -6509,37 +6509,31 @@ final class VkTerrainRenderer {
 
     private void createDescriptorInfrastructure(MemoryStack stack) {
         atlasSampler = createAtlasSampler(stack);
+        // The light map: sixteen by sixteen, one level, read smoothly.
+        //
+        // Linear inside the level because this is a gradient and not a picture
+        // — its two coordinates are how much block light and how much sky
+        // light reach a vertex, and stepping between them in sixteenths shows
+        // up as banding across every surface in the world. There is no mip
+        // chain to walk, so the level clamp is zero and the mip mode never
+        // comes up at all.
+        //
+        // What stood here was a copy of the atlas sampler's own paragraph,
+        // explaining flat block colours and a level clamp of fifteen: on an
+        // object that was then overwritten two lines further down, and about a
+        // texture with one level and no flat-colour setting. None of it was
+        // ever true of this sampler. The overwrite has gone with it — the
+        // values below are the ones that were reaching the driver anyway.
         VkSamplerCreateInfo samplerInfo = VkSamplerCreateInfo.calloc(stack)
                 .sType(VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO)
-                .magFilter(VK_FILTER_NEAREST)
-                .minFilter(VK_FILTER_NEAREST)
-                // Nearest inside a level keeps the pixel-art look; linear
-                // between levels kills the shimmer on distant chunks. maxLod
-                // is clamped by the image's actual level count.
-                .mipmapMode(VK_SAMPLER_MIPMAP_MODE_LINEAR)
-                .maxLod(VK_LOD_CLAMP_NONE)
-                // Flat colours: every block face reads the smallest level of the
-                // atlas, where a sprite has been reduced to a single texel.
-                //
-                // This is not the opposite of mipmapping, it is the far end of
-                // it. Sampling costs what it costs because of cache misses, and
-                // the whole purpose of a mip chain is to keep roughly one texel
-                // per pixel so the cache stays warm; pinning it to the last
-                // level means one texel per face, which is the cheapest a
-                // texture read can be. Turning mipmaps off entirely — the
-                // obvious-looking way to make textures cheap — does the reverse,
-                // sending distant chunks to read the full-size atlas at random.
-                // Fifteen rather than "no clamp": the level count of a 512-pixel
-                // atlas cannot reach it, so it always lands on the last one
-                // there is, and it still reads as a number rather than as a
-                // sentinel that means the opposite on the other field.
+                .magFilter(VK_FILTER_LINEAR)
+                .minFilter(VK_FILTER_LINEAR)
+                .mipmapMode(VK_SAMPLER_MIPMAP_MODE_NEAREST)
+                .maxLod(0.0f)
                 .addressModeU(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
                 .addressModeV(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
                 .addressModeW(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
         LongBuffer pSampler = stack.mallocLong(1);
-
-        samplerInfo.magFilter(VK_FILTER_LINEAR).minFilter(VK_FILTER_LINEAR)
-                .mipmapMode(VK_SAMPLER_MIPMAP_MODE_NEAREST).maxLod(0.0f);
         check(vkCreateSampler(device(), samplerInfo, null, pSampler), "vkCreateSampler(lightmap)");
         lightmapSampler = pSampler.get(0);
 
