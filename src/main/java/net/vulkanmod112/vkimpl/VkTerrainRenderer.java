@@ -989,6 +989,20 @@ final class VkTerrainRenderer {
      * than a glow.
      */
     private static final float AO_BLUR_SPREAD = 2.0f;
+    /**
+     * Wider than the occlusion's, because what is being smoothed is coarser.
+     *
+     * A shaft is gathered by asking twenty-four points along a line whether the
+     * sky is visible there, and the answer at each is yes or no — so the whole
+     * effect can only take twenty-five values, and along the edge of a shaft it
+     * steps down through them one at a time. The per-pixel offset that starts
+     * each walk turns those steps into grain rather than removing them, and the
+     * grain then arrives at full size through a half-resolution texture. The
+     * occlusion beside it has been blurred for exactly this reason since it was
+     * written; the shafts never were, and stairs in a beam of light was the
+     * first thing anyone said about them.
+     */
+    private static final float RAY_BLUR_SPREAD = 3.0f;
     private final java.nio.FloatBuffer projectionMatrix =
             org.lwjgl.BufferUtils.createFloatBuffer(16);
     /**
@@ -4050,6 +4064,7 @@ final class VkTerrainRenderer {
         }
         try {
             buildAoProgram();
+            buildBlurProgram();
         } catch (RuntimeException e) {
             LOGGER.error("Ambient occlusion program failed to build; off for this session", e);
             destroyAoTargets();
@@ -4186,24 +4201,44 @@ final class VkTerrainRenderer {
                         // the whole screen, and a neighbourhood spread that wide
                         // is not a neighbourhood — it is the rest of the picture.
                         + "    scale = min(scale, 0.15);\n"
-                        // Turned by a different angle at every pixel, so what
+                        // Where this point is in the world, in world axes and
+                        // reduced against a lattice the camera is already
+                        // reduced against. Both marches below hash it, and it is
+                        // three dot products for the pair.
+                        + "    vec3 rel = vec3(dot(uCol0, p), dot(uCol1, p), dot(uCol2, p));\n"
+                        // Turned by a different angle at every point, so what
                         // sixteen samples cannot cover comes out as noise the
                         // blur removes rather than as rings nothing removes.
                         //
-                        // The usual fract(sin(dot(...))) was here and it is
-                        // exactly wrong at this size. Its argument grows with
-                        // the pixel's coordinate, and on a large screen it
-                        // reaches six figures, where a 32-bit float no longer
-                        // holds a sine's argument finely enough to answer
-                        // differently for neighbouring pixels. The angles stop
+                        // At every *point*, and not at every pixel, which is
+                        // what it used to say and do. A pattern keyed to
+                        // gl_FragCoord is fixed to the screen: turn your head a
+                        // fraction of a degree and every surface point lands on
+                        // a different pixel, is handed an angle unrelated to the
+                        // one it had, and comes back with a different amount of
+                        // shade. The picture then crawls whenever the camera
+                        // turns and is perfectly still when it does not — which
+                        // is exactly what was reported, and reported as the
+                        // shading being computed from where you look. The blur
+                        // underneath cannot answer it: the blur averages across
+                        // the screen, and this falls apart across frames.
+                        //
+                        // The contact shadow fifty lines below was cured of the
+                        // same thing and left this one alone. Keyed to the world
+                        // instead, neighbouring pixels still get unrelated
+                        // angles — p differs between them — while one point in
+                        // the world keeps its angle whatever the camera does.
+                        //
+                        // The usual fract(sin(dot(...))) was here before either
+                        // and is exactly wrong at this size: its argument grows
+                        // with the coordinate, and past six figures a 32-bit
+                        // float no longer holds a sine's argument finely enough
+                        // to answer differently for neighbours. The angles stop
                         // being unrelated and lay themselves out in faint bands
-                        // across the whole picture — visible, and not something
-                        // a five-tap blur can take out, being wider than the
-                        // grain it was written to remove. This one never takes a
-                        // sine and never lets a number grow: it is fractions
-                        // multiplied by fractions, which stay exact whatever the
-                        // screen size.
-                        + "    vec3 h3 = fract(vec3(gl_FragCoord.xyx) * vec3(0.1031, 0.1030, 0.0973));\n"
+                        // wider than the grain the blur was written to remove.
+                        // This one never takes a sine and never lets a number
+                        // grow: fractions multiplied by fractions.
+                        + "    vec3 h3 = fract((uCamWrap + rel) * vec3(0.1031, 0.1030, 0.0973));\n"
                         + "    h3 += dot(h3, h3.yzx + 33.33);\n"
                         + "    float a = fract((h3.x + h3.y) * h3.z) * 6.2831853;\n"
                         + "    float occlusion = 0.0;\n"
@@ -4319,7 +4354,6 @@ final class VkTerrainRenderer {
                         // hash needs a number it can tell apart from its
                         // neighbour, and a single-precision world coordinate at
                         // Minecraft's range cannot give it one.
-                        + "        vec3 rel = vec3(dot(uCol0, p), dot(uCol1, p), dot(uCol2, p));\n"
                         + "        vec3 wh = fract((uCamWrap + rel) * vec3(0.4127, 0.4013, 0.3971));\n"
                         + "        wh += dot(wh, wh.yzx + 33.33);\n"
                         + "        float jitter = fract((wh.x + wh.y) * wh.z);\n"
@@ -4360,12 +4394,11 @@ final class VkTerrainRenderer {
                         // costs one texture read on a pass that already exists.
                         + "    float cloud = 0.0;\n"
                         + "    if (uCloudShadow > 0.0 && uSunWorld.y > 0.05) {\n"
-                        // View space back to the axes the world is measured in.
-                        // A direction only, so the three dot products are the
-                        // whole of it and the camera's own position never enters
-                        // the arithmetic — which is what keeps this exact a
-                        // million blocks from the origin.
-                        + "        vec3 rel = vec3(dot(uCol0, p), dot(uCol1, p), dot(uCol2, p));\n"
+                        // The shared rel above: view space back to the axes the
+                        // world is measured in. A direction only, so the three
+                        // dot products are the whole of it and the camera's own
+                        // position never enters the arithmetic — which is what
+                        // keeps this exact a million blocks from the origin.
                         + "        float climb = uCloudUv.w - rel.y;\n"
                         // Only what is under the clouds is in their shade. Above
                         // them the sun is unobstructed, and marching backwards
@@ -5192,6 +5225,9 @@ final class VkTerrainRenderer {
 
     private int rayTexture;
     private int rayFbo;
+    /** The other half of the ping-pong the shafts are smoothed through. */
+    private int rayBlurTexture;
+    private int rayBlurFbo;
     private int rayWidth;
     private int rayHeight;
     private int rayProgram;
@@ -5333,6 +5369,24 @@ final class VkTerrainRenderer {
             GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, sceneCopyTexture);
             fullscreenQuad();
 
+            // Smoothed before it is added, the same way and with the same
+            // program the occlusion is. Twenty-four yes-or-no answers a pixel
+            // is twenty-five possible values, and the edge of a shaft walks
+            // down them a step at a time; the offset that starts each walk
+            // scatters those steps without removing them. Two passes of five
+            // taps, across and then down, at half resolution — so the whole of
+            // it costs a fraction of the gather it is smoothing.
+            GL20C.glUseProgram(bloomBlurProgram);
+            GL20C.glUniform2f(bloomBlurInvSize, 1.0f / rayWidth, 1.0f / rayHeight);
+            GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, rayBlurFbo);
+            GL20C.glUniform2f(bloomBlurStep, RAY_BLUR_SPREAD, 0.0f);
+            GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, rayTexture);
+            fullscreenQuad();
+            GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, rayFbo);
+            GL20C.glUniform2f(bloomBlurStep, 0.0f, RAY_BLUR_SPREAD);
+            GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, rayBlurTexture);
+            fullscreenQuad();
+
             // Added rather than mixed: light arriving along the line of sight
             // is light on top of what is already there, and a shaft crossing a
             // dark hillside has to brighten it rather than replace it.
@@ -5368,6 +5422,12 @@ final class VkTerrainRenderer {
         rayHeight = wantHeight;
         rayTexture = GL11C.glGenTextures();
         allocateBloomTexture(rayTexture, rayWidth, rayHeight);
+        rayBlurTexture = GL11C.glGenTextures();
+        allocateBloomTexture(rayBlurTexture, rayWidth, rayHeight);
+        rayBlurFbo = GL30C.glGenFramebuffers();
+        GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, rayBlurFbo);
+        GL30C.glFramebufferTexture2D(GL30C.GL_FRAMEBUFFER, GL30C.GL_COLOR_ATTACHMENT0,
+                GL11C.GL_TEXTURE_2D, rayBlurTexture, 0);
         rayFbo = GL30C.glGenFramebuffers();
         GL30C.glBindFramebuffer(GL30C.GL_FRAMEBUFFER, rayFbo);
         GL30C.glFramebufferTexture2D(GL30C.GL_FRAMEBUFFER, GL30C.GL_COLOR_ATTACHMENT0,
@@ -5379,6 +5439,7 @@ final class VkTerrainRenderer {
             return false;
         }
         buildRayPrograms();
+        buildBlurProgram();
         return true;
     }
 
@@ -5454,6 +5515,14 @@ final class VkTerrainRenderer {
     }
 
     private void destroyRayTargets() {
+        if (rayBlurFbo != 0) {
+            GL30C.glDeleteFramebuffers(rayBlurFbo);
+            rayBlurFbo = 0;
+        }
+        if (rayBlurTexture != 0) {
+            GL11C.glDeleteTextures(rayBlurTexture);
+            rayBlurTexture = 0;
+        }
         if (rayFbo != 0) {
             GL30C.glDeleteFramebuffers(rayFbo);
             rayFbo = 0;
@@ -8360,6 +8429,41 @@ final class VkTerrainRenderer {
      * @param writeDepth export the Vulkan depth per fragment; false when the
      *                   depth buffer is filled by glBlitFramebuffer instead
      */
+    /**
+     * The one blur three passes share, built by whichever of them arrives first.
+     *
+     * It lived inside the bloom's own setup and was used by the occlusion
+     * regardless, so with the glow switched off the occlusion asked for program
+     * zero and drew its two smoothing quads with no shader at all — which does
+     * not fail, it writes something else over the answer. Nobody saw it because
+     * the presets that turn the occlusion on turn the glow on beside it.
+     */
+    private void buildBlurProgram() {
+        if (bloomBlurProgram != 0) {
+            return;
+        }
+        // One axis per pass. A gaussian is separable, so two passes of five
+        // taps do what one of twenty-five would, and the offsets sit between
+        // texels on purpose: linear filtering makes each of those one read
+        // where the weights say two.
+        bloomBlurProgram = buildQuadProgram(
+                "uniform sampler2D uSource;\n"
+                        + "uniform vec2 uInvSize;\n"
+                        + "uniform vec2 uStep;\n"
+                        + "void main() {\n"
+                        + "    vec2 uv = gl_FragCoord.xy * uInvSize;\n"
+                        + "    vec2 d = uStep * uInvSize;\n"
+                        + "    vec3 sum = texture2D(uSource, uv).rgb * 0.227027;\n"
+                        + "    sum += (texture2D(uSource, uv + d * 1.3846154).rgb\n"
+                        + "          + texture2D(uSource, uv - d * 1.3846154).rgb) * 0.3162162;\n"
+                        + "    sum += (texture2D(uSource, uv + d * 3.2307692).rgb\n"
+                        + "          + texture2D(uSource, uv - d * 3.2307692).rgb) * 0.0702703;\n"
+                        + "    gl_FragColor = vec4(sum, 1.0);\n"
+                        + "}\n");
+        bloomBlurInvSize = GL20C.glGetUniformLocation(bloomBlurProgram, "uInvSize");
+        bloomBlurStep = GL20C.glGetUniformLocation(bloomBlurProgram, "uStep");
+    }
+
     private void buildBloomPrograms() {
         if (bloomExtractProgram != 0) {
             return;
@@ -8404,26 +8508,7 @@ final class VkTerrainRenderer {
         GL20C.glUniform1i(GL20C.glGetUniformLocation(bloomExtractProgram, "uTerrain"), 1);
         GL20C.glUseProgram(0);
 
-        // One axis per pass. A gaussian is separable, so two passes of five
-        // taps do what one of twenty-five would, and the offsets sit between
-        // texels on purpose: linear filtering makes each of those one read
-        // where the weights say two.
-        bloomBlurProgram = buildQuadProgram(
-                "uniform sampler2D uSource;\n"
-                        + "uniform vec2 uInvSize;\n"
-                        + "uniform vec2 uStep;\n"
-                        + "void main() {\n"
-                        + "    vec2 uv = gl_FragCoord.xy * uInvSize;\n"
-                        + "    vec2 d = uStep * uInvSize;\n"
-                        + "    vec3 sum = texture2D(uSource, uv).rgb * 0.227027;\n"
-                        + "    sum += (texture2D(uSource, uv + d * 1.3846154).rgb\n"
-                        + "          + texture2D(uSource, uv - d * 1.3846154).rgb) * 0.3162162;\n"
-                        + "    sum += (texture2D(uSource, uv + d * 3.2307692).rgb\n"
-                        + "          + texture2D(uSource, uv - d * 3.2307692).rgb) * 0.0702703;\n"
-                        + "    gl_FragColor = vec4(sum, 1.0);\n"
-                        + "}\n");
-        bloomBlurInvSize = GL20C.glGetUniformLocation(bloomBlurProgram, "uInvSize");
-        bloomBlurStep = GL20C.glGetUniformLocation(bloomBlurProgram, "uStep");
+        buildBlurProgram();
 
         // Added, not laid over: the alpha is zero so a blend of one and one
         // leaves the frame's own alpha alone.
