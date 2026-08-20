@@ -1,107 +1,192 @@
-# VulkanMod112 0.10.0
+<h1 align="center">
+  <img src="src/main/resources/assets/vulkanmod112/logo.png" width="96" height="96" alt="">
+  <br>
+  VulkanMod112
+</h1>
 
-Experimental Vulkan terrain renderer for Minecraft Forge 1.12.2. Minecraft still owns the window and OpenGL context; VulkanMod112 mirrors vanilla chunk VBOs to Vulkan, renders opaque terrain there, then composites colour and depth back into the game's framebuffer through GPU external-memory interop.
+<p align="center">
+  <b>Minecraft 1.12.2 draws its world with Vulkan instead of OpenGL.</b><br>
+  More frames at high render distances, a menu of effects you assemble yourself,<br>
+  and the performance settings this version never had.
+</p>
 
-## Current scope
+<p align="center">
+  <a href="https://www.curseforge.com/minecraft/mc-mods/vulkanmod-legacy"><img src="https://cf.way2muchnoise.eu/full_1624664_downloads.svg?badge_style=flat" alt="CurseForge"></a>
+  <a href="https://github.com/VLOD-ZDOV/VulkanMod-1.12.2/releases"><img src="https://img.shields.io/github/downloads/VLOD-ZDOV/VulkanMod-1.12.2/total?style=flat&logo=github&label=GitHub" alt="GitHub downloads"></a>
+  <img src="https://img.shields.io/badge/Minecraft-1.12.2-brightgreen?style=flat" alt="Minecraft 1.12.2">
+  <img src="https://img.shields.io/badge/licence-LGPL--3.0-blue?style=flat" alt="LGPL-3.0">
+</p>
 
-- Vulkan device selection and isolated LWJGL 3 runtime alongside Minecraft's LWJGL 2.
-- Device-local Vulkan chunk geometry in one growable shared buffer with persistently mapped staging uploads, plus block atlas and lightmap.
-- Vulkan rendering for the `SOLID`, `CUTOUT_MIPPED`, `CUTOUT` and `TRANSLUCENT` terrain layers.
-- Optional dynamic lights, computed while shading rather than rebuilt into the world.
-- Optional dropping of the vanilla chunk buffers once Vulkan holds the geometry, so the world is stored once in video memory instead of twice.
-- Particles, rain and snow drawn in Vulkan, riding the translucent pass rather than opening one of their own.
-- Optional ray-traced shadows from the sun, from carried lights, from burning creatures and from the light-emitting blocks already in the world, with frame averaging to turn one ray per pixel into a soft edge. Needs `VK_KHR_acceleration_structure` and `VK_KHR_ray_query`; without them the settings do nothing and say so.
-- Optional water refraction, and a round sun and moon drawn at runtime rather than shipped as files.
-- Optional surface effects, each off by default: ice that gathers the sky, caustics on the bed of shallow water, rain that darkens and wets upward faces, fog that leans towards the sun, vanilla clouds tinted with the sky they hang in, and a sun and moon glint on water that fades out with distance. The glint, the ice and the caustics are deliberately absent from the traced shader and say so rather than doing nothing.
-- Optional grading of the finished frame, applied on the marker the game raises once the world is complete, so it reaches entities, particles and weather as well as terrain and stops before the hand and the interface.
-- Optional client-side time of day and weather, affecting what is drawn and nothing else.
-- Vulkan drawing of living creatures, on by default, in a subpass of their own so they hide one another by depth rather than by draw order, shaded with the same two directional lights the game uses. It is on rather than off because the split path costs more than the takeover: with the game drawing creatures, the player reaches the shadow passes twice — once as captured geometry, once as something vanilla drew — and two shadows over one another leave a rim that reads as a trail of light following whoever is flying. Tile entities, the sky and the GUI stay with vanilla OpenGL.
-- Optional ray-traced shadows shaped like the creature casting them, replacing vanilla's round blur — and only while there is really something in the acceleration structure to cast one.
-- Optional effects over the finished frame, which reach whatever drew into it, this mod's terrain and other mods' content alike: occlusion in the corners of the whole scene, and grading.
-- Optional light through a canopy, where a leaf lets a shadow ray past in proportion to how much of the quad is holes, rather than stopping it like stone.
-- Optional depth in water — absorption along the path light travelled, so red goes first and a puddle stops looking like an ocean — with foam where the water is thinnest.
-- Optional sixteen bits a channel on this renderer's own targets, behind a switch, with the driver asked first.
-- If Vulkan, required driver extensions, or terrain rendering fail, the game falls back to vanilla OpenGL rather than crashing.
-- Video Settings includes a **VulkanMod112 Settings...** page with presets, a geometry budget, per-setting CPU/GPU/VRAM costs and a render-distance slider up to 64 chunks, or 128 with Extreme Render Distance turned on.
-- Hold-to-zoom on **C** (rebindable under Controls), with mouse sensitivity scaled to match.
+<!-- Add once the Modrinth project exists, with the real slug in place of vulkanmod-legacy:
+  <a href="https://modrinth.com/mod/vulkanmod-legacy"><img src="https://img.shields.io/modrinth/dt/vulkanmod-legacy?style=flat&logo=modrinth&label=Modrinth" alt="Modrinth"></a>
+-->
 
-This is not yet a complete replacement for the modern VulkanMod renderer.
+---
 
-## Current limits
+## Get it
 
-- The world's geometry can exist twice: once in the game's own OpenGL buffers and once in the Vulkan mirror. **Drop Vanilla Chunk Buffers** removes the duplicate and is on by default, so out of the box there is one copy; turning it off brings the second back. On a card with little memory to spare that duplicate is what caps the usable render distance, and it depends on how much geometry is actually in view rather than on the distance setting alone. Switching it either way rebuilds the world. The settings header shows the memory the GPU reports, and the diagnostics log shows what the mirror is using.
-- Chunk building and uploading dominate the frame while the camera moves at high render distances. Every chunk is still uploaded twice — once by the game to OpenGL, once here to Vulkan — but this mod's copy now happens on the thread that built the chunk rather than on the thread that draws, so it no longer competes for the per-frame upload budget the game runs on the render thread.
-- Tile entities, the sky and the GUI are still drawn by vanilla OpenGL. Living creatures are drawn here, which is what gives them a shadow of their own and puts them in the depth the water reflects against — but a mod that builds its models its own way rather than out of the game's model parts is invisible to that path and stays with vanilla, without a shadow of its own. A burning creature still does not glow: what glows is recorded per block while a chunk is built, and a creature is not a block. The effects that run over the finished frame — occlusion and grading — do reach everything, because they read the picture rather than the geometry.
-- The red flash when something is hurt and the shimmer on enchanted armour are missing from the Vulkan creature path, which is now the default one. Neither is drawn the way a colour is: the game builds both out of a fixed-function texture combiner on a second texture unit, which is state this renderer no longer has once it is the one drawing. Turning **Draw Creatures in Vulkan** off restores them and brings back the trail of light described above; the switch says so.
+| | |
+|---|---|
+| **[CurseForge](https://www.curseforge.com/minecraft/mc-mods/vulkanmod-legacy)** | the published build |
+| **[Releases](https://github.com/VLOD-ZDOV/VulkanMod-1.12.2/releases)** | the same jars, and the newest one first |
+
+**You also need [MixinBooter](https://www.curseforge.com/minecraft/mc-mods/mixinbooter) 10.7
+or newer in your mods folder.** No launcher installs it for you, and without it the game
+stops during coremod discovery on `ClassNotFoundException: zone.rong.mixinbooter.IEarlyMixinLoader`.
+
+---
+
+## What it is
+
+The game still owns the window and the OpenGL context. This mod mirrors vanilla's chunk
+geometry into Vulkan, draws the world's blocks and its creatures there, and hands the colour
+and the depth back into the game's own frame through shared GPU memory — so both halves line
+up, and everything this mod does not draw is drawn exactly as it always was.
+
+If Vulkan is missing, the driver is old, or the two graphics cards in a laptop disagree, the
+game renders the way it always did and the log says why.
+
+---
+
+## What you get
+
+**More frames**, most of all at high render distances — the biggest single saving is in how
+the game decides which chunks are on screen, and that cost grows with the distance.
+→ [what shipped when](ROADMAP.md#done)
+
+**Effects with a slider each.** Waves, reflections, refraction, bloom, occlusion, swaying
+grass, god rays, ray-traced shadows, a round sun and moon. Every one off by default, and
+every one a row in a menu rather than a zip to load — turning one on costs a frame, not a
+recompile. → [the full list](ADVANCED.md#what-it-draws-in-full)
+
+**Dynamic lights.** A torch in your hand lights the world. So does one you dropped, and a
+mob that is on fire. No chunk is rebuilt for it.
+
+**The settings 1.12.2 never gave you.** Entity draw distance, animated-texture control, a
+background framerate cap, render distance to 64 chunks, hold-to-zoom.
+→ [all of them](ADVANCED.md#settings-that-are-not-effects)
+
+**It steps aside rather than fighting.** Another renderer in the folder, a driver without an
+extension, a model built some way this mod does not understand — each one is a fallback, not
+a crash. → [when a pack fights back](ADVANCED.md#when-a-pack-fights-back)
+
+Open the menu at **Options → Video Settings → VulkanMod112 Settings…**, or press **F6**.
+Every row states what it costs on your processor, your graphics card and in video memory
+separately, because which of the three you are short of decides whether a setting helps you
+at all. Five presets do the choosing if you would rather not: **Stable**, **Beautiful**,
+**Balanced**, **Performance**, **Potato**.
+
+---
+
+## Where it is known to run
+
+|              | Windows | Linux | macOS |
+|--------------|:-------:|:-----:|:-----:|
+| **NVIDIA**   | ✅ run  | ✅ run | ❌ |
+| **AMD**      | ✅ run  | ✅ run | ❌ |
+| **Intel**    | ⚠️ untried | ⚠️ untried | ❌ |
+
+✅ run — exercised deliberately, not assumed. AMD and NVIDIA are **not the same path**: where
+a card cannot hand its depth back in the format the game keeps, this mod hands it over through
+a shader instead. That second path is easy to get wrong and hard to notice, so it is tested on
+purpose rather than hoped for.
+
+⚠️ untried — no reason it should not work, nobody has reported either way. If you are on one,
+a bug report with the diagnostics file is genuinely useful.
+
+❌ — macOS has no Vulkan driver of its own and is out of scope.
+
+---
+
+## Other optimisation mods
+
+| | | |
+|---|:---:|---|
+| **Phosphor**, **Alfheim** | 🟢 | Lighting engines. They work on the world, this works on the picture. Keep them. |
+| **FoamFix**, **LoliASM / CensoredASM** | 🟢 | Memory. Nothing in common with this. |
+| **VintageFix** | 🟢 | Resource and model loading, before a frame is ever drawn. |
+| **BetterFps**, **Clumps**, **FastFurnace**, **AI Improvements**, **RandomPatches** | 🟢 | Server-side and tick-side work. Untouched by any of this. |
+| **Particle Culling**, **Chunk Pregenerator**, **RoughlyEnoughIDs** | 🟢 | Run alongside; all three are in the pack below. |
+| **OptiFine** | 🟡 | Replaces the same part of the game. The Vulkan renderer does not load; its settings and speed options stay. |
+| **Shaders Mod** (the old GLSL one) | 🟡 | Same as OptiFine, same outcome. |
+| **Celeritas**, **Actinium** | 🟡 | Sodium ports — a second terrain renderer. This one steps aside. |
+| **Nothirium** | 🟡 | Rewrites the chunk rendering engine. This one steps aside. |
+| **Vintagium**, **Relictium**, **Neonium** | 🟡 | A Sodium port and two forks of it. Same story, same outcome. |
+| **Vulcanizator** | 🟡 | A second Vulkan renderer, and it takes over presentation as well. This one steps aside. |
+| anything else | 🔴 | **None known.** No mod has yet been found that cannot be in the folder at all. |
+| **All the Mods 3 Remix** — around **340 mods** | 🟢 | Loads, draws its world through this renderer, on the Beautiful preset with every effect on. Confirmed, not assumed. |
+
+🟢 runs alongside, nothing to do · 🟡 the Vulkan renderer stands aside and the rest of the mod
+stays · 🔴 cannot be installed together
+
+Standing aside is automatic and silent. You keep the settings screen, the draw distances, the
+background cap, the zoom and every speed option — you just do not get the Vulkan terrain,
+because two renderers cannot own the world between them. One this build has not heard of can
+be named by hand in `config/vulkanmod112-standaside.txt`.
+
+---
 
 ## Requirements
 
-- Forge 14.23.5.2857 (or compatible 1.12.2 Forge) / Minecraft 1.12.2.
-- MixinBooter 10.7 or newer in the instance `mods` directory when installing the released JAR manually. It is a required runtime dependency and no launcher resolves it for you. Without it the launch ends during coremod discovery on `ClassNotFoundException: zone.rong.mixinbooter.IEarlyMixinLoader`; that message means MixinBooter and nothing else.
-- A 64-bit Windows or Linux Vulkan driver.
-- Matching OpenGL and Vulkan external-memory/semaphore extensions for the terrain path: `GL_EXT_memory_object_fd` / `GL_EXT_semaphore_fd` with `VK_KHR_external_memory_fd` / `VK_KHR_external_semaphore_fd` on Linux, and the `_win32` variants of the same four on Windows. The mod selects the pair for the host platform automatically. Without them it loads safely but leaves terrain in OpenGL.
+- Minecraft **1.12.2** with Forge 14.23.5.2857 or compatible, or **Cleanroom** — both tested
+- **MixinBooter 10.7 or newer**, installed by hand
+- A 64-bit **Vulkan driver** on Windows or Linux
+- For the terrain path, matching external-memory and semaphore extensions on both sides:
+  `GL_EXT_memory_object_fd` / `GL_EXT_semaphore_fd` with `VK_KHR_external_memory_fd` /
+  `VK_KHR_external_semaphore_fd` on Linux, and the `_win32` variants of the same four on
+  Windows. The right pair is chosen for the host automatically; without them the mod loads
+  safely and leaves terrain to OpenGL.
+- One graphics card doing both halves. On a machine with two, the mod compares device UUIDs
+  at startup and stays on vanilla rendering if they differ, naming both in the log.
 
-## Run and build
+---
 
-Use Java 8 for the Minecraft client and Java 25 or newer for Gradle. Configure a local Gradle JDK in your IDE or through `JAVA_HOME`; do not commit machine-specific paths to `gradle.properties`.
+## Honest limits
 
-```bash
-./gradlew compileJava
-./gradlew build
-./gradlew runClient
-```
+This is not a drop-in OptiFine replacement, and it is not finished.
 
-Useful JVM properties:
+- **Not every effect reaches everything.** The ones that run over the finished picture —
+  occlusion, contact and cloud shadows, god rays, grading — reach creatures, particles and
+  other mods' content for free. The rest are worked out while the blocks are drawn and stop
+  there: a burning creeper does not glow, because what glows is recorded per block while a
+  chunk is built and a creeper is not a block.
+- **A mod that builds its creatures with its own drawing code** rather than out of the game's
+  model parts is left to the game, as are chests, signs and machines.
+- **Screen reflections reflect what is on the screen** — nothing off the edge of the frame,
+  nothing hidden behind something nearer. Treat this one as unfinished.
+- **Chunk building dominates the frame while you move** at high render distances. Standing
+  still is much faster than turning, and that is the game's own work rather than this mod's.
+- **No connected textures, and no shader pack support.**
 
-- `-Dvulkanmod112.terrain=false` — disable Vulkan terrain completely.
-- `-Dvulkanmod112.validation=true` — request Vulkan validation layers when installed.
-- `-Dvulkanmod112.debugLoader=true` — print LWJGL loader diagnostics.
-- `-Dvulkanmod112.cull=false` — disable Vulkan terrain backface culling for visual debugging.
-- `-Dvulkanmod112.overlay=true` — show the legacy Vulkan demo overlay.
-- `-Dvulkanmod112.ultraLog=true` — write a full diagnostics report to `logs/vulkanmod112-diagnostics.log`; the same switch lives in the settings screen under Advanced.
-- `-Dvulkanmod112.extraRendererMarkers=name` — treat additional mod jars as renderer replacements, so the Vulkan terrain mixins are not loaded beside them.
-- `-Dvulkanmod112.depthBlit=false` — composite depth through the fragment shader instead of `glBlitFramebuffer`; use if depth looks wrong after the change.
-- `-Dvulkanmod112.allowIncompatibleRenderer=true` — test with OptiFine/shader-mod renderer replacements; unsupported and off by default.
-- `-Dvulkanmod112.geometryBudget=MiB` — geometry budget; 0 derives it from the GPU. Also in the settings screen.
-- `-Dvulkanmod112.framesInFlight=1..3` — how far the CPU may run ahead of the GPU. Also in the settings screen.
-- `-Dvulkanmod112.rayTracing=true` — build acceleration structures over the terrain without opening the menu.
-- `-Dvulkanmod112.noAtlasAnimations=true` — stop uploading animated block textures, to tell that path apart from another when something goes wrong.
-- `-Dvulkanmod112.slowChunkMs=N` — how long a chunk build has to take before it is named in the log. 100 by default.
-- `-Dvulkanmod112.rayTracingFoliage=false` — keep leaves out of the acceleration structures, so a canopy casts no shadow. Halves what the structures hold, for a machine where building them costs more than the shadow is worth.
-- `-Dvulkanmod112.javaCeiling=NN` — the newest Java version the bundled LWJGL is allowed to run on. What actually decides is the JNI version the JVM reports, which is written into the log at startup; this exists for trying a JVM newer than any that has been checked here.
+---
 
-## In-game settings
+## Something looks wrong
 
-Open **Options → Video Settings → VulkanMod112 Settings...**. The terrain switch is applied immediately and returns to vanilla OpenGL when disabled. The diagnostic overlay is off by default.
+**Send one file: `logs/latest.log`.** Play for about a minute with the world visible first;
+that is the whole of the preparation.
 
-Defaults are the conservative choice throughout: nothing is traded for speed until you ask for it. Five presets on the Rendering page do the asking — **Stable** (the shipped values), **Beautiful** (every effect on, for a machine that can afford them), **Balanced** (caps the draw distances vanilla leaves wider than anyone can see), **Performance** (trades visible detail for frames) and **Potato** (for a machine this game is too heavy for). A preset writes its settings once and then stops existing, so anything you change afterwards stays changed. **Reset** at the bottom restores this mod's settings only; Minecraft's own are left alone.
+A picture that comes out wrong has a handful of causes that look identical on screen — the
+world never arrived, a copy the driver refused, a pass that stood down, an effect that graded
+it away. So the renderer reads back a pixel of its own frame at three points and writes what
+it found, in plain numbers, into that file, unasked and whatever the settings are. Those
+numbers separate all four before anyone has to ask you anything.
 
-Every row states what it costs on the CPU, the GPU and in VRAM separately, because which of the three you are short of decides whether a setting will help you at all.
+Going further is optional: turn on **Ultra Logging** and send
+`logs/vulkanmod112-diagnostics.log` as well. → [what else is in there](ADVANCED.md#diagnostics)
 
-**Geometry Budget** (Advanced) sets how much video memory the world geometry may take before the renderer stops growing its buffer generously. Each growth stops the GPU and re-uploads every chunk, so on a card with memory to spare a larger budget buys those stutters away; on a small one a lower value keeps the footprint tight. Automatic uses a quarter of the device-local memory the GPU reports, shown in the screen header. Chunks are never dropped to stay inside the budget — it steers growth, it is not a cap.
+---
 
-The slider permits 2–64 chunks, and 2–128 with **Extreme Render Distance** on. Both are experimental maxima: vanilla 1.12.2 allocates a render chunk for every cell of a `(2d+1) x (2d+1) x 16` grid as soon as a world loads and keeps all of them — 266 256 at 64 and 1 056 784 at 128 — so CPU and RAM are spent up front whether or not there is terrain out there to put in them, and multiplayer servers can impose a smaller view-distance cap regardless. Increase it gradually and restart the world if the chunk grid does not refresh immediately. Turning Extreme Render Distance back off pulls the distance down to 64 with it.
+## More
 
-Zero-copy sharing requires OpenGL and Vulkan to run on the same GPU. On systems with more than one, the mod compares device UUIDs at startup and stays on vanilla rendering if they differ, naming both devices in the log.
+| | |
+|---|---|
+| [ROADMAP.md](ROADMAP.md) | what is [done](ROADMAP.md#done), [planned](ROADMAP.md#planned) and [not planned](ROADMAP.md#not-planned) |
+| [CHANGELOG.md](CHANGELOG.md) | every release, in detail |
+| [ADVANCED.md](ADVANCED.md) | the full feature list, the JVM switches, building, diagnostics |
+| [Issues](https://github.com/VLOD-ZDOV/VulkanMod-1.12.2/issues) | bugs and requests |
 
-## Troubleshooting
+---
 
-Turn on Ultra Logging in the settings screen, reproduce, and attach
-`logs/vulkanmod112-diagnostics.log`. It records versions, installed mods, the GL driver,
-every active renderer path, the frame cost breakdown and resource counts.
+## Licence
 
-## Compatibility and diagnostics
-
-OptiFine, legacy shader mods and Sodium-derived renderers for 1.12.2 — Celeritas, and Actinium which ships it — replace the same renderer classes this mod rewrites. When one of them is installed, the terrain mixins are not registered at all, so the game boots on that renderer while this mod's settings screen and game-side optimisations stay active. Sharing terrain rendering between the two is not possible: the vertex format and pass order differ, and with a shader pack loaded the format changes again.
-
-Any Forge build for 1.12.2 works; the only hard dependency is MixinBooter 10.7 or newer. Forge reads this mod's declared dependencies only after the coremod class has loaded, and that class cannot load without MixinBooter, so a missing MixinBooter is never reported as a missing dependency — it is the `ClassNotFoundException` named under Requirements above.
-
-Older large packs may carry mods that bundle Mixin 0.7.11 themselves; malisiscore and Phosphor are the two that turn up most. Forge adds coremod jars to the classpath in file-name order, so whichever sorts first owns the `org.spongepowered.asm` package for everyone, and MixinBooter's newer copy then dies on the older one with `NoSuchMethodError: org.spongepowered.asm.util.VersionNumber.getMajor()S`. Renaming the MixinBooter jar so that it sorts first — `aaa_mixinbooter-*.jar` — settles that. Not every configuration written for 0.7.11 survives the upgrade afterwards: Phosphor's `MixinChunk$Vanilla` fails its injection check and stops the game, and an individual configuration can be switched off through `blacklistedConfigs` in `config/mixinbooter.cfg`.
-
-Large packs are tested rather than assumed. A 1.12.2 pack of roughly 340 mods — All the Mods 3 Remix, with its own coremods, its own renderer patches from Quark, CTM, FoamFix, BetterFps and LibrarianLib, and thirty loading plugins between them — loads with this mod installed, draws its world through this renderer, and reports nothing in the log that this mod put there. The frame cost measured in it was the same as on a bare instance: a fraction of a millisecond to record and submit, well under a tenth of the frame. No mod there had to give way to this one. What did have to be sorted out was MixinBooter — its place in the load order, and the one mod whose own Mixin 0.7.11 configuration does not survive the upgrade — and both of those are described above and are the same in any pack of that age, with or without this mod.
-
-Cleanroom is supported and tested: the renderer starts, draws, and its mod list picks up this mod's logo, licence and issue tracker from `mcmod.info`. That loader runs a modern JVM and an LWJGL of its own, which is what `-Dvulkanmod112.javaCeiling` and the private prefix the native libraries are unpacked under exist for.
-
-A renderer replacement this build has not heard of can be named without waiting for a release: `-Dvulkanmod112.extraRendererMarkers=part-of-its-jar-name` makes this mod stand aside for it.
-
-The F3 overlay reports GPU selection, VBO mirror statistics, active terrain mode and chunk count. Periodic log entries report fence wait, command recording, submit/composite and GPU timings. For anything more detailed, turn on Ultra Logging and attach `logs/vulkanmod112-diagnostics.log`. Start with `validation=true` when debugging a driver or synchronisation issue.
+GNU LGPL v3. See [LICENSE](LICENSE).
