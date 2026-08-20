@@ -312,6 +312,15 @@ final class VkTerrainRenderer {
     /** Triples: first vertex, vertex count, texture slot. */
     private int[] spriteBatches = new int[192];
     private float[] spriteCutoffs = new float[64];
+    /**
+     * A colour laid over each batch's skin, packed ARGB; 0 for none.
+     *
+     * Beside the batches rather than inside them, the way the cutoffs already
+     * are. The batch array is read with a stride in four separate loops and
+     * widening it means getting all four right for one number that is zero
+     * almost always.
+     */
+    private int[] spriteOverlays = new int[64];
     private int spriteBatchCount;
     private int spriteFrameVertices;
     private int spriteFrameBatches;
@@ -2815,6 +2824,11 @@ final class VkTerrainRenderer {
      *         fit, so weather through this path was invisible.
      */
     synchronized boolean submitSprites(ByteBuffer vertices, int vertexCount, int slot, float cutoff) {
+        return submitSprites(vertices, vertexCount, slot, cutoff, 0);
+    }
+
+    synchronized boolean submitSprites(ByteBuffer vertices, int vertexCount, int slot, float cutoff,
+                                       int overlay) {
         if (vertices == null || slot < 0 || slot >= SPRITE_SLOTS) {
             return false;
         }
@@ -2855,6 +2869,7 @@ final class VkTerrainRenderer {
         spriteBatches[b * 3 + 1] = vertexCount;
         spriteBatches[b * 3 + 2] = slot;
         spriteCutoffs[b] = cutoff;
+        spriteOverlays[b] = overlay;
         spriteScratchVertices += vertexCount;
         return true;
     }
@@ -2866,8 +2881,11 @@ final class VkTerrainRenderer {
         }
         int[] batches = new int[want * 3];
         float[] cutoffs = new float[want];
+        int[] overlays = new int[want];
         System.arraycopy(spriteBatches, 0, batches, 0, spriteBatchCount * 3);
         System.arraycopy(spriteCutoffs, 0, cutoffs, 0, spriteBatchCount);
+        System.arraycopy(spriteOverlays, 0, overlays, 0, spriteBatchCount);
+        spriteOverlays = overlays;
         spriteBatches = batches;
         spriteCutoffs = cutoffs;
         return true;
@@ -2975,7 +2993,7 @@ final class VkTerrainRenderer {
         // constants. Set 1 is the one that changes between batches.
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, spritePipelineLayout, 0,
                 stack.longs(drawDescriptorSets[slot * BATCHES_PER_FRAME + LAYER_TRANSLUCENT]), null);
-        ByteBuffer push = stack.calloc(32);
+        ByteBuffer push = stack.calloc(48);
         // Everything in here except the alpha cutoff is the same for every
         // batch of the call, so it is written once rather than per batch.
         push.putFloat(4, creatures ? 1.0f : 0.0f);
@@ -3026,6 +3044,11 @@ final class VkTerrainRenderer {
                 vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, wanted);
             }
             push.putFloat(0, spriteCutoffs[b]);
+            int overlay = spriteOverlays[b];
+            push.putFloat(32, ((overlay >>> 16) & 0xFF) / 255.0f);
+            push.putFloat(36, ((overlay >>> 8) & 0xFF) / 255.0f);
+            push.putFloat(40, (overlay & 0xFF) / 255.0f);
+            push.putFloat(44, ((overlay >>> 24) & 0xFF) / 255.0f);
             vkCmdPushConstants(cmd, spritePipelineLayout,
                     VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, push);
             if (set != boundTexture) {
@@ -7916,13 +7939,14 @@ final class VkTerrainRenderer {
         VkPushConstantRange.Buffer pushRange = VkPushConstantRange.calloc(1, stack);
         pushRange.get(0)
                 .stageFlags(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
-                // Two vec4: the per-batch parameters, and where the sun is.
+                // Three vec4: the per-batch parameters, where the sun is, and
+                // the colour laid over a creature that has just been hurt.
                 // The sun could have come from the frame block this pass
                 // already binds, but reaching it there means declaring every
                 // field in front of it a second time, and a uniform block
                 // written out twice is a layout with two authors. It went wrong
                 // that way once already.
-                .offset(0).size(32);
+                .offset(0).size(48);
         VkPipelineLayoutCreateInfo pipelineLayoutInfo = VkPipelineLayoutCreateInfo.calloc(stack)
                 .sType(VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO)
                 .pSetLayouts(stack.longs(descriptorSetLayout, spriteSetLayout))

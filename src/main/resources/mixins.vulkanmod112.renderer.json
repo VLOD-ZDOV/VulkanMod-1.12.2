@@ -28,6 +28,7 @@
     "RebuildNearMixin",
     "FrustumTestMixin",
     "EntityBrightnessMixin",
+    "EntityOverlayMixin",
     "FogDistanceMixin",
     "ParticleBrightnessMixin",
     "ParticleRenderMixin",

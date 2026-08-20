@@ -47,20 +47,37 @@ public final class EntityGeometry {
     /** How deep a skeleton may be before this stops following it. */
     private static final int MAX_DEPTH = 16;
 
-    /** One buffer per skin, because the pass draws one texture at a time. */
+    /**
+     * One buffer per skin, because the pass draws one texture at a time — and
+     * per colour laid over that skin, because the overlay travels with the
+     * batch rather than with the vertex.
+     *
+     * It has to travel with something, and the vertex is full: the format is
+     * vanilla's own particle vertex and widening it means this stops being a
+     * copy of what the game already built. So a hurt creature gets a batch of
+     * its own, which costs one draw call while it is red and nothing at all
+     * the rest of the time.
+     */
     private static final class Batch {
         final int glTexture;
+        /** Packed ARGB laid over the skin; 0 for the ordinary case. */
+        final int overlay;
         ByteBuffer vertices;
         int count;
+        /** Whether anything was written here during the pass just gone. */
+        boolean used;
 
-        Batch(int glTexture) {
+        Batch(int glTexture, int overlay) {
             this.glTexture = glTexture;
+            this.overlay = overlay;
             this.vertices = BufferUtils.createByteBuffer(64 * 1024).order(ByteOrder.nativeOrder());
         }
     }
 
     private static final List<Batch> BATCHES = new ArrayList<Batch>();
     private static Batch current;
+    /** What the game asked to be laid over the creature being drawn now. */
+    private static int overlay;
 
     /** The camera's own transform, undone, so bones come out in world axes. */
     private static final float[] VIEW_INVERSE = new float[16];
@@ -94,9 +111,34 @@ public final class EntityGeometry {
             return;
         }
         viewKnown = invert(GlMatrixMirror.current(), VIEW_INVERSE);
-        for (int i = 0; i < BATCHES.size(); i++) {
-            BATCHES.get(i).count = 0;
+        // Plain batches are kept between frames: there are as many of them as
+        // there are skins on screen, and each one owns a buffer worth keeping.
+        // Overlaid ones are not, because their key is a colour that changes
+        // every tick a creature is hurt — kept, they would accumulate a buffer
+        // per shade of red anything had ever flashed.
+        for (int i = BATCHES.size() - 1; i >= 0; i--) {
+            Batch batch = BATCHES.get(i);
+            if (batch.overlay != 0 && !batch.used) {
+                BATCHES.remove(i);
+                continue;
+            }
+            batch.used = false;
+            batch.count = 0;
         }
+        current = null;
+        // A creature whose drawing threw between the two hooks would otherwise
+        // leave its colour standing for whatever is drawn next.
+        overlay = 0;
+    }
+
+    /**
+     * The colour the game is about to lay over the creature it draws next.
+     *
+     * @param packed ARGB, alpha being how much of the colour to use; 0 for none
+     */
+    public static void setOverlay(int packed) {
+        overlay = packed;
+        current = null;
     }
 
     /**
@@ -221,7 +263,7 @@ public final class EntityGeometry {
 
     /** Eight floats a vertex in, twenty-eight bytes a vertex out. */
     private static void write(float[] shape, float[] m) {
-        Batch batch = batchFor(GlTextureMirror.boundOnDefaultUnit());
+        Batch batch = batchFor(GlTextureMirror.boundOnDefaultUnit(), overlay);
         if (batch == null) {
             return;
         }
@@ -251,21 +293,24 @@ public final class EntityGeometry {
         quadsDrawn += vertices / 4;
     }
 
-    private static Batch batchFor(int glTexture) {
+    private static Batch batchFor(int glTexture, int tint) {
         if (glTexture <= 0) {
             return null;
         }
-        if (current != null && current.glTexture == glTexture) {
+        if (current != null && current.glTexture == glTexture && current.overlay == tint) {
+            current.used = true;
             return current;
         }
         for (int i = 0; i < BATCHES.size(); i++) {
             Batch batch = BATCHES.get(i);
-            if (batch.glTexture == glTexture) {
+            if (batch.glTexture == glTexture && batch.overlay == tint) {
+                batch.used = true;
                 current = batch;
                 return batch;
             }
         }
-        Batch batch = new Batch(glTexture);
+        Batch batch = new Batch(glTexture, tint);
+        batch.used = true;
         BATCHES.add(batch);
         current = batch;
         return batch;
@@ -336,7 +381,7 @@ public final class EntityGeometry {
             // A cutout threshold rather than a particle's: a creature's skin is
             // opaque where it is drawn at all, and the edges of a cape or a
             // wing are a hard boundary, not a fade.
-            bridge.submitSprites(batch.vertices, batch.count, slot, 0.1f);
+            bridge.submitSprites(batch.vertices, batch.count, slot, 0.1f, batch.overlay);
             batch.vertices.clear();
             batches++;
             quads += batch.count / 4;

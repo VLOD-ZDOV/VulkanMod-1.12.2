@@ -95,7 +95,8 @@ public final class VulkanPatchGroups {
         group(ENTITIES, "Creatures",
                 "Creatures are drawn by the game in OpenGL. The Draw Creatures in Vulkan "
                         + "setting stops doing anything.",
-                "BlobShadowMixin", "EntityPassMixin", "ModelBaseMixin", "ModelBoxAccessor",
+                "BlobShadowMixin", "EntityPassMixin", "EntityOverlayMixin", "ModelBaseMixin",
+                "ModelBoxAccessor",
                 "ModelPartMixin");
         group(LIGHTING, "Dynamic Lights",
                 "A torch in the hand or on the floor stops lighting what is around it. The "

@@ -26,6 +26,11 @@ layout(push_constant) uniform Draw {
     // xyz = which way the sun is, in the same camera-relative axes the
     // positions arrive in. w = how much of the shading to believe, 0 = off.
     vec4 sun;
+    // rgb = a colour laid over the skin, a = how much of it. This is the red
+    // flash of a creature taking damage and the white one of a creeper about
+    // to go off; the game does both by replacing what its second texture unit
+    // computes, and there is no second texture unit here to replace.
+    vec4 overlay;
 } draw;
 
 layout(location = 0) in vec4 vColor;
@@ -120,7 +125,14 @@ void main() {
     // one side of that torchlit pig according to where the sun is, in a cave,
     // at night. That is why this lives here, in the pass that still knows.
     vec2 light = vec2(vLight.x, vLight.y * facing);
-    vec3 shaded = texel.rgb * texture(lightmap, light).rgb;
+    // Over the skin, under the light — the order the game uses, and it shows.
+    //
+    // Vanilla lays this on its second texture unit and multiplies by the light
+    // map on the third, so a creature hurt in the dark is a dark red rather
+    // than a lit one. Laying it on after the light instead would make every
+    // hurt mob its own lamp, which is the sort of wrong that looks deliberate.
+    vec3 tinted = mix(texel.rgb, draw.overlay.rgb, draw.overlay.a);
+    vec3 shaded = tinted * texture(lightmap, light).rgb;
     int mode = int(frame.fogColor.a + 0.5);
     if (mode != 0) {
         shaded = mix(frame.fogColor.rgb, shaded, clamp(fogFactor(mode), 0.0, 1.0));

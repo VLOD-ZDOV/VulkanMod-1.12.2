@@ -361,4 +361,16 @@ public interface VulkanBridge {
     boolean submitSprites(java.nio.ByteBuffer vertices, int vertexCount, int spriteSlot,
                           float alphaCutoff);
 
+    /**
+     * The same, with a colour laid over the skin.
+     *
+     * @param overlay packed ARGB, where alpha is how much of the colour to use
+     *                and zero means none. This is how a creature turns red when
+     *                it is hurt: the game does it by rewriting what a texture
+     *                unit computes, which is a thing that exists in the fixed
+     *                pipeline it draws with and not in the one here.
+     */
+    boolean submitSprites(java.nio.ByteBuffer vertices, int vertexCount, int spriteSlot,
+                          float alphaCutoff, int overlay);
+
 }
