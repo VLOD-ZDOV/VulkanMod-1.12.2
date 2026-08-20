@@ -29,7 +29,9 @@ layout(set = 0, binding = 3, std140) uniform Frame {
     mat4 mvp;
     vec4 fogColor;   // rgb = colour, a = mode: 0 off, 1 linear, 2 exp, 3 exp2
     vec4 fogParams;  // x = start, y = end, z = density
-    // x = how many of lights[] are in use; yzw are spare and zeroed.
+    // x = how many of lights[] are in use.
+    // y = how brightly the sun and moon glint off water and ice, 0 = off.
+    // zw are spare and zeroed.
     vec4 lightInfo;
     vec4 lights[32]; // xyz = position relative to the camera, w = light level
     // x = seconds, y = directional light strength (0 = off),

@@ -47,23 +47,6 @@ public final class VulkanConfig {
      */
     static final int DEF_CHUNK_BUILD_THREADS = 0;
     /**
-     * Milliseconds between visibility walks that only pending chunk rebuilds
-     * asked for; 0 leaves vanilla alone.
-     *
-     * The walk is the flood fill in {@code RenderGlobal.setupTerrain} that
-     * decides which chunks are visible, and the game re-runs all of it whenever
-     * the camera moves *or* any chunk is waiting to be rebuilt. Measured with
-     * the game's own profiler at render distance 64, it is 25% to 48% of the
-     * frame, by a wide margin the largest single item — and while a world is
-     * filling in, the second condition holds on every frame, so a camera that
-     * has not moved at all pays for the identical walk again and again.
-     *
-     * A rebuilt chunk can genuinely reveal new area, so this is a rate limit
-     * rather than a removal: the walk still happens, just not ten times in the
-     * same tenth of a second. The visible cost is that a chunk which finished
-     * building may wait up to this long before it is drawn.
-     */
-    /**
      * Near clipping plane in hundredths of a block; 0 keeps vanilla's 0.05.
      *
      * Depth precision at a distance z is roughly {@code z² / (near · 2²⁴)} with
@@ -87,9 +70,10 @@ public final class VulkanConfig {
      */
     static final boolean DEF_VISIBILITY_SEED_CACHE = true;
     /**
-     * Replace the game's visibility flood fill with our own. Off by default:
-     * this is a rewrite of vanilla logic rather than of our renderer, and the
-     * way it fails is by quietly not drawing something.
+     * Replace the game's visibility flood fill with our own. On by default,
+     * and it was not always: this is a rewrite of vanilla logic rather than of
+     * our renderer, and the way it fails is by quietly not drawing something,
+     * so it shipped off until a season of that not happening.
      *
      * The game's own profiler puts that flood fill at a quarter to a half of the
      * frame at render distance 64, against 4.5% for drawing the world. Running
@@ -171,6 +155,10 @@ public final class VulkanConfig {
      * waits on.
      */
     static final boolean DEF_VULKAN_TRANSLUCENT = true;
+    /** Show a frame-time graph in the corner of the screen. */
+    static final boolean DEF_FRAME_GRAPH = false;
+    /** How often the graph's numbers are recomputed, in milliseconds. */
+    static final int DEF_FRAME_GRAPH_INTERVAL = 1000;
     /**
      * Light from carried torches and burning entities, added while the terrain
      * is shaded instead of written into the world.
@@ -180,9 +168,6 @@ public final class VulkanConfig {
      * this way — but it is arithmetic per fragment per source, and it lights
      * only what this renderer draws.
      */
-    static final boolean DEF_FRAME_GRAPH = false;
-    /** How often the graph's numbers are recomputed, in milliseconds. */
-    static final int DEF_FRAME_GRAPH_INTERVAL = 1000;
     static final boolean DEF_DYNAMIC_LIGHTS = false;
     /**
      * How far a light source may be and still be drawn, in blocks. Not how far
@@ -750,9 +735,10 @@ public final class VulkanConfig {
                 "Run this mod's own chunk visibility search instead of the game's. Same answer, "
                         + "same every frame, but out of reused buffers rather than a fresh queue, "
                         + "set and one object per visited chunk. The game's profiler puts its "
-                        + "version at a quarter to a half of the frame at render distance 64. Off "
-                        + "by default because it replaces vanilla logic, and the way that goes "
-                        + "wrong is that something stops being drawn.");
+                        + "version at a quarter to a half of the frame at render distance 64. On "
+                        + "by default now, having shipped off while it was new: it replaces "
+                        + "vanilla logic, and the way that goes wrong is that something quietly "
+                        + "stops being drawn, so turn it off first if anything is missing.");
         fastRebuildNear = config.getBoolean("fastRebuildNear", CATEGORY_OPTIMIZATION,
                 DEF_FAST_REBUILD_NEAR,
                 "Hand the last loop of the terrain setup only the chunks it can act on. That loop "
@@ -825,7 +811,8 @@ public final class VulkanConfig {
                         + "a speed setting: the layer measures 2.6% of a frame either way. It is "
                         + "here because the Vulkan terrain has fog and the OpenGL leftovers do "
                         + "not, so water is currently the one surface that stays clear when "
-                        + "everything around it fades. Off by default while it is new.");
+                        + "everything around it fades. On by default, once water, glass and the "
+                        + "creatures seen through them had been checked by eye.");
         dropVanillaBuffers = config.getBoolean("dropVanillaBuffers", CATEGORY_OPTIMIZATION,
                 DEF_DROP_VANILLA_BUFFERS,
                 "Stop filling the game's own chunk buffers once Vulkan has the geometry. The world "
@@ -1397,9 +1384,6 @@ public final class VulkanConfig {
         chunkPreloadEnabled = value;
         store(CATEGORY_OPTIMIZATION, "chunkPreload", value);
     }
-
-    /** Milliseconds between rebuild-triggered visibility walks; 0 leaves vanilla alone. */
-
 
     public static boolean isVisibilitySeedCacheEnabled() {
         return visibilitySeedCache;

@@ -18,7 +18,7 @@ import net.minecraft.client.settings.GameSettings;
  * buffer names on it, whether or not there is terrain in that cell:
  *
  * <pre>
- *   32  ->    66   x  66 x 16 =    69 696 chunks
+ *   32  ->    65  x  65 x 16 =     67 600 chunks
  *   64  ->   129 x 129 x 16 =    266 256 chunks
  *  128  ->   257 x 257 x 16 =  1 056 784 chunks
  * </pre>

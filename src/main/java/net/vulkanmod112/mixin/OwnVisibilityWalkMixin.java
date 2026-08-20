@@ -126,7 +126,7 @@ public abstract class OwnVisibilityWalkMixin {
                 System.nanoTime() - started);
 
         // Vanilla clears the flag as the first statement of the block being
-        // skipped, and the throttle in VisibilityWalkMixin learns from that
+        // skipped, and the counter in VisibilityWalkMixin learns from that
         // instruction that a walk happened. Neither runs now, so both are done
         // here.
         displayListEntitiesDirty = false;

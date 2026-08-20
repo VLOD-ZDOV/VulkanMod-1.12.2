@@ -81,8 +81,7 @@ public abstract class VisibilityWalkMixin implements WalkTimer {
 
     /**
      * Runs before vanilla overwrites its own record of where the camera was,
-     * which is the only moment this comparison can still be made, and pays back
-     * anything the throttle is holding.
+     * which is the only moment this comparison can still be made.
      */
     @Inject(method = "setupTerrain", at = @At("HEAD"))
     private void vulkanmod112$beginFrame(Entity viewEntity, double partialTicks, ICamera camera,

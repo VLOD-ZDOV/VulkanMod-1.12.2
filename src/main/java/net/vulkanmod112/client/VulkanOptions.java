@@ -105,8 +105,12 @@ final class VulkanOptions {
                                 }),
                         new VActionOption("Potato",
                                 "For a machine this game is too heavy for. Everything Performance "
-                                        + "gives up, plus smooth lighting, mipmaps, clouds and eight "
-                                        + "chunks of view — and a sixty frame ceiling with vsync on. "
+                                        + "gives up, plus smooth lighting, clouds and eight chunks "
+                                        + "of view — and a sixty frame ceiling with vsync on. "
+                                        + "Mipmaps stay on, and deliberately: turning them off is "
+                                        + "the obvious-looking way to make textures cheap and it "
+                                        + "does the reverse, sending distant blocks to read the "
+                                        + "full-size atlas at random. "
                                         + "The ceiling is the point: above the refresh rate of the "
                                         + "screen, extra frames are heat and fan noise for pictures "
                                         + "nobody sees. The world will look plainly worse. Pick this "
@@ -441,8 +445,11 @@ final class VulkanOptions {
                                         + "buffer's precision falls off with the square of distance "
                                         + "divided by this number, and three hundred blocks out it "
                                         + "can no longer separate a snow layer from the block under "
-                                        + "it, whose top face is still drawn. 20 puts the resolvable "
-                                        + "gap comfortably under that, and it is the default here. "
+                                        + "it, whose top face is still drawn. 10 is the default "
+                                        + "here: it leaves the resolvable gap under half of what "
+                                        + "the ripple needs, while 20 — what shipped first — "
+                                        + "reached far enough to open a view through a wall you "
+                                        + "were standing against. "
                                         + "The price is that anything closer to the eye than this is "
                                         + "clipped away, so with your head inside a block a large "
                                         + "value can open a hole in it. Set it to 0 for vanilla.",
@@ -559,8 +566,9 @@ final class VulkanOptions {
                                         + "surface still drawn the old way, stays clear while the "
                                         + "blocks around it do not. It also has to happen before "
                                         + "the game's own chunk buffers can be dropped, which is "
-                                        + "where the video memory saving lives. Off by default "
-                                        + "while it is new; turn it off again if water looks "
+                                        + "where the video memory saving lives. On by default, "
+                                        + "once water, glass and the creatures seen through them "
+                                        + "had been checked by eye; turn it off if water looks "
                                         + "wrong against entities.",
                                 Cost.of(Level.NONE, Level.LOW, Level.LOW), null,
                                 new VSwitchOption.Access() {

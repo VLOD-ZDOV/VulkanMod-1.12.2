@@ -33,8 +33,8 @@ import java.util.Set;
  * This tops the build queue up from the full chunk grid once the visible work
  * is dealt with. Two rules keep it from making things worse:
  *
- * - it only adds when the queue is nearly empty, so on-screen chunks always
- *   win the builder threads;
+ * - it only adds when the queue has run dry, not merely when it is short, so
+ *   on-screen chunks always win the builder threads;
  * - it scans a bounded slice of the grid per frame, resuming where it left
  *   off, because the grid is 129x129x16 at distance 64 and sweeping it every
  *   frame would trade slow loading for a stutter.
