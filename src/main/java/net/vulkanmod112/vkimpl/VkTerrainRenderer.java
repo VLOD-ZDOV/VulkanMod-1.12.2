@@ -1217,6 +1217,8 @@ final class VkTerrainRenderer {
     private float timestampPeriod;
     private boolean timestampsSupported;
     private long gpuNanos;
+    private long gpuTranslucentNanos;
+    private int gpuTranslucentSamples;
     private int gpuSamples;
     // VK-side readback of a horizontal strip of the color target: tells apart
     // "Vulkan drew nothing" from "GL cannot see what Vulkan drew"
@@ -1906,6 +1908,7 @@ final class VkTerrainRenderer {
         long ours = worstGapFence + worstGapWait + worstGapRecord + worstGapSubmit;
         sb.append(String.format("    of that worst frame, %.0f%% was this renderer\n",
                 100.0 * ours / Math.max(1, worstGapNanos)));
+        appendVerdict(sb);
         // Asked of the machine rather than of this renderer, and printed even
         // when it is zero: "no collection ran" is the answer that sends the
         // search back here, and it is worth as much as the other one.
@@ -1960,6 +1963,8 @@ final class VkTerrainRenderer {
         translucentWaitNanos = 0;
         submitCompositeNanos = 0;
         gpuNanos = 0;
+        gpuTranslucentNanos = 0;
+        gpuTranslucentSamples = 0;
         gpuSamples = 0;
         // The marks the per-frame breakdown subtracts from have to go back to
         // zero with the totals they are subtracted from. Left behind, the first
@@ -2318,10 +2323,67 @@ final class VkTerrainRenderer {
         VkQueryPoolCreateInfo info = VkQueryPoolCreateInfo.calloc(stack)
                 .sType(VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO)
                 .queryType(VK_QUERY_TYPE_TIMESTAMP)
-                .queryCount(framesInFlight * 2);
+                // Four a slot, not two: the opaque pass takes the first pair
+                // and the translucent pass the second. Timing only the first
+                // was worse than timing nothing, because every expensive shader
+                // this renderer has — reflection, refraction, absorption — is
+                // in the second, so the number said "the card is idle" exactly
+                // when the card was busiest.
+                .queryCount(framesInFlight * 4);
         LongBuffer pPool = stack.mallocLong(1);
         check(vkCreateQueryPool(device(), info, null, pPool), "vkCreateQueryPool(terrain)");
         queryPool = pPool.get(0);
+    }
+
+    /**
+     * The one line that says where the frame actually went.
+     *
+     * Three numbers were already being measured and never stood next to each
+     * other: how long the whole frame took, how much of it this renderer spent
+     * on the processor, and how long the card was busy with the work this
+     * renderer gave it. Each on its own answers nothing. Together they separate
+     * the only three answers there are, and the third one — that the frame is
+     * neither, and the time is going into waiting for the two halves to agree —
+     * is the one nobody ever guesses and the one this renderer is most able to
+     * cause, owning both sides of the boundary as it does.
+     *
+     * Said in words rather than left as three figures to compare, because the
+     * comparison is the whole content and the person reading the log is looking
+     * for what to do next, not for arithmetic.
+     */
+    private void appendVerdict(StringBuilder sb) {
+        if (!timestampsSupported || gpuSamples == 0) {
+            sb.append("    where the frame went: unknown, this driver has no usable timestamps\n");
+            return;
+        }
+        double frame = worstGapNanos / 1e6;
+        double cpu = (worstGapFence + worstGapWait + worstGapRecord + worstGapSubmit) / 1e6;
+        double opaque = gpuNanos / (double) gpuSamples / 1e6;
+        double water = gpuTranslucentSamples == 0
+                ? 0.0 : gpuTranslucentNanos / (double) gpuTranslucentSamples / 1e6;
+        double gpu = opaque + water;
+        // The fence wait is time already spent waiting for the card, so it is
+        // named apart from the rest: a frame that is mostly this is not a frame
+        // the processor was busy in, whatever the total says.
+        double waiting = (worstGapFence + worstGapWait) / 1e6;
+        String verdict;
+        if (gpu >= frame * 0.7) {
+            verdict = "the card — it is busy for most of the frame, so shading and fill are the limit";
+        } else if (cpu - waiting >= frame * 0.5) {
+            verdict = "this renderer, on the processor — the card finishes early and waits";
+        } else if (waiting >= frame * 0.4 && gpu < frame * 0.5) {
+            verdict = "waiting, not working — neither side is busy, so the time is in the handshake,"
+                    + " the present, or a frame cap";
+        } else {
+            verdict = "somewhere else — not this renderer's processor time and not its card time,"
+                    + " so look at the game, the driver or the collector";
+        }
+        sb.append(String.format(
+                "    where the frame went: %s\n"
+                        + "      worst frame %.1f ms | this renderer on the CPU %.1f ms"
+                        + " (of which %.1f ms was waiting) | card %.1f ms"
+                        + " (opaque %.1f + translucent %.1f over %d and %d samples)\n",
+                verdict, frame, cpu, waiting, gpu, opaque, water, gpuSamples, gpuTranslucentSamples));
     }
 
     private void readGpuTimestamps(MemoryStack stack, int slot) {
@@ -2329,7 +2391,7 @@ final class VkTerrainRenderer {
             return; // this slot has not run yet
         }
         LongBuffer results = stack.mallocLong(2);
-        int result = vkGetQueryPoolResults(device(), queryPool, slot * 2, 2, results, 8,
+        int result = vkGetQueryPoolResults(device(), queryPool, slot * 4, 2, results, 8,
                 VK_QUERY_RESULT_64_BIT);
         if (result != VK_SUCCESS) {
             return; // VK_NOT_READY: skip this sample rather than stall the frame
@@ -2338,6 +2400,21 @@ final class VkTerrainRenderer {
         if (delta > 0) {
             gpuNanos += (long) (delta * timestampPeriod);
             gpuSamples++;
+        }
+        // Asked separately, and allowed to fail on its own. A frame with no
+        // water in front of the camera records no translucent pass at all, and
+        // its pair of queries is never written — reading all four at once would
+        // turn every such frame into VK_NOT_READY and throw the opaque half
+        // away with it.
+        int second = vkGetQueryPoolResults(device(), queryPool, slot * 4 + 2, 2, results, 8,
+                VK_QUERY_RESULT_64_BIT);
+        if (second != VK_SUCCESS) {
+            return;
+        }
+        long translucent = results.get(1) - results.get(0);
+        if (translucent > 0) {
+            gpuTranslucentNanos += (long) (translucent * timestampPeriod);
+            gpuTranslucentSamples++;
         }
     }
 
@@ -2410,9 +2487,12 @@ final class VkTerrainRenderer {
 
             if (timestampsSupported) {
                 // Must be outside a render pass, so it goes first.
-                vkCmdResetQueryPool(commandBuffer, queryPool, slot * 2, 2);
+                // All four reset here, where the frame starts, so the
+                // translucent pair is clean even on a frame that never records
+                // a translucent pass.
+                vkCmdResetQueryPool(commandBuffer, queryPool, slot * 4, 4);
                 vkCmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                        queryPool, slot * 2);
+                        queryPool, slot * 4);
             }
 
             recordAtlasUpload(stack);
@@ -2651,7 +2731,7 @@ final class VkTerrainRenderer {
             }
             if (timestampsSupported) {
                 vkCmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-                        queryPool, activeFrameSlot * 2 + 1);
+                        queryPool, activeFrameSlot * 4 + 1);
             }
             check(vkEndCommandBuffer(commandBuffer), "vkEndCommandBuffer");
 
@@ -3259,6 +3339,13 @@ final class VkTerrainRenderer {
                     .sType(VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO)
                     .flags(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
             check(vkBeginCommandBuffer(cmd, begin), "vkBeginCommandBuffer(translucent)");
+            if (timestampsSupported) {
+                // Reset with the other pair at the top of the opaque buffer,
+                // which is submitted to the same queue before this one, so the
+                // reset has run by the time this is written.
+                vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                        queryPool, slot * 4 + 2);
+            }
 
             // One clear value only: the depth attachment is loaded, not cleared.
             VkClearValue.Buffer clears = VkClearValue.calloc(1, stack);
@@ -3310,6 +3397,10 @@ final class VkTerrainRenderer {
             }
 
             vkCmdEndRenderPass(cmd);
+            if (timestampsSupported) {
+                vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                        queryPool, slot * 4 + 3);
+            }
             check(vkEndCommandBuffer(cmd), "vkEndCommandBuffer(translucent)");
 
             VkSubmitInfo submit = VkSubmitInfo.calloc(stack)
