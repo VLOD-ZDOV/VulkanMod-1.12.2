@@ -887,6 +887,37 @@ final class VkChunkMirror {
                 materialCapacity / (1024.0 * 1024.0), staged, applied, kept, missing);
     }
 
+    /**
+     * Gives up every chunk whose geometry reaches past a point in the buffer.
+     *
+     * Only ever called when the allocator's mark has been found beyond the end
+     * of the buffer it indexes — a state that should not arise and has been
+     * seen once, by fifty bytes. What it protects against is not the overrun
+     * itself but the shape of its consequence: an entry that names bytes which
+     * were never written is indistinguishable, from every other part of this
+     * renderer, from one that names real geometry.
+     *
+     * The ranges are not returned to the free list. They describe a buffer that
+     * is being replaced in the next few lines, and handing them back would put
+     * the one piece of bookkeeping known to be wrong back into circulation to
+     * be trusted a second time. Losing the space until the next full reset is
+     * the cheaper mistake by a wide margin.
+     *
+     * @return how many chunks were given up, for the message that reports it
+     */
+    private int dropEntriesPast(long limit) {
+        Entry[] table = entries.values();
+        int dropped = 0;
+        for (int slot = 0; slot < table.length; slot++) {
+            Entry entry = table[slot];
+            if (entry != null && entry.offset + entry.capacity > limit) {
+                entries.remove(slot);
+                dropped++;
+            }
+        }
+        return dropped;
+    }
+
     private Entry createEntry(int capacity) {
         Entry entry = new Entry();
         entry.capacity = capacity;
@@ -1322,8 +1353,28 @@ final class VkChunkMirror {
                     // is a report and not another investigation.
                     long copied = Math.min(oldUsed, oldCapacity);
                     if (copied != oldUsed) {
-                        LOGGER.warn("Geometry high water mark {} is past the buffer it lives in "
-                                + "({}); copying only what is there", oldUsed, oldCapacity);
+                        // The tail the mark claims was never in this buffer.
+                        //
+                        // Which means the chunks living there were never
+                        // uploaded into anything: there is no data to carry
+                        // forward, only whatever the allocator happened to
+                        // leave. Copying less and printing a warning was what
+                        // stood here, and it left those chunks drawing that —
+                        // triangles out of nowhere that outlive the frame they
+                        // appeared in and point at nothing when reported.
+                        //
+                        // So the range is given up rather than carried over.
+                        // The chunks in it stop being drawn until the game
+                        // rebuilds them, which is a hole and not a lie, and the
+                        // mark is wound back to the last byte that exists so
+                        // that the allocation this growth was for lands
+                        // somewhere real.
+                        int dropped = dropEntriesPast(oldCapacity);
+                        nextGeometryOffset = oldCapacity;
+                        LOGGER.error("Geometry mark {} is past the buffer it indexes ({}); the {} "
+                                        + "bytes beyond it were never uploaded, so {} chunk(s) have "
+                                        + "been dropped and will return when the game rebuilds them",
+                                oldUsed, oldCapacity, oldUsed - oldCapacity, dropped);
                     }
                     VkBufferCopy.Buffer copy = VkBufferCopy.calloc(1, stack);
                     copy.get(0).srcOffset(0).dstOffset(0).size(copied);
