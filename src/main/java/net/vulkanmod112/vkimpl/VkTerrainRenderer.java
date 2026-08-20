@@ -2381,6 +2381,17 @@ final class VkTerrainRenderer {
         // the processor was busy in, whatever the total says.
         double waiting = (worstGapFence + worstGapWait) / 1e6;
         String verdict;
+        // What to do next, printed only where it is the next thing to do.
+        //
+        // Three of these four verdicts name something in this renderer and the
+        // reader can go and look at it. The fourth names the game, and there is
+        // nothing here to look at — but the game keeps its own profiler, and
+        // this report already prints its tree in full. It only fills in while
+        // the game holds that profiler on, which it does only while the chart
+        // is open, so the one flight made to answer this question came back
+        // without the one measurement that answers it. Saying so beside the
+        // verdict is the difference between one flight and two.
+        String next = "";
         if (gpu >= frame * 0.7) {
             verdict = "the card — it is busy for most of the frame, so shading and fill are the limit";
         } else if (cpu - waiting >= frame * 0.5) {
@@ -2391,6 +2402,8 @@ final class VkTerrainRenderer {
         } else {
             verdict = "somewhere else — not this renderer's processor time and not its card time,"
                     + " so look at the game, the driver or the collector";
+            next = "      to find out which: press Shift+F3 and fly again, and the game's own"
+                    + " profiler tree will appear further down this report\n";
         }
         sb.append(String.format(
                 "    where the frame went: %s\n"
@@ -2398,6 +2411,7 @@ final class VkTerrainRenderer {
                         + " (of which %.1f ms was waiting) | card %.1f ms"
                         + " (opaque %.1f + translucent %.1f over %d and %d samples)\n",
                 verdict, frame, cpu, waiting, gpu, opaque, water, gpuSamples, gpuTranslucentSamples));
+        sb.append(next);
     }
 
     private void readGpuTimestamps(MemoryStack stack, int slot) {
