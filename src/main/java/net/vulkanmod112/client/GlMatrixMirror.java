@@ -34,18 +34,45 @@ import java.nio.FloatBuffer;
  */
 public final class GlMatrixMirror {
 
-    /** GL_MODELVIEW. The other modes are tracked only well enough to be ignored. */
+    /** GL_MODELVIEW. Modes other than these two are tracked only enough to be ignored. */
     private static final int MODELVIEW = 5888;
+    /**
+     * GL_TEXTURE, and the reason it is here at all.
+     *
+     * Exactly one thing in the game moves this matrix on a creature: the glint
+     * of enchanted armour, which draws the model twice more with the texture
+     * coordinates scaled, turned and slid along, and the sliding is what makes
+     * it shimmer. Nothing about that reaches the vertices — the model, its
+     * bones and its texture coordinates are identical in all three passes —
+     * so a renderer that captures geometry and ignores this captures three
+     * copies of the same thing and can only draw one of them.
+     */
+    private static final int TEXTURE = 5890;
     private static final int DEPTH = 48;
+    /** Two would do for the glint; eight is room for a mod with an opinion. */
+    private static final int TEXTURE_DEPTH = 8;
 
     private static final float[][] STACK = new float[DEPTH][16];
+    private static final float[][] TEXTURE_STACK = new float[TEXTURE_DEPTH][16];
     private static int top;
+    private static int textureTop;
+    /**
+     * Whether anything has touched the texture matrix since it was last reset.
+     *
+     * Cheaper than comparing sixteen floats on every vertex, and wrong only in
+     * the harmless direction: a transform that happens to be the identity is
+     * reported as present and applied, which changes nothing.
+     */
+    private static boolean textureMoved;
     private static int mode = MODELVIEW;
     private static final float[] SCRATCH = new float[16];
     private static final float[] PRODUCT = new float[16];
 
     static {
         identity(STACK[0]);
+        for (int i = 0; i < TEXTURE_DEPTH; i++) {
+            identity(TEXTURE_STACK[i]);
+        }
     }
 
     private GlMatrixMirror() {
@@ -60,7 +87,39 @@ public final class GlMatrixMirror {
         mode = newMode;
     }
 
+    /** The texture matrix as this mirror believes it to be, column-major. */
+    public static float[] currentTexture() {
+        return TEXTURE_STACK[textureTop];
+    }
+
+    /** False when texture coordinates may be used exactly as they arrived. */
+    public static boolean textureMoved() {
+        return textureMoved;
+    }
+
+    /**
+     * Which matrix the calls below are talking about, or null for a mode this
+     * mirror does not follow.
+     */
+    private static float[] target() {
+        if (mode == MODELVIEW) {
+            return STACK[top];
+        }
+        if (mode == TEXTURE) {
+            return TEXTURE_STACK[textureTop];
+        }
+        return null;
+    }
+
     public static void push() {
+        if (mode == TEXTURE) {
+            if (textureTop + 1 < TEXTURE_DEPTH) {
+                System.arraycopy(TEXTURE_STACK[textureTop], 0,
+                        TEXTURE_STACK[textureTop + 1], 0, 16);
+                textureTop++;
+            }
+            return;
+        }
         if (mode != MODELVIEW) {
             return;
         }
@@ -75,6 +134,12 @@ public final class GlMatrixMirror {
     }
 
     public static void pop() {
+        if (mode == TEXTURE) {
+            if (textureTop > 0) {
+                textureTop--;
+            }
+            return;
+        }
         if (mode != MODELVIEW) {
             return;
         }
@@ -84,19 +149,28 @@ public final class GlMatrixMirror {
     }
 
     public static void loadIdentity() {
-        if (mode == MODELVIEW) {
-            identity(STACK[top]);
+        float[] m = target();
+        if (m == null) {
+            return;
+        }
+        identity(m);
+        if (mode == TEXTURE) {
+            // The glint resets this before each of its two passes and again
+            // when it is done, so this is also how the ordinary case gets its
+            // "nothing to apply" back.
+            textureMoved = textureTop != 0;
         }
     }
 
     public static void translate(double x, double y, double z) {
-        if (mode != MODELVIEW) {
+        float[] m = target();
+        if (m == null) {
             return;
         }
+        textureMoved |= mode == TEXTURE;
         // The last column moved by the matrix's own basis: the same thing
         // multiplying by a translation would do, without the other twelve
         // products that are all zero or one.
-        float[] m = STACK[top];
         float fx = (float) x;
         float fy = (float) y;
         float fz = (float) z;
@@ -107,10 +181,11 @@ public final class GlMatrixMirror {
     }
 
     public static void scale(double x, double y, double z) {
-        if (mode != MODELVIEW) {
+        float[] m = target();
+        if (m == null) {
             return;
         }
-        float[] m = STACK[top];
+        textureMoved |= mode == TEXTURE;
         float fx = (float) x;
         float fy = (float) y;
         float fz = (float) z;
@@ -128,9 +203,10 @@ public final class GlMatrixMirror {
      * models about single axes and mods do not have to.
      */
     public static void rotate(float angleDegrees, float x, float y, float z) {
-        if (mode != MODELVIEW) {
+        if (target() == null) {
             return;
         }
+        textureMoved |= mode == TEXTURE;
         float length = (float) Math.sqrt(x * x + y * y + z * z);
         if (length == 0.0f) {
             return;
@@ -159,19 +235,21 @@ public final class GlMatrixMirror {
         SCRATCH[13] = 0.0f;
         SCRATCH[14] = 0.0f;
         SCRATCH[15] = 1.0f;
-        multiplyInto(STACK[top], SCRATCH);
+        multiplyInto(target(), SCRATCH);
     }
 
     /** The buffer is the caller's and its position is not disturbed. */
     public static void multiply(FloatBuffer matrix) {
-        if (mode != MODELVIEW || matrix == null || matrix.remaining() < 16) {
+        float[] m = target();
+        if (m == null || matrix == null || matrix.remaining() < 16) {
             return;
         }
+        textureMoved |= mode == TEXTURE;
         int at = matrix.position();
         for (int i = 0; i < 16; i++) {
             SCRATCH[i] = matrix.get(at + i);
         }
-        multiplyInto(STACK[top], SCRATCH);
+        multiplyInto(m, SCRATCH);
     }
 
     private static void multiplyInto(float[] target, float[] right) {

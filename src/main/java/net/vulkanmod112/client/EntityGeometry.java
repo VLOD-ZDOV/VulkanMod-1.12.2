@@ -274,6 +274,13 @@ public final class EntityGeometry {
         short lightV = GlTextureMirror.lightV();
         ByteBuffer out = batch.vertices;
         int at = batch.count * VERTEX_BYTES;
+        // The texture matrix, which is the identity for every ordinary
+        // creature and is not for the glint of enchanted armour — that draws
+        // the same model twice more and slides these coordinates across it,
+        // which is the whole of the shimmer. Read once for the batch rather
+        // than per vertex; it cannot move inside one part.
+        boolean slid = GlMatrixMirror.textureMoved();
+        float[] tex = slid ? GlMatrixMirror.currentTexture() : null;
         for (int v = 0; v < vertices; v++) {
             int in = v * 8;
             float x = shape[in];
@@ -282,8 +289,20 @@ public final class EntityGeometry {
             out.putFloat(at, m[0] * x + m[4] * y + m[8] * z + m[12]);
             out.putFloat(at + 4, m[1] * x + m[5] * y + m[9] * z + m[13]);
             out.putFloat(at + 8, m[2] * x + m[6] * y + m[10] * z + m[14]);
-            out.putFloat(at + 12, shape[in + 3]);
-            out.putFloat(at + 16, shape[in + 4]);
+            float texU = shape[in + 3];
+            float texV = shape[in + 4];
+            if (slid) {
+                // Two coordinates through a four by four, which is all the
+                // game ever puts here: a scale, a turn about z and a slide
+                // along y. The third row is not read because there is no third
+                // coordinate to read it with.
+                float slidU = tex[0] * texU + tex[4] * texV + tex[12];
+                float slidV = tex[1] * texU + tex[5] * texV + tex[13];
+                texU = slidU;
+                texV = slidV;
+            }
+            out.putFloat(at + 12, texU);
+            out.putFloat(at + 16, texV);
             out.putInt(at + 20, shade(colour, shape, in, m));
             out.putShort(at + 24, lightU);
             out.putShort(at + 26, lightV);
