@@ -8,6 +8,40 @@ rather than crashing.
 
 ## Done
 
+### 0.10.0
+
+- **The picture has room above white.** The game's own frame is converted to sixteen bits a
+  channel and the grading pass brings the range back down along a film curve, so a highlight on
+  water keeps the ripple inside it and a torch keeps a core instead of becoming a flat patch. The
+  driver is asked first, and the frame goes back to eight bits by itself the moment the pass that
+  would close the range down is not going to run.
+- **Three effects gathered from the finished picture**, so they land on whatever drew into it —
+  a chest, a creature, another mod's machine — and cost nothing to know what that thing was: a
+  short shadow where a thing meets the ground, shafts of sunlight in the air, and the shade the
+  clouds overhead throw on the world.
+- **The sun glints off water**, and at night so does the moon: a narrow streak that moves with the
+  ripples, which a reflection cannot give — a mirror shows what is behind you, a glint shows where
+  the light is. It fades out with distance rather than growing as you climb.
+- **Ice gathers the sky**, **light bands on the bed of shallow water**, **rain darkens and wets
+  what it lands on**, **fog leans warm towards the sun**, and **clouds take the colour of the sky
+  they hang in** rather than staying white in an orange sunset.
+- **Water has a depth**, so a puddle and an ocean stop looking alike, with foam where the water is
+  thinnest — both riding a number the shader was already computing.
+- **Light comes through a canopy.** A ray reads no textures, so a leaf used to stop a shadow the
+  way stone does. A quad is asked how much of it is holes rather than where they are, and light
+  passes with that probability.
+- **Creatures are drawn in a subpass of their own**, so they hide one another by depth rather than
+  by draw order, land in the depth the water reflects against, and cast a shadow of their own
+  shape instead of the round patch vanilla puts under a chicken and a horse alike.
+- **The mod has a logo, an author line, a licence and somewhere for its bugs to go**, which
+  Cleanroom draws and plain Forge stores without looking at.
+- Fixed: the world was black on AMD, over one line that bound only half of what it named; grass
+  darkened when you turned round; shallow water at a shore was painted the colour of an ocean;
+  contact shadows flickered indoors on the smallest movement; a torch lost its shadow when you
+  took a step; the desert was wet in a storm; rain wetted grass and leaves; ore looked like stone
+  on the Potato preset; the renderer refused to start on any modern Java over a limit that was
+  not real.
+
 ### 0.9.0
 
 - **The whole picture is graded**, not only the blocks. It runs on the marker the game raises once
