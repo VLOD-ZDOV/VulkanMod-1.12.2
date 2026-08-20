@@ -1197,10 +1197,11 @@ final class VulkanOptions {
                                 }),
                         new VSwitchOption("Check For Updates",
                                 "Ask once, when the game starts, whether a newer build of this "
-                                        + "mod exists, and say so at the top of this screen. Two "
-                                        + "requests, in this order: the page it is published on, "
-                                        + "then the repository it is built from — either answer is "
-                                        + "the same answer, so the first to arrive wins. What "
+                                        + "mod exists, and say so at the top of this screen. Both "
+                                        + "the page it is published on and the repository it is "
+                                        + "built from are asked, because a build can be on one and "
+                                        + "not yet on the other, and the button then leads to "
+                                        + "whichever of them actually has it. What "
                                         + "leaves the machine is a GET with no query, no body and "
                                         + "no identifier; the only thing said about you is a user "
                                         + "agent naming this mod and its version, which one of the "

@@ -12,15 +12,21 @@ import java.util.regex.Pattern;
 /**
  * Whether a newer build of this mod exists, asked once and never again.
  *
- * <h2>Two places, and the order is deliberate</h2>
+ * <h2>Two places, both asked, and the order still matters</h2>
  *
- * CurseForge is asked first because that is where a download is worth something
- * to whoever wrote this, and GitHub second because it is the one that cannot be
- * behind a service that decided today to answer robots differently. Either
- * answer is the same answer, so the first that arrives wins and the second is
- * never asked. A version that comes back from GitHub is still pointed at the
- * CurseForge page to download, since the number and the place are separate
- * questions.
+ * Both are asked every time rather than the second only when the first fails,
+ * and that is the difference between two sources and one with a spare. A build
+ * can be on one and not yet on the other — published to the repository and not
+ * uploaded to the page, or the reverse — and a check that stops at the first
+ * answer reports the older of the two as the newest there is.
+ *
+ * So the highest version either of them names is the answer, and the link is
+ * decided separately: it points at CurseForge whenever CurseForge has that
+ * version, because a download there is worth something to whoever wrote this,
+ * and at the repository's releases when it does not — whether because the file
+ * is not up there yet or because the service did not answer at all. Sending
+ * somebody to a page that has not got what they were just told about is a
+ * worse outcome than losing the click.
  *
  * <h2>What leaves the machine</h2>
  *
@@ -41,9 +47,10 @@ import java.util.regex.Pattern;
  */
 public final class UpdateCheck {
 
-    /** Where a player is sent, whichever source answered. */
-    public static final String DOWNLOAD_PAGE =
+    private static final String CURSEFORGE_PAGE =
             "https://www.curseforge.com/minecraft/mc-mods/vulkanmod-legacy";
+    private static final String GITHUB_PAGE =
+            "https://github.com/VLOD-ZDOV/VulkanMod-1.12.2/releases";
 
     private static final String CURSEFORGE =
             "https://api.cfwidget.com/minecraft/mc-mods/vulkanmod-legacy";
@@ -68,6 +75,7 @@ public final class UpdateCheck {
     private static final int READ_LIMIT = 256 * 1024;
 
     private static volatile String newer;
+    private static volatile String page = CURSEFORGE_PAGE;
     private static volatile boolean started;
 
     private UpdateCheck() {
@@ -76,6 +84,17 @@ public final class UpdateCheck {
     /** The version worth telling the player about, or null. */
     public static String newerVersion() {
         return newer;
+    }
+
+    /**
+     * Where to send somebody who wants it — the page that actually has it.
+     *
+     * Defaults to CurseForge and stays there unless the check found the newer
+     * build only in the repository, so a session where nothing was found at all
+     * still points somewhere sensible.
+     */
+    public static String downloadPage() {
+        return page;
     }
 
     public static void start() {
@@ -94,15 +113,24 @@ public final class UpdateCheck {
     }
 
     private static void look() {
-        String found = ask(CURSEFORGE, FILE);
-        if (found == null) {
-            found = ask(GITHUB, TAG);
+        String published = ask(CURSEFORGE, FILE);
+        String tagged = ask(GITHUB, TAG);
+        String found = published;
+        if (found == null || (tagged != null && isNewer(tagged, found))) {
+            found = tagged;
         }
-        if (found != null && isNewer(found, Tags.VERSION)) {
-            newer = found;
-            net.vulkanmod112.VulkanMod112.LOGGER.info(
-                    "Version {} is available; this is {}", found, Tags.VERSION);
+        if (found == null || !isNewer(found, Tags.VERSION)) {
+            return;
         }
+        // The page keeps the click only when the page has the file. Equal
+        // counts as having it: the usual case is both services carrying the
+        // same build, and that is the case the preference exists for.
+        boolean onThePage = published != null && !isNewer(found, published);
+        page = onThePage ? CURSEFORGE_PAGE : GITHUB_PAGE;
+        newer = found;
+        net.vulkanmod112.VulkanMod112.LOGGER.info(
+                "Version {} is available and this is {}; sending anyone who wants it to {}",
+                found, Tags.VERSION, onThePage ? "the published page" : "the repository releases");
     }
 
     /** @return the highest version the answer mentions, or null for any failure */

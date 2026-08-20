@@ -86,7 +86,7 @@ public final class GuiVulkanSettings extends GuiScreen {
             if (opening) {
                 try {
                     java.awt.Desktop.getDesktop().browse(
-                            new java.net.URI(UpdateCheck.DOWNLOAD_PAGE));
+                            new java.net.URI(UpdateCheck.downloadPage()));
                 } catch (Throwable ignored) {
                     // A machine with no browser to hand is not a fault worth a
                     // crash report; the address was on the screen a moment ago.
@@ -174,7 +174,7 @@ public final class GuiVulkanSettings extends GuiScreen {
             // a browser somewhere without showing where has to be trusted
             // rather than checked.
             this.mc.displayGuiScreen(new net.minecraft.client.gui.GuiConfirmOpenLink(
-                    this, UpdateCheck.DOWNLOAD_PAGE, UPDATE, false));
+                    this, UpdateCheck.downloadPage(), UPDATE, false));
             return;
         }
         if (button.id == DONE) {
