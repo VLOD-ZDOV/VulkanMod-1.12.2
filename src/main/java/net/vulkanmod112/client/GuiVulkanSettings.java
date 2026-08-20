@@ -27,6 +27,7 @@ import java.io.IOException;
 public final class GuiVulkanSettings extends GuiScreen {
 
     private static final int DONE = 200;
+    private static final int UPDATE = 201;
     private static final int RESET = 201;
     private static final int PAGE_BUTTON_BASE = 300;
 
@@ -78,6 +79,25 @@ public final class GuiVulkanSettings extends GuiScreen {
         this.parent = parent;
     }
 
+    /** The answer to the link confirmation opened above. */
+    @Override
+    public void confirmClicked(boolean opening, int id) {
+        if (id == UPDATE) {
+            if (opening) {
+                try {
+                    java.awt.Desktop.getDesktop().browse(
+                            new java.net.URI(UpdateCheck.DOWNLOAD_PAGE));
+                } catch (Throwable ignored) {
+                    // A machine with no browser to hand is not a fault worth a
+                    // crash report; the address was on the screen a moment ago.
+                }
+            }
+            this.mc.displayGuiScreen(this);
+            return;
+        }
+        super.confirmClicked(opening, id);
+    }
+
     @Override
     public void initGui() {
         this.buttonList.clear();
@@ -116,6 +136,14 @@ public final class GuiVulkanSettings extends GuiScreen {
         // arrow keys and the mouse still work, so nothing is taken away by it.
         this.search.setFocused(true);
         refreshSearch();
+        // Only when there is something to press it for. A button that is
+        // there and greyed out the rest of the time would be a promise of news
+        // on every screen that has none.
+        String newer = UpdateCheck.newerVersion();
+        if (newer != null) {
+            this.buttonList.add(new GuiButton(UPDATE, this.width / 2 + 56, this.height - 27, 98, 20,
+                    Lang.tr(Lang.UI, "Get") + " " + newer));
+        }
         this.buttonList.add(new GuiButton(RESET, this.width / 2 - 154, this.height - 27, 100, 20,
                 Lang.tr(Lang.UI, "Reset")));
         this.buttonList.add(new GuiButton(DONE, this.width / 2 - 50, this.height - 27, 150, 20,
@@ -138,6 +166,15 @@ public final class GuiVulkanSettings extends GuiScreen {
     @Override
     protected void actionPerformed(GuiButton button) throws IOException {
         if (!button.enabled) {
+            return;
+        }
+        if (button.id == UPDATE) {
+            // Through the game's own confirmation, which is not a formality:
+            // it shows the address before anything opens, and a mod that sends
+            // a browser somewhere without showing where has to be trusted
+            // rather than checked.
+            this.mc.displayGuiScreen(new net.minecraft.client.gui.GuiConfirmOpenLink(
+                    this, UpdateCheck.DOWNLOAD_PAGE, UPDATE, false));
             return;
         }
         if (button.id == DONE) {
@@ -211,6 +248,13 @@ public final class GuiVulkanSettings extends GuiScreen {
             gpu = gpu + " — " + vram + " MiB";
         }
         this.drawCenteredString(this.fontRenderer, gpu, this.width / 2, 24, 0x909090);
+        String newer = UpdateCheck.newerVersion();
+        if (newer != null) {
+            this.drawCenteredString(this.fontRenderer,
+                    Lang.tr(Lang.UI, "Version") + " " + newer + " "
+                            + Lang.tr(Lang.UI, "is available"),
+                    this.width / 2, 34, 0xE0B060);
+        }
         drawVramBar();
 
         drawRect(this.listLeft - 2, this.listTop - 2, this.listLeft + this.listWidth + 2,

@@ -1195,6 +1195,32 @@ final class VulkanOptions {
                                         VulkanConfig.setShowMaterials(value);
                                     }
                                 }),
+                        new VSwitchOption("Check For Updates",
+                                "Ask once, when the game starts, whether a newer build of this "
+                                        + "mod exists, and say so at the top of this screen. Two "
+                                        + "requests, in this order: the page it is published on, "
+                                        + "then the repository it is built from — either answer is "
+                                        + "the same answer, so the first to arrive wins. What "
+                                        + "leaves the machine is a GET with no query, no body and "
+                                        + "no identifier; the only thing said about you is a user "
+                                        + "agent naming this mod and its version, which one of the "
+                                        + "two services refuses a request without. Nothing about "
+                                        + "the machine, the player, the world or the other mods is "
+                                        + "collected, sent or written down. Off means the requests "
+                                        + "are never made rather than made and thrown away.",
+                                Cost.of(Level.NONE, Level.NONE, Level.NONE),
+                                "Takes effect the next time the game starts.",
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return VulkanConfig.isUpdateCheck();
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        VulkanConfig.setUpdateCheck(value);
+                                    }
+                                }),
                         new VSwitchOption("Show Creature Light",
                                 "Paint creatures with their own shading term and nothing else, "
                                         + "flat grey: white is a face turned to the sun, dark "

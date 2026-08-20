@@ -28,6 +28,10 @@ public class VulkanMod112 {
         // diagnostics file is worth asking for on its own rather than always
         // alongside the game's log.
         net.vulkanmod112.client.Diagnostics.startCapture();
+        // On its own daemon thread, so the answer is waiting by the time
+        // anybody opens the settings screen rather than being fetched while
+        // they look at it.
+        net.vulkanmod112.client.UpdateCheck.start();
         // Independent of Vulkan: the zoom must work even where the renderer
         // falls back to OpenGL, so it is registered before anything can fail.
         net.vulkanmod112.client.Zoom.register();

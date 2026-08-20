@@ -375,6 +375,14 @@ public final class VulkanConfig {
     /** How much a creature's own faces shade themselves against the sun. */
     static final int DEF_CREATURE_LIGHT = 0;
     static final boolean DEF_SHOW_CREATURE_LIGHT = false;
+    /**
+     * Ask once a session whether a newer build exists.
+     *
+     * On, unlike the effects, and for a different kind of reason: this one does
+     * not trade anything away, and the cost of it being off is that somebody
+     * plays a version whose bugs were fixed a month ago and reports them again.
+     */
+    static final boolean DEF_UPDATE_CHECK = true;
     /** How dark the shadow of the game's own clouds may go. */
     static final int DEF_CLOUD_SHADOWS = 0;
     /** How bright the shafts of light from the sun may be. */
@@ -599,6 +607,7 @@ public final class VulkanConfig {
     private static volatile int contactShadows = DEF_CONTACT_SHADOWS;
     private static volatile int creatureLight = DEF_CREATURE_LIGHT;
     private static boolean showCreatureLight = DEF_SHOW_CREATURE_LIGHT;
+    private static boolean updateCheck = DEF_UPDATE_CHECK;
     private static volatile int cloudShadows = DEF_CLOUD_SHADOWS;
     private static volatile int godRays = DEF_GOD_RAYS;
     private static volatile boolean hdrFrame = DEF_HDR_FRAME;
@@ -936,6 +945,8 @@ public final class VulkanConfig {
         creatureLight = config.getInt("creatureLight", CATEGORY_GENERAL,
                 DEF_CREATURE_LIGHT, 0, 100,
                 "How much a creature shades its own faces against the sun, so that a cow in a lit world is lit like the world instead of flat against it. The face is taken from the geometry being drawn rather than from the depth of the picture, so it is exact and has no outline around it. Only the sky half of the game's own lighting is moved, never the block half - a creature in a cave beside a torch is left exactly as the game drew it, whatever this is set to, and that is by construction rather than by tuning. Needs Draw Creatures in Vulkan.");
+        updateCheck = config.getBoolean("updateCheck", CATEGORY_GENERAL, DEF_UPDATE_CHECK,
+                "Ask once when the game starts whether a newer build of this mod exists, and say so at the top of this screen. Two GET requests with no query, no body and no identifier: the only thing said about you is a user agent naming this mod and its version, which one of the two services refuses a request without. Nothing about the machine, the player, the world or the other mods is collected or sent. Off means the requests are never made.");
         showCreatureLight = config.getBoolean("showCreatureLight", CATEGORY_ADVANCED,
                 DEF_SHOW_CREATURE_LIGHT,
                 "Paint creatures with the shading term on its own, flat grey, and nothing else. "
@@ -1277,6 +1288,7 @@ public final class VulkanConfig {
         setContactShadows(DEF_CONTACT_SHADOWS);
         setCreatureLight(DEF_CREATURE_LIGHT);
         setShowCreatureLight(DEF_SHOW_CREATURE_LIGHT);
+        setUpdateCheck(DEF_UPDATE_CHECK);
         setCloudShadows(DEF_CLOUD_SHADOWS);
         setGodRays(DEF_GOD_RAYS);
         setHdrFrame(DEF_HDR_FRAME);
@@ -1717,6 +1729,15 @@ public final class VulkanConfig {
         showCreatureLight = value;
         store(CATEGORY_ADVANCED, "showCreatureLight", value);
         applySystemProperties();
+    }
+
+    public static boolean isUpdateCheck() {
+        return updateCheck;
+    }
+
+    public static void setUpdateCheck(boolean value) {
+        updateCheck = value;
+        store(CATEGORY_GENERAL, "updateCheck", value);
     }
 
     public static int getLeafShadows() {
