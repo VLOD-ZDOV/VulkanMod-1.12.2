@@ -133,6 +133,13 @@ public final class EntityGeometry {
             }
             batch.used = false;
             batch.count = 0;
+            // Cleared, not carried. A batch outlives the frame it was made in,
+            // and this says what was done to the coordinates during one pass —
+            // left standing, one enchanted thing seen once would keep that
+            // skin on the glint's pipeline for the rest of the session, where
+            // it is added to the picture rather than drawn into it and writes
+            // no depth. That is a creature you can see through.
+            batch.glint = false;
         }
         current = null;
         // A creature whose drawing threw between the two hooks would otherwise
@@ -409,8 +416,10 @@ public final class EntityGeometry {
         // behind it, and be painted over a moment later.
         int batches = submit(bridge, false);
         int quads = lastPassQuads;
-        batches += submit(bridge, true);
+        int glints = submit(bridge, true);
         quads += lastPassQuads;
+        batches += glints;
+        lastGlints = glints;
         lastBatches = batches;
         lastQuads = quads;
         if (quads > 0) {
@@ -422,6 +431,17 @@ public final class EntityGeometry {
 
     /** Quads handed over by the {@link #submit} call that just returned. */
     private static int lastPassQuads;
+    /**
+     * How many of last frame's batches went out as the shimmer of enchanted
+     * armour rather than as skins.
+     *
+     * Reported because the two are told apart by watching a matrix the game
+     * moves for its own reasons elsewhere, and getting that wrong does not
+     * look like a wrong answer — it looks like the creatures are missing. A
+     * number here as large as the batch count beside it says every skin was
+     * mistaken for a glint, which is the whole diagnosis in one figure.
+     */
+    private static int lastGlints;
 
     /** @return how many batches were handed over */
     private static int submit(VulkanBridge bridge, boolean wantGlint) {
@@ -507,7 +527,8 @@ public final class EntityGeometry {
         if (!VulkanConfig.isVulkanEntities()) {
             return "vulkan entities: off";
         }
-        return "vulkan entities: " + lastQuads + " quads in " + lastBatches + " skins last frame; "
+        return "vulkan entities: " + lastQuads + " quads in " + lastBatches + " skins last frame ("
+                + lastGlints + " of them the shimmer of enchanted armour); "
                 + framesDrawn + " frames drawn, " + partsDrawn + " parts, " + quadsDrawn
                 + " quads total" + (skinsRefused > 0 ? "; " + skinsRefused + " skins had no slot"
                 : "");

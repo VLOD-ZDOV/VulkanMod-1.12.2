@@ -60,6 +60,20 @@ public final class GlTextureMirror {
     }
 
     /**
+     * Whether the calls happening now are about the unit a skin is sampled on.
+     *
+     * OpenGL keeps a texture matrix per unit, and the game uses that: the light
+     * map lives on its own unit with a permanent scale and offset on it, set
+     * once and never taken off. Anything mirroring the texture matrix without
+     * asking which unit it belongs to reads that offset as though it were the
+     * skin's, which is the difference between "nothing is transforming these
+     * coordinates" and "everything is".
+     */
+    public static boolean onDefaultUnit() {
+        return activeUnit == 0;
+    }
+
+    /**
      * The colour and the light the fixed-function pipeline would have applied.
      *
      * A model's vertices carry neither. The display list holds position,

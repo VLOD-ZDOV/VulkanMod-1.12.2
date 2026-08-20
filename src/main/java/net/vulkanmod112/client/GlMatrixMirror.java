@@ -3,7 +3,8 @@ package net.vulkanmod112.client;
 import java.nio.FloatBuffer;
 
 /**
- * A copy of OpenGL's model-view matrix, kept by watching what is done to it.
+ * A copy of OpenGL's model-view matrix, and of one of its texture matrices,
+ * kept by watching what is done to them.
  *
  * <h2>Why this is here at all</h2>
  *
@@ -46,6 +47,17 @@ public final class GlMatrixMirror {
      * bones and its texture coordinates are identical in all three passes —
      * so a renderer that captures geometry and ignores this captures three
      * copies of the same thing and can only draw one of them.
+     *
+     * <b>Only the unit a skin is sampled on is followed.</b> OpenGL keeps one
+     * of these per texture unit, and the game leans on that: {@code
+     * EntityRenderer.enableLightmap} puts a scale of a two hundred and
+     * fifty-sixth and an offset of eight on the light map's unit, once, and
+     * never takes them off again. Followed without asking which unit it
+     * belonged to, that offset was read as the skin's — so from the first
+     * frame of every session every creature looked like a glint, and was drawn
+     * as one: added rather than laid down, no depth of its own, and its
+     * texture read from a single texel. On screen that is a creature you can
+     * see through.
      */
     private static final int TEXTURE = 5890;
     private static final int DEPTH = 48;
@@ -57,13 +69,23 @@ public final class GlMatrixMirror {
     private static int top;
     private static int textureTop;
     /**
-     * Whether anything has touched the texture matrix since it was last reset.
+     * Whether anything has touched the texture matrix at each level of its
+     * stack, since that level was last reset.
      *
-     * Cheaper than comparing sixteen floats on every vertex, and wrong only in
+     * Cheaper than comparing sixteen floats on every part, and wrong only in
      * the harmless direction: a transform that happens to be the identity is
      * reported as present and applied, which changes nothing.
+     *
+     * One per level rather than one flag, because the two things in the game
+     * that move this matrix reset it in different ways. The glint of enchanted
+     * armour loads the identity back when it is done; the glint of an
+     * enchanted item in a slot pushes, moves, and pops — and a single flag,
+     * having no way to know what a pop undid, stayed set from the first
+     * enchanted thing on the hotbar until the game was closed.
      */
-    private static boolean textureMoved;
+    private static final boolean[] TEXTURE_MOVED = new boolean[TEXTURE_DEPTH];
+    /** Pushes past the top of the texture stack, so pops can be paired with them. */
+    private static int textureOverflow;
     private static int mode = MODELVIEW;
     private static final float[] SCRATCH = new float[16];
     private static final float[] PRODUCT = new float[16];
@@ -94,7 +116,7 @@ public final class GlMatrixMirror {
 
     /** False when texture coordinates may be used exactly as they arrived. */
     public static boolean textureMoved() {
-        return textureMoved;
+        return TEXTURE_MOVED[textureTop];
     }
 
     /**
@@ -105,18 +127,38 @@ public final class GlMatrixMirror {
         if (mode == MODELVIEW) {
             return STACK[top];
         }
-        if (mode == TEXTURE) {
+        if (mode == TEXTURE && GlTextureMirror.onDefaultUnit()) {
             return TEXTURE_STACK[textureTop];
         }
         return null;
     }
 
+    /** True while the calls coming in are about the texture matrix we follow. */
+    private static boolean onTexture() {
+        return mode == TEXTURE && GlTextureMirror.onDefaultUnit();
+    }
+
+    private static void markTextureMoved() {
+        if (onTexture()) {
+            TEXTURE_MOVED[textureTop] = true;
+        }
+    }
+
     public static void push() {
         if (mode == TEXTURE) {
+            if (!GlTextureMirror.onDefaultUnit()) {
+                return;
+            }
             if (textureTop + 1 < TEXTURE_DEPTH) {
                 System.arraycopy(TEXTURE_STACK[textureTop], 0,
                         TEXTURE_STACK[textureTop + 1], 0, 16);
+                TEXTURE_MOVED[textureTop + 1] = TEXTURE_MOVED[textureTop];
                 textureTop++;
+            } else {
+                // Counted rather than dropped: an unpaired pop would hand back
+                // a level that was never left, and the transform of whatever
+                // pushed would stay applied to everything after it.
+                textureOverflow++;
             }
             return;
         }
@@ -135,7 +177,12 @@ public final class GlMatrixMirror {
 
     public static void pop() {
         if (mode == TEXTURE) {
-            if (textureTop > 0) {
+            if (!GlTextureMirror.onDefaultUnit()) {
+                return;
+            }
+            if (textureOverflow > 0) {
+                textureOverflow--;
+            } else if (textureTop > 0) {
                 textureTop--;
             }
             return;
@@ -158,7 +205,7 @@ public final class GlMatrixMirror {
             // The glint resets this before each of its two passes and again
             // when it is done, so this is also how the ordinary case gets its
             // "nothing to apply" back.
-            textureMoved = textureTop != 0;
+            TEXTURE_MOVED[textureTop] = false;
         }
     }
 
@@ -167,7 +214,7 @@ public final class GlMatrixMirror {
         if (m == null) {
             return;
         }
-        textureMoved |= mode == TEXTURE;
+        markTextureMoved();
         // The last column moved by the matrix's own basis: the same thing
         // multiplying by a translation would do, without the other twelve
         // products that are all zero or one.
@@ -185,7 +232,7 @@ public final class GlMatrixMirror {
         if (m == null) {
             return;
         }
-        textureMoved |= mode == TEXTURE;
+        markTextureMoved();
         float fx = (float) x;
         float fy = (float) y;
         float fz = (float) z;
@@ -206,7 +253,7 @@ public final class GlMatrixMirror {
         if (target() == null) {
             return;
         }
-        textureMoved |= mode == TEXTURE;
+        markTextureMoved();
         float length = (float) Math.sqrt(x * x + y * y + z * z);
         if (length == 0.0f) {
             return;
@@ -244,7 +291,7 @@ public final class GlMatrixMirror {
         if (m == null || matrix == null || matrix.remaining() < 16) {
             return;
         }
-        textureMoved |= mode == TEXTURE;
+        markTextureMoved();
         int at = matrix.position();
         for (int i = 0; i < 16; i++) {
             SCRATCH[i] = matrix.get(at + i);
