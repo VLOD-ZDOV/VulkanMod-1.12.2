@@ -57,7 +57,23 @@ public class VulkanCorePlugin implements IFMLLoadingPlugin, IEarlyMixinLoader {
     private static final String[] RENDERER_JAR_MARKERS = {
             "optifine", "shadersmod", "celeritas", "actinium",
             "nothirium", "vulcanizator",
+            // The Sodium ports and their forks. Found by looking rather than by
+            // waiting for the crash report: every one of these replaces the
+            // chunk renderer, and a list of them that is only ever extended by
+            // people whose game already broke is a list that is always one
+            // release behind.
+            "vintagium", "relictium", "neonium", "magnesium",
     };
+    /**
+     * A file beside the settings where anyone can name one more.
+     *
+     * The list above will always be behind — somebody forks a renderer, gives
+     * it a name nobody here has heard, and the two of them fight over the
+     * terrain with no way to say so short of waiting for this mod to ship
+     * again. One line in a text file settles it, and it is read at the only
+     * moment it could be useful, which is before either renderer has loaded.
+     */
+    private static final String STAND_ASIDE_FILE = "vulkanmod112-standaside.txt";
     /**
      * Comma-separated extra jar-name fragments, for renderer replacements that
      * appear after this version ships: -Dvulkanmod112.extraRendererMarkers=foo,bar
@@ -122,14 +138,97 @@ public class VulkanCorePlugin implements IFMLLoadingPlugin, IEarlyMixinLoader {
                     return entry.getName();
                 }
             }
-            for (String marker : System.getProperty(EXTRA_MARKERS_PROPERTY, "").split(",")) {
-                String trimmed = marker.trim().toLowerCase(Locale.ROOT);
-                if (!trimmed.isEmpty() && name.contains(trimmed)) {
+            for (String marker : namedByHand()) {
+                if (name.contains(marker)) {
                     return entry.getName();
                 }
             }
         }
         return null;
+    }
+
+
+    /** Cached: the folder is walked once per jar and this does not change. */
+    private static List<String> namedByHand;
+
+    /**
+     * Markers the player added — on the command line, or in the file beside the
+     * settings, which is written out the first time this runs so that it can be
+     * found without being documented.
+     */
+    private static List<String> namedByHand() {
+        if (namedByHand != null) {
+            return namedByHand;
+        }
+        List<String> markers = new ArrayList<String>();
+        for (String marker : System.getProperty(EXTRA_MARKERS_PROPERTY, "").split(",")) {
+            add(markers, marker);
+        }
+        try {
+            File home = Launch.minecraftHome;
+            File config = new File(home == null ? new File(".") : home, "config");
+            File file = new File(config, STAND_ASIDE_FILE);
+            if (!file.isFile()) {
+                writeTemplate(config, file);
+            } else {
+                java.io.BufferedReader reader = new java.io.BufferedReader(
+                        new java.io.InputStreamReader(new java.io.FileInputStream(file), "UTF-8"));
+                try {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        int hash = line.indexOf('#');
+                        add(markers, hash < 0 ? line : line.substring(0, hash));
+                    }
+                } finally {
+                    reader.close();
+                }
+            }
+        } catch (Throwable failure) {
+            // A file that cannot be read is the same as one that is not there.
+            // This decides whether a renderer loads, and refusing to start over
+            // a text file would be a far worse answer than ignoring it.
+            System.out.println("[VulkanMod112] Could not read " + STAND_ASIDE_FILE + ". " + failure);
+        }
+        if (!markers.isEmpty()) {
+            System.out.println("[VulkanMod112] Also standing aside for: " + markers);
+        }
+        namedByHand = markers;
+        return markers;
+    }
+
+    private static void add(List<String> markers, String marker) {
+        String trimmed = marker.trim().toLowerCase(Locale.ROOT);
+        if (!trimmed.isEmpty()) {
+            markers.add(trimmed);
+        }
+    }
+
+    /** Written empty, so that finding it is not the same as reading a manual. */
+    private static void writeTemplate(File config, File file) throws java.io.IOException {
+        if (!config.isDirectory() && !config.mkdirs()) {
+            return;
+        }
+        java.io.Writer out = new java.io.OutputStreamWriter(
+                new java.io.FileOutputStream(file), "UTF-8");
+        try {
+            out.write("# One line for each mod this renderer should stand aside for.\n");
+            out.write("#\n");
+            out.write("# Put part of the jar's file name on a line of its own, lower case.\n");
+            out.write("# When a jar in the mods folder contains that text, this mod does not\n");
+            out.write("# load its Vulkan renderer at all: the settings screen and every speed\n");
+            out.write("# option stay, and the world is drawn by whatever else you installed.\n");
+            out.write("#\n");
+            out.write("# It is for renderers that came out after this build did. These are\n");
+            out.write("# already known and do not need a line: optifine, shadersmod,\n");
+            out.write("# celeritas, actinium, nothirium, vulcanizator, vintagium, relictium,\n");
+            out.write("# neonium, magnesium.\n");
+            out.write("#\n");
+            out.write("# Anything after a # is ignored. Blank lines are ignored.\n");
+            out.write("# To go the other way and load this renderer anyway, start the game\n");
+            out.write("# with -Dvulkanmod112.allowIncompatibleRenderer=true\n");
+        } finally {
+            out.close();
+        }
     }
 
     @Override
