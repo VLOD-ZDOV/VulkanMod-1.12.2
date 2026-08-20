@@ -904,7 +904,31 @@ float directionalTerm(vec3 normal, vec3 toSource, float distance, float backFace
  * crossed quads you are looking at.
  */
 vec3 foliageNormal(vec3 geometric) {
-    vec3 bent = mix(geometric, vec3(0.0, 1.0, 0.0), FOLIAGE_UPRIGHT);
+    // The quad's own direction, put back on the diagonal it is really built on.
+    //
+    // faceNormal snaps a measured direction to an axis when it is clearly along
+    // one, and deliberately does not when it is not — a crossed quad sits at
+    // forty-five degrees and its largest component is 0.71, so no axis is near
+    // it. That leaves foliage as the one surface in the world shaded from the
+    // raw cross product of two screen derivatives, and a third of what is mixed
+    // in here is that raw vector. Two derivatives determine a plane badly
+    // wherever the plane is seen edge-on, and worse still across the line where
+    // the two quads of a cross meet on screen, where a block of four pixels
+    // straddles both of them and the difference is taken over two planes at
+    // once. What comes back moves with the camera, so grass dimmed and lifted
+    // slightly as you turned or walked — the same class of fault the axis snap
+    // was written for, in the one case it was written to skip.
+    //
+    // A cross has four possible directions and they are known in advance, so
+    // the same argument applies: the measurement does not have to be believed
+    // to any precision, only enough to say which of four it is, and that
+    // survives noise that would ruin the direction itself. The quads are
+    // vertical, so the answer has no height in it.
+    vec2 sideways = geometric.xz;
+    vec3 stable = dot(sideways, sideways) < 1.0e-6
+            ? vec3(0.0, geometric.y < 0.0 ? -1.0 : 1.0, 0.0)
+            : vec3(sign(sideways.x), 0.0, sign(sideways.y)) * 0.7071068;
+    vec3 bent = mix(stable, vec3(0.0, 1.0, 0.0), FOLIAGE_UPRIGHT);
     // Bending past a quad facing straight down could cancel to nothing at some
     // other value of the constant; normalising that is a NaN across the whole
     // surface rather than a wrong shade on one of them.
