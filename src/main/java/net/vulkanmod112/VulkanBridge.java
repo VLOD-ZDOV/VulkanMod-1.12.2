@@ -369,8 +369,11 @@ public interface VulkanBridge {
      *                it is hurt: the game does it by rewriting what a texture
      *                unit computes, which is a thing that exists in the fixed
      *                pipeline it draws with and not in the one here.
+     * @param glint   true for the shimmer of enchanted armour, which is added
+     *                to what is already there rather than covering it, is not
+     *                touched by the light map, and must not write depth
      */
     boolean submitSprites(java.nio.ByteBuffer vertices, int vertexCount, int spriteSlot,
-                          float alphaCutoff, int overlay);
+                          float alphaCutoff, int overlay, boolean glint);
 
 }

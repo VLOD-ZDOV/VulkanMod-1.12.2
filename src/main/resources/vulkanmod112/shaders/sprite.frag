@@ -22,6 +22,7 @@ layout(push_constant) uniform Draw {
     // x = alpha cutoff
     // y = 1 on creature geometry, 0 on particles and weather
     // z = 1 to show the shading term on its own, flat grey
+    // w = 1 for the shimmer of enchanted armour
     vec4 params;
     // xyz = which way the sun is, in the same camera-relative axes the
     // positions arrive in. w = how much of the shading to believe, 0 = off.
@@ -132,10 +133,20 @@ void main() {
     // than a lit one. Laying it on after the light instead would make every
     // hurt mob its own lamp, which is the sort of wrong that looks deliberate.
     vec3 tinted = mix(texel.rgb, draw.overlay.rgb, draw.overlay.a);
-    vec3 shaded = tinted * texture(lightmap, light).rgb;
+    // The glint carries no light of its own and takes none from the world.
+    //
+    // The game turns lighting off for the whole of it, so a shimmer on a
+    // creature standing in a cave is exactly as bright as one in open sun —
+    // which is the point of it, and which is why it must not go through the
+    // light map here either. It also fades to black rather than to the fog,
+    // again the game's own choice: what is being added to the picture cannot
+    // fade towards a colour brighter than nothing without lighting the fog up.
+    bool glint = draw.params.w > 0.5;
+    vec3 shaded = glint ? tinted : tinted * texture(lightmap, light).rgb;
     int mode = int(frame.fogColor.a + 0.5);
     if (mode != 0) {
-        shaded = mix(frame.fogColor.rgb, shaded, clamp(fogFactor(mode), 0.0, 1.0));
+        shaded = mix(glint ? vec3(0.0) : frame.fogColor.rgb, shaded,
+                clamp(fogFactor(mode), 0.0, 1.0));
     }
     // Premultiplied, like the translucent terrain drawn in the same pass and
     // for the same reason: this target is blended over the game's frame a

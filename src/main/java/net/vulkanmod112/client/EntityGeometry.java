@@ -66,6 +66,15 @@ public final class EntityGeometry {
         int count;
         /** Whether anything was written here during the pass just gone. */
         boolean used;
+        /**
+         * Whether this is the glint of enchanted armour rather than a skin.
+         *
+         * Recognised by the texture matrix having been moved, which is the
+         * thing that makes a glint a glint, rather than by the name of the
+         * texture — a mod doing the same trick gets the same treatment, and
+         * nothing has to be kept in step with a resource path.
+         */
+        boolean glint;
 
         Batch(int glTexture, int overlay) {
             this.glTexture = glTexture;
@@ -281,6 +290,9 @@ public final class EntityGeometry {
         // than per vertex; it cannot move inside one part.
         boolean slid = GlMatrixMirror.textureMoved();
         float[] tex = slid ? GlMatrixMirror.currentTexture() : null;
+        if (slid) {
+            batch.glint = true;
+        }
         for (int v = 0; v < vertices; v++) {
             int in = v * 8;
             float x = shape[in];
@@ -303,7 +315,10 @@ public final class EntityGeometry {
             }
             out.putFloat(at + 12, texU);
             out.putFloat(at + 16, texV);
-            out.putInt(at + 20, shade(colour, shape, in, m));
+            // The glint is not shaded by which way the face points: vanilla
+            // turns lighting off for the whole of it, so a face away from the
+            // light shimmers exactly as brightly as one towards it.
+            out.putInt(at + 20, slid ? colour : shade(colour, shape, in, m));
             out.putShort(at + 24, lightU);
             out.putShort(at + 26, lightV);
             at += VERTEX_BYTES;
@@ -383,11 +398,38 @@ public final class EntityGeometry {
         if (bridge == null || !viewKnown) {
             return;
         }
+        // Skins first and glints after, which is why this runs twice.
+        //
+        // The glint is drawn with the depth test on and depth writing off, so
+        // it can only appear where the skin it belongs to has already put its
+        // depth there. Batches are kept between frames and their order is the
+        // order the skins were first seen, which has nothing to do with the
+        // order they need to be drawn in — one creature's glint could be
+        // recorded before another creature's skin, land on the terrain depth
+        // behind it, and be painted over a moment later.
+        int batches = submit(bridge, false);
+        int quads = lastPassQuads;
+        batches += submit(bridge, true);
+        quads += lastPassQuads;
+        lastBatches = batches;
+        lastQuads = quads;
+        if (quads > 0) {
+            framesDrawn++;
+        }
+        current = null;
+        viewKnown = false;
+    }
+
+    /** Quads handed over by the {@link #submit} call that just returned. */
+    private static int lastPassQuads;
+
+    /** @return how many batches were handed over */
+    private static int submit(VulkanBridge bridge, boolean wantGlint) {
         int batches = 0;
         int quads = 0;
         for (int i = 0; i < BATCHES.size(); i++) {
             Batch batch = BATCHES.get(i);
-            if (batch.count == 0) {
+            if (batch.count == 0 || batch.glint != wantGlint) {
                 continue;
             }
             int slot = bridge.spriteSlotForTexture(batch.glTexture);
@@ -400,19 +442,15 @@ public final class EntityGeometry {
             // A cutout threshold rather than a particle's: a creature's skin is
             // opaque where it is drawn at all, and the edges of a cape or a
             // wing are a hard boundary, not a fade.
-            bridge.submitSprites(batch.vertices, batch.count, slot, 0.1f, batch.overlay);
+            bridge.submitSprites(batch.vertices, batch.count, slot, 0.1f, batch.overlay,
+                    batch.glint);
             batch.vertices.clear();
             batches++;
             quads += batch.count / 4;
             batch.count = 0;
         }
-        lastBatches = batches;
-        lastQuads = quads;
-        if (quads > 0) {
-            framesDrawn++;
-        }
-        current = null;
-        viewKnown = false;
+        lastPassQuads = quads;
+        return batches;
     }
 
     /** out = a * b, both column-major. */

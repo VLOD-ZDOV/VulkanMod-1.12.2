@@ -279,6 +279,7 @@ final class VkTerrainRenderer {
      * arrangement of faces in no particular order.
      */
     private long creaturePipeline;
+    private long creatureGlintPipeline;
     private long spritePipelineLayout;
     private long spriteSetLayout;
     private long spriteDescriptorPool;
@@ -321,6 +322,8 @@ final class VkTerrainRenderer {
      * almost always.
      */
     private int[] spriteOverlays = new int[64];
+    /** Which batches are the shimmer of enchanted armour rather than a skin. */
+    private boolean[] spriteGlints = new boolean[64];
     private int spriteBatchCount;
     private int spriteFrameVertices;
     private int spriteFrameBatches;
@@ -2824,11 +2827,11 @@ final class VkTerrainRenderer {
      *         fit, so weather through this path was invisible.
      */
     synchronized boolean submitSprites(ByteBuffer vertices, int vertexCount, int slot, float cutoff) {
-        return submitSprites(vertices, vertexCount, slot, cutoff, 0);
+        return submitSprites(vertices, vertexCount, slot, cutoff, 0, false);
     }
 
     synchronized boolean submitSprites(ByteBuffer vertices, int vertexCount, int slot, float cutoff,
-                                       int overlay) {
+                                       int overlay, boolean glint) {
         if (vertices == null || slot < 0 || slot >= SPRITE_SLOTS) {
             return false;
         }
@@ -2870,6 +2873,7 @@ final class VkTerrainRenderer {
         spriteBatches[b * 3 + 2] = slot;
         spriteCutoffs[b] = cutoff;
         spriteOverlays[b] = overlay;
+        spriteGlints[b] = glint;
         spriteScratchVertices += vertexCount;
         return true;
     }
@@ -2882,10 +2886,13 @@ final class VkTerrainRenderer {
         int[] batches = new int[want * 3];
         float[] cutoffs = new float[want];
         int[] overlays = new int[want];
+        boolean[] glints = new boolean[want];
         System.arraycopy(spriteBatches, 0, batches, 0, spriteBatchCount * 3);
         System.arraycopy(spriteCutoffs, 0, cutoffs, 0, spriteBatchCount);
         System.arraycopy(spriteOverlays, 0, overlays, 0, spriteBatchCount);
+        System.arraycopy(spriteGlints, 0, glints, 0, spriteBatchCount);
         spriteOverlays = overlays;
+        spriteGlints = glints;
         spriteBatches = batches;
         spriteCutoffs = cutoffs;
         return true;
@@ -3032,7 +3039,9 @@ final class VkTerrainRenderer {
             // the game's own sheets are particles and weather, everything past
             // them is a creature skin.
             long wanted;
-            if (creatures && creaturePipeline != 0) {
+            if (creatures && spriteGlints[b] && creatureGlintPipeline != 0) {
+                wanted = creatureGlintPipeline;
+            } else if (creatures && creaturePipeline != 0) {
                 wanted = creaturePipeline;
             } else if (sheet >= FIRST_SKIN_SLOT && spriteOpaquePipeline != 0) {
                 wanted = spriteOpaquePipeline;
@@ -3044,6 +3053,7 @@ final class VkTerrainRenderer {
                 vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, wanted);
             }
             push.putFloat(0, spriteCutoffs[b]);
+            push.putFloat(12, spriteGlints[b] ? 1.0f : 0.0f);
             int overlay = spriteOverlays[b];
             push.putFloat(32, ((overlay >>> 16) & 0xFF) / 255.0f);
             push.putFloat(36, ((overlay >>> 8) & 0xFF) / 255.0f);
@@ -8026,6 +8036,38 @@ final class VkTerrainRenderer {
                 "vkCreateGraphicsPipelines(creature)");
         creaturePipeline = pPipeline.get(0);
 
+        // And the shimmer over enchanted armour, which is the same geometry a
+        // third and fourth time with the texture coordinates slid across it.
+        //
+        // Added to what is already there and weighted by its own colour, which
+        // is the game's own SRC_COLOR/ONE — the pattern brightens where it is
+        // bright and leaves the skin alone where it is dark. Alpha is left
+        // exactly as it was: this target is composited over the game's frame by
+        // its alpha, and a glint that raised it would take a bite out of the
+        // world behind the creature instead of lying on top of it.
+        //
+        // Depth tested and not written, so it can only appear where the skin it
+        // belongs to already is. That is also why the batches are ordered so
+        // that skins go first.
+        blendAttachment.get(0)
+                .blendEnable(true)
+                .srcColorBlendFactor(VK_BLEND_FACTOR_SRC_COLOR)
+                .dstColorBlendFactor(VK_BLEND_FACTOR_ONE)
+                .colorBlendOp(VK_BLEND_OP_ADD)
+                .srcAlphaBlendFactor(VK_BLEND_FACTOR_ZERO)
+                .dstAlphaBlendFactor(VK_BLEND_FACTOR_ONE)
+                .alphaBlendOp(VK_BLEND_OP_ADD);
+        VkPipelineDepthStencilStateCreateInfo glintDepth =
+                VkPipelineDepthStencilStateCreateInfo.calloc(stack)
+                        .sType(VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO)
+                        .depthTestEnable(true)
+                        .depthWriteEnable(false)
+                        .depthCompareOp(VK_COMPARE_OP_LESS_OR_EQUAL);
+        pipelineInfo.get(0).pDepthStencilState(glintDepth);
+        check(vkCreateGraphicsPipelines(device(), pipelineCacheHandle, pipelineInfo, null, pPipeline),
+                "vkCreateGraphicsPipelines(creature glint)");
+        creatureGlintPipeline = pPipeline.get(0);
+
         vkDestroyShaderModule(device(), vertModule, null);
         vkDestroyShaderModule(device(), fragModule, null);
     }
@@ -9509,6 +9551,10 @@ final class VkTerrainRenderer {
         if (spritePipeline != 0) {
             vkDestroyPipeline(device(), spritePipeline, null);
             spritePipeline = 0;
+        }
+        if (creatureGlintPipeline != 0) {
+            vkDestroyPipeline(device(), creatureGlintPipeline, null);
+            creatureGlintPipeline = 0;
         }
         if (spriteOpaquePipeline != 0) {
             vkDestroyPipeline(device(), spriteOpaquePipeline, null);
