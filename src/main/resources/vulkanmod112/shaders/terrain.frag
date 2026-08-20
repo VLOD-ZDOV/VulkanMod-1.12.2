@@ -533,7 +533,7 @@ const float CUTOUT_STOPS = 0.34;
 float leafChance(uint primitive, vec2 pixel) {
     vec3 seed = vec3(float(primitive & 0xFFFFu), pixel);
     return fract(sin(dot(seed, vec3(12.9898, 78.233, 37.719))) * 43758.5453
-            + frame.lightShadow.x);
+            + frame.lightShadow.z);
 }
 
 /**

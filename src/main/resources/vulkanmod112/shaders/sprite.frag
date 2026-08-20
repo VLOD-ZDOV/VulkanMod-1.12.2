@@ -62,14 +62,19 @@ vec3 faceOf(vec3 rel) {
 
 // How much of its sky light a face keeps, by which way it is turned.
 //
-// Wrapped rather than clamped, so a back turned fully on the sun keeps half its
-// sky light instead of none. Taking it to zero is the physically true answer
-// and the wrong one for everything this game looks like: a cow's far side would
-// go black in open daylight, which vanilla never does, and which reads as a
-// fault rather than as shading. The terrain shader refuses the same temptation
-// in the same place and for the same reason.
+// Half at the far end, not none. Taking it to zero is the physically true
+// answer and the wrong one for everything this game looks like: a cow's far
+// side would go black in open daylight, which vanilla never does, and which
+// reads as a fault rather than as shading. The terrain shader refuses the same
+// temptation in the same place and for the same reason.
+//
+// A quarter and three quarters, not a half and a half. The obvious wrap maps a
+// face turned fully away to zero — the very case this is written to avoid —
+// and only softens the directions short of it. This maps the whole sphere into
+// half the range instead: full on gives one, edge on three quarters, full away
+// a half, and nothing anywhere reaches nothing.
 float sunFacing(vec3 rel) {
-    return dot(faceOf(rel), draw.sun.xyz) * 0.5 + 0.5;
+    return dot(faceOf(rel), draw.sun.xyz) * 0.25 + 0.75;
 }
 
 // The same fog the terrain uses, and it has to be: a particle and the block
