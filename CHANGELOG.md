@@ -4,6 +4,44 @@
 
 ### Added
 
+- **Creatures shade their own faces against the sun.** A cow in a lit world was lit flat against it, because the game's own lighting of a creature is one number per vertex and knows nothing about which way a face points. The face is taken from the geometry being drawn rather than reconstructed from the depth of the picture, so it is exact and has no outline around it. Only the sky half of the game's light map is moved, never the block half — a creature in a cave beside a torch comes out exactly as the game drew it, whatever the slider says, by construction rather than by tuning. That is also why the effect lives in the pass that draws creatures instead of over the finished frame: by the time a frame is finished the two halves of the light have been multiplied into one number, and a pass over it would dim one side of that torchlit pig according to where the sun is, in a cave, at night.
+
+- **The shimmer of enchanted armour.** The game draws it by rendering the same model twice more with the texture matrix scaled, turned and slid along, which is the whole of the effect — nothing about it reaches the vertices, so a renderer that captures geometry and ignores that matrix captures three copies of one thing and can draw only one. The matrix is mirrored now and the captured coordinates go through it. Skins are handed over before glints, because a glint is depth-tested and writes no depth: it can only appear where the skin it belongs to has already put its own depth there.
+
+- **The class patches are split into eight groups that can be switched off**, under Settings → Advanced → Diagnostics → Class Patches, and a group whose patch fails is quarantined so the next launch starts without it. A failed patch used to poison the class it was aimed at: the loader remembers the failure and everything afterwards sees `NoClassDefFoundError` on a vanilla class, naming neither the patch nor the mod that caused it. Removing mods one at a time cannot isolate that. Deleting `config/vulkanmod112-patches.cfg` turns everything back on.
+
+- **A file for naming a renderer this build has not heard of.** `config/vulkanmod112-standaside.txt`, one fragment of a jar's file name a line: the Vulkan terrain then does not register itself when that jar is present. Until now the only way was a JVM property, and the only way to add a name was a release.
+
+- **The mod says when a newer build exists**, in gold at the top of the settings screen, with a button beside Done that opens it. Both places are asked rather than the first that answers, because a release reaches one before the other, and the button leads to whichever of them actually has that version. Comparison is numeric, which matters more than it sounds: 0.10.0 is newer than 0.9.0 and sorts below it as text.
+
+- **A line naming where the frame went.** The card's translucent pass is timed as well as its opaque one, and the three numbers that answer "what am I actually waiting for" — the worst frame, this renderer's own processor time with the waiting split out of it, and the card's time — now stand together with a verdict over them: the card, this renderer, waiting, or something else. An external counter showing the GPU at a hundred per cent answers a different question, which is whether the queue was ever empty.
+
+- **A fog distance setting.** Vanilla ties the haze to the render distance, so more chunks arrive wrapped in more of it and look no further away than before. It scales the game's own linear fog through `GlStateManager` rather than behind it, so the whole scene moves together; fog that tells you something — blindness, being under water or in lava — is never rescaled.
+
+### Fixed
+
+- **Creatures were see-through, and the player's own model with them.** The texture matrix was mirrored as one matrix for the whole of OpenGL, and OpenGL keeps one per texture unit: the game puts a permanent scale and offset on the light map's unit and never takes them off. Read as the skin's, that offset made every creature in every session look like a glint and be drawn as one — added to the picture rather than laid into it, writing no depth, and taking its colour from a single texel. A second latch in the same place kept a batch marked as a glint for the rest of the session once one enchanted thing had been seen. Only the unit a skin is drawn from is followed now, the mark is cleared with the batch, and the diagnostics report how many batches went out as shimmer, so the same fault would be one number rather than a report.
+
+- **The red flash of a hurt creature came back.** It was never geometry: the game builds it out of a fixed-function texture stage, so capturing the geometry lost it. It is laid over the skin and under the light map, in that order and for a reason — vanilla does the same, and a creature hurt in the dark is a dark red rather than a lit one.
+
+- **A crash in a pack, from a patch that insisted on finding something another mod had already done.** The redirect that shares one array of directions instead of copying it may now find nothing, because a missing call means another coremod made the same substitution first. This mod also stands aside for two more renderers it had not heard of.
+
+- **Chunks whose geometry was never in the buffer are given up** instead of being carried into the new one when it grows, and the allocator's mark is wound back to the last byte that exists. A mark past the end of the buffer it indexes meant everything beyond it had never been uploaded, and the growth copied whatever happened to be sitting there.
+
+- **The leaf speckle in a traced shadow is offset by the dither rotation** it was documented to use, rather than by the torch radius, which is a different number in a different unit.
+
+- **A creature's far side no longer goes black in daylight.** The wrap that decides how much sky light a face turned away keeps mapped a face turned fully away to nothing — the one case it exists to avoid.
+
+- **Twenty-three places where a comment described something the code no longer does**, three of them real defects rather than stale prose: a sampler carrying another sampler's description and an overwrite that made most of that description untrue, and three claims in the README a player could check and find false.
+
+### Changed
+
+- **The mod says when creature light is switched on and cannot act**, which is every session where the game is still drawing the creatures rather than this renderer.
+
+## [0.9.0]
+
+### Added
+
 - **The sun glints off water, and at night so does the moon.** A narrow bright streak that moves with the ripples, which is the one thing the reflection could never give: a mirror shows what is behind you, a glint shows where the light itself is. It fades out over seventy-two blocks and is gone past that, which answers the only complaint the first attempt drew — flying up over an ocean used to make it grow until it filled the view. It was growing correctly: the share of a surface that returns a highlight really does widen towards the horizon as the eye rises. Nothing else in this game grows when you climb, so the correct thing read as a fault. It is deliberately absent from the traced version of the terrain shader, where a term of this exact shape cost that pass more than every other effect of this release put together and once took the graphics device with it; the setting says so rather than doing nothing quietly.
 
 - **The mod has a logo, an author line, a licence and a link to where its bugs go.** Cleanroom draws its own mod list rather than Forge's, and it reads the last three of those out of a block of `mcmod.info` that plain Forge stores and never looks at — so on that loader the entry now has a Submit Bug button that leads somewhere, and on Forge it looks exactly as it did plus the picture.
