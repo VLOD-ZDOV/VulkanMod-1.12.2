@@ -2343,11 +2343,11 @@ final class VulkanOptions {
                                         + "a night sky rather than a colour of this mod's "
                                         + "choosing, so the top cannot disagree with the horizon "
                                         + "under it. Painted only where nothing else drew, so a "
-                                        + "hilltop against the sky keeps its own colour. It "
-                                        + "follows the screen rather than the true direction of "
-                                        + "the sky: look straight up and the deepest part is "
-                                        + "across the middle rather than overhead. That is what "
-                                        + "makes it a look rather than a sky.",
+                                        + "hilltop against the sky keeps its own colour. Each "
+                                        + "pixel is asked where it actually looks rather than "
+                                        + "how high it sits on the screen, so the deepest part "
+                                        + "stays overhead however the camera is tilted, and the "
+                                        + "sky warms where it meets a sun that has not set.",
                                 Cost.of(Level.NONE, Level.LOW, Level.NONE),
                                 "One fullscreen pass over the part of the frame with no terrain.",
                                 0, 100, 5, "%", "Off",

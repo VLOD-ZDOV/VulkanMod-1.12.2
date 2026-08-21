@@ -967,8 +967,9 @@ public final class VulkanConfig {
                         + "from the horizon to straight overhead; this deepens the top of it "
                         + "towards a night sky, using the game's own fog colour so it cannot "
                         + "disagree with the horizon under it. Painted only where the terrain "
-                        + "drew nothing, and it follows the screen rather than the true direction "
-                        + "of the sky — a look rather than a sky model.");
+                        + "drew nothing, and each pixel is asked where it actually looks rather "
+                        + "than how high it sits on the screen, so the deepest part stays "
+                        + "overhead however the camera is tilted.");
         sunHaze = config.getInt("sunHaze", CATEGORY_GENERAL, DEF_SUN_HAZE, 0, 100,
                 "How much the fog warms towards the sun and cools away from it. The game fogs "
                         + "everything to one colour whichever way you face; the sky it hangs "
