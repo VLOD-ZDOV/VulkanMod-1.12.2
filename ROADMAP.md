@@ -165,18 +165,26 @@ rather than crashing.
 
 In the order they are likely to be worth doing.
 
-- **Finishing the creatures.** They are drawn here now, and two things they had under vanilla are
-  not back yet: the red flash when something is hurt, and the shimmer on enchanted armour.
+- **A shadow map for what this renderer draws.** Traced shadows are more accurate than the one a
+  shader pack builds, and they reach only what a ray can hit. A map reaches everything drawn into
+  it and costs the same whatever is in front of the camera. Not started, and it waits on one
+  thing: there are already three sun-driven systems here that darken independently, and a fourth
+  laid over three that disagree would be built on sand.
 - **Block entities**, which are still vanilla's — chests, signs and every mod's machine. They are
   drawn by code of their own rather than out of model parts, which is the wall this path reaches
   rather than a matter of effort.
-- **Contact shadows and volumetric light**, both over the finished frame like the occlusion
-  above, so they reach whatever drew into it rather than only this renderer's blocks.
+- **Taking work off the game's render thread.** Measured rather than assumed: in a flight this
+  renderer accounted for half a millisecond of processor time and four tenths of a millisecond on
+  the card, out of a worst frame of seven and a half. Optimising this mod's own drawing has very
+  little left to give; what the frame is actually waiting on is the game, and that is where the
+  next measurement goes.
 - **Smart animated textures** — updating only the animated blocks actually in view, instead of
   the all-or-nothing switch that exists today.
 - **Connected glass textures.**
 - **Front-to-back drawing** within a terrain layer.
-- Testing the Windows path on real hardware.
+- **Intel graphics.** Nobody has reported either way. The class of fault that catches an Intel
+  driver where AMD and NVIDIA forgive it has been audited for and is not present, which is not
+  the same as having run it.
 
 ## Not planned
 
