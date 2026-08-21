@@ -98,6 +98,12 @@ public final class EntityGeometry {
     private static long quadsDrawn;
     private static long partsDrawn;
     private static long skinsRefused;
+    /** Whether the root being walked has put a single vertex anywhere. */
+    private static boolean wroteAnything;
+    /** Roots handed back to the game because nothing of them was written. */
+    private static long refusedRoots;
+    /** Bones dropped for sitting deeper than the frames this follows. */
+    private static long deepParts;
     private static int lastQuads;
     private static int lastBatches;
 
@@ -166,25 +172,49 @@ public final class EntityGeometry {
         if (part == null || !drawing()) {
             return false;
         }
+        wroteAnything = false;
         try {
             // The frame the game has built up to here: the creature's place in
             // the world, still with the camera's rotation in it, which the
             // inverse above takes back out.
             multiply(VIEW_INVERSE, GlMatrixMirror.current(), FRAMES[0]);
             emit(part, scale, 0);
-            return true;
         } catch (Throwable ignored) {
             // A model this does not understand is a model the game still draws
-            // — but only if we say so, and we have already drawn part of it.
-            // Saying "ours" here would lose the rest of the creature, so the
-            // half that reached the buffer is accepted and the rest is not
-            // drawn twice.
-            return true;
+            // — but only if we say so, and by now we may have drawn part of it.
+            // Saying "ours" with half of it in the buffer is right; saying it
+            // with none of it there is how a creature disappears.
         }
+        // Claimed only if something was actually written.
+        //
+        // This used to answer yes in both branches, and the reasoning for it
+        // covered one of the two ways to get here: a throw partway through,
+        // where the half already in the buffer would be lost and the rest
+        // drawn twice. The other way — a throw on the very first part, or
+        // every part refused because no skin was bound to read them with —
+        // leaves nothing in the buffer at all, and answering yes there cancels
+        // the game's own drawing of a creature nobody then draws. There is no
+        // cost to being right about it: the flag is set by the one place that
+        // writes vertices.
+        if (!wroteAnything) {
+            refusedRoots++;
+            return false;
+        }
+        return true;
     }
 
     private static void emit(ModelRenderer part, float scale, int depth) {
-        if (part.isHidden || !part.showModel || depth >= MAX_DEPTH - 1) {
+        if (part.isHidden || !part.showModel) {
+            return;
+        }
+        if (depth >= MAX_DEPTH - 1) {
+            // Vanilla follows a skeleton as deep as it goes; this stops at
+            // sixteen, because the frames are an array. No creature the game
+            // ships is more than six deep, so the difference has never shown —
+            // but a mod with a deeper one loses everything below the cut and
+            // loses it silently, which is the sort of thing that gets reported
+            // as "half the model is missing" with nothing anywhere to say why.
+            deepParts++;
             return;
         }
         EntityCapture.localTransform(part, scale, LOCAL);
@@ -332,6 +362,7 @@ public final class EntityGeometry {
         }
         batch.count += vertices;
         quadsDrawn += vertices / 4;
+        wroteAnything = true;
     }
 
     private static Batch batchFor(int glTexture, int tint) {
@@ -531,6 +562,12 @@ public final class EntityGeometry {
                 + lastGlints + " of them the shimmer of enchanted armour); "
                 + framesDrawn + " frames drawn, " + partsDrawn + " parts, " + quadsDrawn
                 + " quads total" + (skinsRefused > 0 ? "; " + skinsRefused + " skins had no slot"
-                : "");
+                : "")
+                + (refusedRoots > 0 ? "; " + refusedRoots + " model(s) handed back to the game "
+                + "because nothing of them could be written" : "")
+                + (deepParts > 0 ? "; " + deepParts + " bone(s) deeper than this follows" : "")
+                + (GlMatrixMirror.hasOverflowed()
+                ? "; the model-view mirror has overflowed its stack at least once, so a "
+                + "creature may have been placed from a frame this did not see" : "");
     }
 }
