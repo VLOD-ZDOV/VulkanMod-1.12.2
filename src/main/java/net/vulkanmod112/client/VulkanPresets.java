@@ -46,6 +46,17 @@ public final class VulkanPresets {
         boolean flatBlockColours;
         int framesInFlight;
         int chunkBuildThreads = -1;   // -1 leaves the setting alone
+        /**
+         * Video memory the chunk buffer may take before growth turns cautious,
+         * in MiB. -1 leaves it on automatic, which is a quarter of what the
+         * device reports.
+         *
+         * Automatic is right wherever the card has memory of its own. On
+         * integrated graphics it is not memory of its own — it is the system's,
+         * the same pool the game's heap comes out of, and a quarter of it is a
+         * quarter of what the machine has to run everything else in.
+         */
+        int geometryBudgetMiB = -1;
 
         int particles;
         boolean fancy;
@@ -308,7 +319,24 @@ public final class VulkanPresets {
         // the thing holding the frame up — on this class of machine the card
         // is, and a third frame only adds a frame of delay to the controls.
         look.framesInFlight = 2;
-        look.chunkBuildThreads = VulkanConfig.coresForChunkBuilding();
+        // One fewer than the machine has, and only here.
+        //
+        // Every other preset takes every core, which is what vanilla does and
+        // is right where there are cores to spare: a build thread that is not
+        // needed costs nothing. On two cores there are none to spare, and two
+        // build threads leave the thread that actually draws the frame with no
+        // core of its own — competing with them and with the game's own logic
+        // for the same two. The chunk that arrives a moment later is not the
+        // thing being noticed on this machine; the frame that did not is.
+        look.chunkBuildThreads = Math.max(1, VulkanConfig.coresForChunkBuilding() - 1);
+        // A floor rather than a quarter of what the device claims.
+        //
+        // The device claiming it is integrated: what it reports as its own
+        // memory is the system's, and a quarter of that is a quarter of the two
+        // gigabytes this game was given in the first place. At eight chunks
+        // there is nothing like that much geometry to hold — the whole visible
+        // world fits inside the smallest buffer this allocator will make.
+        look.geometryBudgetMiB = 256;
         look.particles = 2;
         look.fancy = false;
         look.ambientOcclusion = 0;
@@ -375,6 +403,9 @@ public final class VulkanPresets {
         VulkanConfig.setWaterRefraction(look.waterRefraction);
         VulkanConfig.setRoundSun(look.roundSun);
         VulkanConfig.setRoundMoon(look.roundMoon);
+        if (look.geometryBudgetMiB >= 0) {
+            VulkanConfig.setGeometryBudgetMiB(look.geometryBudgetMiB);
+        }
         if (look.chunkBuildThreads > 0) {
             VulkanConfig.setChunkBuildThreads(look.chunkBuildThreads);
         }
