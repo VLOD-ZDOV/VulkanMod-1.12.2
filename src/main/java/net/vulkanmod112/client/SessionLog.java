@@ -100,6 +100,10 @@ public final class SessionLog {
                 // working game queued a line that nothing ever printed.
                 RenderNotice.flushRestartToChat();
                 LangDump.onceIfAsked();
+                // The automated route, which needs a tick rather than a frame:
+                // it moves the camera, and a camera moved from inside a frame
+                // is moved halfway through the picture it is being read for.
+                Flight.tick();
                 // Asked on a clock as well as when a setting moves, because
                 // not everything this answers is a setting. Whether another
                 // mod has taken the sky is a property of the world, and a
@@ -112,6 +116,19 @@ public final class SessionLog {
                     healthTicks = 0;
                     SettingsHealth.check();
                 }
+            }
+        }
+
+        /**
+         * The end of a frame, which is the one moment a picture of it can be
+         * taken: the world and the interface are both drawn and the buffers
+         * have not been swapped away yet.
+         */
+        @SubscribeEvent
+        public void onRenderTick(net.minecraftforge.fml.common.gameevent.TickEvent.RenderTickEvent
+                                         event) {
+            if (event.phase == net.minecraftforge.fml.common.gameevent.TickEvent.Phase.END) {
+                Flight.onFrameEnd();
             }
         }
 

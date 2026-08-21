@@ -535,6 +535,23 @@ tasks.matching { it.name in ['runClient', 'runObfClient'] }.configureEach {
     if (project.hasProperty('dumpLang')) {
         jvmArgs '-Dvulkanmod112.dumpLang=true'
     }
+    // -Pflight=<route> flies the client by itself: it makes a world from a
+    // fixed seed, waits for the chunks around the spawn, flies the named route
+    // taking screenshots, marks the diagnostics file at each one and quits.
+    // Everything else about the run is a property of its own, and all of them
+    // are passed straight through so that a route can be pinned without
+    // touching this file: -PflightTag, -PflightSeed, -PflightDistance,
+    // -PflightSeconds, -PflightSettle, -PflightShots, -PflightPatience.
+    if (project.hasProperty('flight')) {
+        jvmArgs '-Dvulkanmod112.flight=' + project.property('flight')
+        ['flightTag', 'flightSeed', 'flightDistance', 'flightSeconds',
+         'flightSettle', 'flightShots', 'flightPatience', 'flightPos',
+         'flightProfiler', 'flightPreset'].each { name ->
+            if (project.hasProperty(name)) {
+                jvmArgs '-Dvulkanmod112.' + name + '=' + project.property(name)
+            }
+        }
+    }
     // -PforceFallback makes the Vulkan side refuse to start, which is what a
     // player on an unsupported driver gets. It is the only way to see that
     // state on a machine where the renderer works.
