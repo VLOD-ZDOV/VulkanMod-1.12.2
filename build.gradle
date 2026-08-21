@@ -549,7 +549,7 @@ tasks.matching { it.name in ['runClient', 'runObfClient'] }.configureEach {
         ['flightTag', 'flightSeed', 'flightDistance', 'flightSeconds',
          'flightSettle', 'flightShots', 'flightPatience', 'flightPos',
          'flightProfiler', 'flightPreset', 'flightHour', 'flightWeather',
-         'flightPairs'].each { name ->
+         'flightPairs', 'flightClouds'].each { name ->
             if (project.hasProperty(name)) {
                 jvmArgs '-Dvulkanmod112.' + name + '=' + project.property(name)
             }
@@ -561,6 +561,12 @@ tasks.matching { it.name in ['runClient', 'runObfClient'] }.configureEach {
     // every pixel of foliage and water is a difference.
     if (project.hasProperty('frozenSeconds')) {
         jvmArgs '-Dvulkanmod112.frozenSeconds=' + project.property('frozenSeconds')
+    }
+    // -PcheckOrder counts how far the visibility list departs from a
+    // front-to-back order. It answers whether sorting that list is worth any
+    // code at all, and costs a comparison per chunk while it runs.
+    if (project.hasProperty('checkOrder')) {
+        jvmArgs '-Dvulkanmod112.checkOrder=true'
     }
     // -PforceFallback makes the Vulkan side refuse to start, which is what a
     // player on an unsupported driver gets. It is the only way to see that

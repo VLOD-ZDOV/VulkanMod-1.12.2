@@ -139,6 +139,16 @@ public final class Flight {
      */
     private static final int PATIENCE = Integer.getInteger("vulkanmod112.flightPatience", 180);
 
+    /**
+     * Clouds: 0 off, 1 fast, 2 fancy, or -1 to leave the option alone.
+     *
+     * Off by default. A cloud drifts whatever else is held still, and between
+     * two frames of the same view it is the largest difference in the picture
+     * — measured, more than a quarter of the pixels — while having nothing to
+     * do with anything a route is flown to compare.
+     */
+    private static final int CLOUDS = Integer.getInteger("vulkanmod112.flightClouds", 0);
+
     /** Whether to keep each frame twice, on two consecutive frames. */
     private static final boolean PAIRS =
             Boolean.parseBoolean(System.getProperty("vulkanmod112.flightPairs", "false"));
@@ -275,6 +285,9 @@ public final class Flight {
         // rather than assumed.
         mc.gameSettings.showDebugInfo = PROFILER;
         applyPreset(mc);
+        if (CLOUDS >= 0) {
+            mc.gameSettings.clouds = CLOUDS;
+        }
         // Pinned after the preset, because a preset does not write these and
         // a route that is not flown at a fixed hour compares two skies rather
         // than two builds.
