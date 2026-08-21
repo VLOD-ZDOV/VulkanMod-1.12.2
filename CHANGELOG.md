@@ -32,6 +32,10 @@
 
 - **A creature's far side no longer goes black in daylight.** The wrap that decides how much sky light a face turned away keeps mapped a face turned fully away to nothing — the one case it exists to avoid.
 
+- **Two of the diagnostic views left water out of the picture.** Show Materials wrote its answer before the water code, and the mirror, the refraction and the glint each repainted the surface afterwards — so the one material it never showed was the one everything downstream decides again. Show Reflections sat inside both the water and the screen-reflection sliders, which meant that on a preset with the second at zero it could not draw anything at all, and "the view shows nothing" read as "the ray found nothing" rather than as "the view was never asked to run". Both now answer whatever the sliders are set to, and a water face that never reflects says so instead of staying silent.
+
+- **The sky gradient's description said the opposite of what it does.** It claimed to follow the height of a pixel on the screen, and to put the deepest part of the sky across the middle of the view when you look up — true of the first version, and not since the pixel started being unprojected into a direction in the world. Regenerating the English language file, which nothing had done for a while, turned up four more entries that had drifted the same way.
+
 - **Twenty-three places where a comment described something the code no longer does**, three of them real defects rather than stale prose: a sampler carrying another sampler's description and an overwrite that made most of that description untrue, and three claims in the README a player could check and find false.
 
 ### Changed
