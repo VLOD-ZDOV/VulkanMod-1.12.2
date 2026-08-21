@@ -125,6 +125,12 @@ through `JAVA_HOME`; machine-specific paths do not belong in `gradle.properties`
 ./gradlew runClient
 ```
 
+`python3 tools/check-gl-shaders.py` compiles the OpenGL shaders that are built from Java
+strings at runtime — the glow, the occlusion, the light shafts, the composite. The Vulkan ones
+are files and `./gradlew compileShaders` refuses to build when one is wrong; these are handed to
+the driver while the game runs, and a typo in one switches that effect off for the session with
+a line in the log. Needs `glslangValidator` on the path.
+
 `./gradlew runClient -PnoDepthBlit` reproduces the path taken on a card that cannot hand its
 depth back in the format the game keeps — which is half the installed base, and the half
 easiest to break without noticing.
