@@ -1392,9 +1392,16 @@ final class VulkanOptions {
                                         + "a long streak rather than a tree. Which means the "
                                         + "question of whether this is working cannot be settled "
                                         + "by how it looks over the water, and this is how to "
-                                        + "settle it instead.",
+                                        + "settle it instead. It runs whatever the two sliders in "
+                                        + "front of it are set to, because a view that switches "
+                                        + "itself off with the effect it is meant to inspect "
+                                        + "answers the same way whether the ray found nothing or "
+                                        + "the march never ran. The side of a water block is deep "
+                                        + "blue too: it never reflects, and the view says so "
+                                        + "rather than leaving it looking untouched.",
                                 Cost.of(Level.NONE, Level.NONE, Level.NONE),
-                                "Needs Screen Reflections above zero.",
+                                "Needs Vulkan Water and Glass, so that this renderer is the one "
+                                        + "drawing the water.",
                                 new VSwitchOption.Access() {
                                     @Override
                                     public boolean get() {
