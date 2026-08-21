@@ -303,7 +303,6 @@ final class VkChunkMirror {
     private long geometryCapacity;
     private long nextGeometryOffset;
     /** Once a session: the second complaint says nothing the first did not. */
-    private boolean markOverrunLogged;
     private final List<FreeRange> freeRanges = new ArrayList<FreeRange>();
     /**
      * How much VRAM the geometry buffer is allowed to take before growth turns
@@ -869,6 +868,9 @@ final class VkChunkMirror {
                 entries.size(), totalBytes / (1024.0 * 1024.0),
                 geometryCapacity / (1024.0 * 1024.0), uploadCount,
                 stagingCapacity / (1024 * 1024), stagingWraps, offThread, onThread);
+        if (markOverruns > 0) {
+            line += String.format("; geometry mark found past the buffer %d time(s)", markOverruns);
+        }
         if (materialsStaged == 0 && materialBuffer == 0) {
             return line;
         }
@@ -1162,6 +1164,18 @@ final class VkChunkMirror {
     }
 
     private long allocateGeometryRange(int capacity) {
+        // Asked on the way in as well as on the way out, and the difference
+        // between the two answers is the whole reason this is here twice.
+        //
+        // The mark has been found past the end of the buffer it indexes, and
+        // three passes over this file across three weeks have not found what
+        // put it there. One check, after the mark moves, cannot tell the two
+        // cases apart: a call that pushed the mark over the edge itself, and a
+        // call that arrived to find it already over. Those are different bugs
+        // in different places, and knowing which it is halves the search.
+        if (nextGeometryOffset > geometryCapacity) {
+            noteMarkOverrun("was already past", capacity);
+        }
         for (int i = 0; i < freeRanges.size(); i++) {
             FreeRange range = freeRanges.get(i);
             if (range.capacity >= capacity) {
@@ -1185,12 +1199,34 @@ final class VkChunkMirror {
         // replaced. This is the only place the mark moves, so a complaint here
         // names the size that did it, and it is one comparison on a path that
         // already did a search.
-        if (nextGeometryOffset > geometryCapacity && !markOverrunLogged) {
-            markOverrunLogged = true;
-            LOGGER.warn("Geometry mark moved past the buffer: {} of {} after taking {} bytes",
-                    nextGeometryOffset, geometryCapacity, capacity);
+        if (nextGeometryOffset > geometryCapacity) {
+            noteMarkOverrun("was moved past", capacity);
         }
         return offset;
+    }
+
+    /** How many times the mark has been found past the end of its buffer. */
+    private long markOverruns;
+
+    /**
+     * Says which call, on which thread, with what in hand.
+     *
+     * The line this replaces was fired once per session and then went quiet
+     * for good, and carried the two numbers only. Once is enough to know
+     * something is wrong and not enough to know what: the second occurrence is
+     * where a pattern would show — same thread or a different one, same size or
+     * any size, right after a growth or nowhere near one. The gate is now a
+     * count rather than a flag, so the first several all speak, and the total
+     * goes into the report where a tester will see it without reading a log.
+     */
+    private void noteMarkOverrun(String when, int capacity) {
+        markOverruns++;
+        if (markOverruns <= 8) {
+            LOGGER.warn("Geometry mark {} the buffer it indexes: {} of {} bytes, "
+                            + "while taking {} bytes on thread {} (occurrence {})",
+                    when, nextGeometryOffset, geometryCapacity, capacity,
+                    Thread.currentThread().getName(), markOverruns);
+        }
     }
 
     /**
