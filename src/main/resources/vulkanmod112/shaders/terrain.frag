@@ -1499,8 +1499,14 @@ void main() {
     skyLight = mix(skyLight, skyLight * frame.sunParams.y, sunShadow(normal));
     vec3 light = texture(lightmap, vec2(blockLight, skyLight)).rgb;
     vec3 shaded = tex.rgb * vColor.rgb * light * waveShade;
+    // Worked out once. The translucent pass needs the same answer again at
+    // the very end, after the water code has finished repainting the surface,
+    // and asking materialColor twice puts the whole chain of comparisons into
+    // the one pipeline here with no room to spare.
+    vec3 materialView = vec3(0.0);
     if (frame.frameInfo.w > 0.5) {
-        shaded = materialColor(material) * light;
+        materialView = materialColor(material) * light;
+        shaded = materialView;
     }
 
     // Rain, on the faces it can land on.
@@ -1852,7 +1858,14 @@ void main() {
 #endif
         // frame.heightFog.w: how much of the Fresnel term to believe, 0 off.
         float water = frame.heightFog.w;
-        if (water > 0.0 && material == MATERIAL_WATER) {
+        // The view that paints water with what the ray found has to reach the
+        // march whatever the two sliders in front of it are set to. Nested
+        // inside them, "switch the view on and nothing changes" is the same
+        // picture whether the ray found nothing or the march was never asked
+        // to run — and on the preset this was last looked at on, screen
+        // reflections are at zero, so it could only ever have been the second.
+        bool mirrorView = frame.screenMirror.y > 0.5;
+        if ((water > 0.0 || mirrorView) && material == MATERIAL_WATER) {
             float mirror = fresnel(mirrorNormal) * water;
             // Worked out before the march rather than inside it, because the
             // sky is the answer whether or not the march ever runs.
@@ -1869,7 +1882,7 @@ void main() {
             // of those travels along the surface rather than away from it —
             // which is where a good part of the smearing was coming from. The
             // waves have always known this; the mirror did not.
-            if (frame.screenMirror.x > 0.0 && normal.y > 0.9) {
+            if ((frame.screenMirror.x > 0.0 || mirrorView) && normal.y > 0.9) {
                 // A ray heading back towards the eye is looking at the side of
                 // the world that was never drawn. Faded rather than cut, so a
                 // surface does not change its mind along a line.
@@ -1902,11 +1915,19 @@ void main() {
                 // nothing at all. Three rounds have now been spent describing
                 // this to each other in words, which is two more than a
                 // picture costs.
-                if (frame.screenMirror.y > 0.5) {
+                if (mirrorView) {
                     shaded = found.a > 0.0 ? found.rgb : vec3(0.02, 0.02, 0.22);
                     outColor = vec4(shaded, 1.0);
                     return;
                 }
+            } else if (mirrorView) {
+                // The side of a water block never reflects, and this view has
+                // nothing to report there. Said in the same colour as a ray
+                // that found nothing, because leaving the surface as ordinary
+                // water would read as the view being broken rather than as
+                // the answer.
+                outColor = vec4(0.02, 0.02, 0.22, 1.0);
+                return;
             }
             // Believed in proportion to there being something to reflect. See
             // FLAT_SKY_LIMIT: a perfect mirror of nothing is pale paint, and
@@ -1980,6 +2001,16 @@ void main() {
             }
         }
 #endif
+        // The material view, answered here rather than where the opaque pass
+        // answers it. Everything above re-decides the colour of a water
+        // surface — the mirror, the refraction, the glint — so the answer
+        // written before them was painted over by exactly the surface this
+        // view exists to name, and water was the one thing missing from a
+        // picture of what the world is made of.
+        if (frame.frameInfo.w > 0.5) {
+            shaded = materialView;
+            alpha = 1.0;
+        }
         outColor = vec4(shaded * alpha, alpha);
     } else {
         // The alpha of an opaque pixel was the constant 1.0 and nothing else,
