@@ -203,7 +203,26 @@ public final class VulkanPresets {
         // right standing still as well as in motion.
         look.foliageSway = 38;
         look.bloom = 45;
-        look.screenReflections = 35;
+        // Off in the preset named for looks, and this is the honest thing to do.
+        //
+        // Every description this project ships already says screen reflections
+        // are unfinished — nothing off the edge of the frame, nothing behind
+        // anything nearer — and then the preset called Beautiful switched them
+        // on anyway. So the one effect we know is not ready was the one
+        // deciding what the mod looks like on a first run: the white patch that
+        // stretches as the camera rises, and the field of dither with a hard
+        // straight edge beside it, are both the march and both in every
+        // screenshot anyone has taken of this.
+        //
+        // What replaces it is not nothing. The Fresnel term still turns the
+        // surface into a mirror at a grazing angle, and what it now mirrors is
+        // the sky along the reflected ray rather than one flat colour. That is
+        // a real reflection of a real sky; the march was a real reflection of
+        // whatever happened to be on screen, which at a shallow angle is a
+        // handful of pixels smeared down the water.
+        //
+        // The slider is untouched and one row away for anyone who wants it.
+        look.screenReflections = 0;
         look.shaderAmbientOcclusion = 60;
         look.sceneTone = 45;
         look.sceneWarmth = 55;
