@@ -1798,11 +1798,26 @@ void main() {
 #endif
                 // Exactly what the blend would have done, done here: the frame
                 // times what the water lets through, plus the water itself.
+#ifdef RAY_QUERY
                 shaded = shaded * alpha + behind * (1.0 - alpha);
-#ifndef RAY_QUERY
-                alpha = mix(alpha, 1.0, trustBehind);
-#else
                 alpha = 1.0;
+#else
+                // Mixed in only as far as the sample is believed, which is the
+                // same measure that decides the opacity two lines down.
+                //
+                // Both lines are about one thing — whether what the refraction
+                // fetched is really the bed — and only one of them was asking.
+                // The opacity was let down where something stands close under
+                // the surface, so the game's own blend could show what is
+                // really there; and then the colour underneath it was mixed
+                // with the fetched sample anyway, unconditionally. That sample
+                // comes from a copy of the world taken before the game draws a
+                // single creature, so a villager standing in the shallows was
+                // being painted a third of the way towards the sand it is
+                // standing on, however far the opacity was let down for it.
+                vec3 refracted = shaded * alpha + behind * (1.0 - alpha);
+                shaded = mix(shaded, refracted, trustBehind);
+                alpha = mix(alpha, 1.0, trustBehind);
 #endif
             }
         }
