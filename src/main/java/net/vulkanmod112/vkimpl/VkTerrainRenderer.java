@@ -3594,8 +3594,6 @@ final class VkTerrainRenderer {
             setFenceValue(glTranslucentWaitSemaphore, translucentSignalFenceValue);
             EXTSemaphore.glWaitSemaphoreEXT(glTranslucentWaitSemaphore, noBuffers, textures, layouts);
 
-            compositeTimer.begin();
-            compositeTimerRunning = true;
             int prevProgram = GL11C.glGetInteger(GL20C.GL_CURRENT_PROGRAM);
             int prevActive = GL11C.glGetInteger(GL13C.GL_ACTIVE_TEXTURE);
             org.lwjgl.opengl.GL11.glPushAttrib(org.lwjgl.opengl.GL11.GL_ENABLE_BIT
@@ -3703,6 +3701,25 @@ final class VkTerrainRenderer {
                     depthBlitTimer.end();
                 }
             }
+
+            // The composite's own clock starts here, and where it starts is
+            // the whole of what it means.
+            //
+            // An elapsed-time query cannot contain another, so this one has to
+            // begin after both of the passes that are timed separately: the
+            // wait for Vulkan, which is idling rather than work, and the depth
+            // blit, which the hardware does. The three numbers on the line add
+            // up to the cost of handing a frame back.
+            //
+            // It began in the translucent composite instead, which is a
+            // different method that starts with the same twelve lines, and
+            // nothing ever closed it: the query stayed open, no slot was ever
+            // marked as owing an answer, and every later attempt to open one
+            // was rejected by the driver for being inside the first. The line
+            // printed 0.00 ms with a note that no result had been collected —
+            // and this is the number a whole plan was waiting on.
+            compositeTimer.begin();
+            compositeTimerRunning = true;
 
             // Before the colour goes into the frame: what the frame receives is
             // the terrain already darkened where it cannot see the sky.
