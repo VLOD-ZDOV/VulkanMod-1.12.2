@@ -262,9 +262,14 @@ public final class Flight {
         // low enough to still have the ground fill the view, and derived from
         // the world rather than written down, so the same route works on any
         // seed it is pointed at.
-        baseX = mc.player.posX;
-        baseY = mc.player.posY + 12.0;
-        baseZ = mc.player.posZ;
+        // The world's spawn point, not the player's position: a player is put
+        // down at a random spot inside the spawn area, so two runs of the same
+        // seed start tens of blocks apart and the frames cannot be compared.
+        // The spawn point itself is a property of the seed and does not move.
+        net.minecraft.util.math.BlockPos spawn = mc.world.getSpawnPoint();
+        baseX = spawn.getX() + 0.5;
+        baseY = spawn.getY() + 12.0;
+        baseZ = spawn.getZ() + 0.5;
         String[] given = POSITION.isEmpty() ? null : POSITION.split(",");
         if (given != null && given.length == 3) {
             baseX = Double.parseDouble(given[0].trim());

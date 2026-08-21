@@ -133,6 +133,16 @@ public final class VulkanPresets {
         int waterRefraction;
         boolean roundSun;
         boolean roundMoon;
+
+        // Not an effect, and that is exactly why it was missed: it scales the
+        // game's own haze, and at a low value the world is a white wall two
+        // chunks away whatever else is switched on. A preset is the one thing a
+        // player reaches for when the picture is wrong, so a setting that can
+        // ruin the picture and is not written by any preset leaves them with
+        // nowhere to go — every preset looked equally broken, and the effects
+        // they do set were being judged through the fog.
+        int fogDistance = VulkanConfig.DEF_FOG_DISTANCE;
+        boolean fog = true;
     }
 
     /**
@@ -422,6 +432,8 @@ public final class VulkanPresets {
         VulkanConfig.setWaterRefraction(look.waterRefraction);
         VulkanConfig.setRoundSun(look.roundSun);
         VulkanConfig.setRoundMoon(look.roundMoon);
+        VulkanConfig.setFogDistance(look.fogDistance);
+        VulkanConfig.setFogEnabled(look.fog);
         if (look.geometryBudgetMiB >= 0) {
             VulkanConfig.setGeometryBudgetMiB(look.geometryBudgetMiB);
         }
