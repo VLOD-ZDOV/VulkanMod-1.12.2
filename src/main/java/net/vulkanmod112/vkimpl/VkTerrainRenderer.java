@@ -4475,8 +4475,22 @@ final class VkTerrainRenderer {
                         // it is the same march the contact shadows do, walked
                         // further and asked a coarser question.
                         + "            vec3 up = rayStart;\n"
-                        + "            for (int k = 1; k <= 6; k++) {\n"
-                        + "                vec3 sk = up + uSun * (2.0 * float(k));\n"
+                        // Twelve steps of a block, not six of two.
+                        //
+                        // This walk asks whether there is a roof between the
+                        // point and the sun, and a step of two blocks steps
+                        // clean over a ceiling one block thick: the sample
+                        // before it is under the roof and the sample after is
+                        // above it, and nothing in between is ever asked. So
+                        // the shade of a passing cloud swept across the floor
+                        // of a closed room — reported three rounds running,
+                        // each time as "the shadows flicker indoors", and each
+                        // time looking like noise rather than like a step that
+                        // is simply too long. The reach is the same twelve
+                        // blocks; only the spacing changes, and it changes to
+                        // the thickness of the thinnest thing worth finding.
+                        + "            for (int k = 1; k <= 12; k++) {\n"
+                        + "                vec3 sk = up + uSun * float(k);\n"
                         + "                if (sk.z > -uProj.z) break;\n"
                         + "                vec2 kn = vec2(sk.x / (uProj.x * -sk.z), sk.y / (uProj.y * -sk.z));\n"
                         + "                vec2 kuv = kn * 0.5 + 0.5;\n"
