@@ -217,6 +217,25 @@ final class VkTerrainRenderer {
      */
     private final GlTimer compositeTimer = new GlTimer();
     private final GlTimer depthImportTimer = new GlTimer();
+    /**
+     * The two halves the composite figure was hiding.
+     *
+     * One number covered the whole of it, and the log said so — "includes
+     * waiting for Vulkan". At sixty frames a second that is two per cent of a
+     * frame and nobody needs the split. At six hundred it is a fifth of one,
+     * and the split is the whole question: a fifth of a frame spent waiting is
+     * cured by letting the two sides overlap, and a fifth spent working is
+     * cured by doing less work. Those are different projects, and one of them
+     * is the largest and riskiest thing on the list.
+     *
+     * Elapsed-time queries cannot nest, so these cannot sit inside the figure
+     * above; they sit beside it, and the wait is taken out of it rather than
+     * counted twice.
+     */
+    private final GlTimer compositeWaitTimer = new GlTimer();
+    private boolean compositeTimerRunning;
+    /** Handing depth back, which the log has been calling untimed. */
+    private final GlTimer depthBlitTimer = new GlTimer();
 
     // ------------------------------------------------------------------
     // Sprites: particles, rain and snow
@@ -2185,9 +2204,12 @@ final class VkTerrainRenderer {
         // queue's own. This is the other half of the frame: what the card
         // spends inside OpenGL doing our work, which nothing measured before.
         sb.append("  gl cost: composite ").append(glTimeText(compositeTimer))
+                .append(" of work plus ").append(glTimeText(compositeWaitTimer))
+                .append(" waiting for Vulkan")
                 .append(" [").append(compositeTimer.health()).append(']')
-                .append(" (includes waiting for Vulkan), depth back to Vulkan ")
-                .append(depthBlit ? "by hardware copy, untimed" : glTimeText(depthImportTimer))
+                .append(", depth back to Vulkan ")
+                .append(depthBlit ? glTimeText(depthBlitTimer) + " by hardware copy"
+                        : glTimeText(depthImportTimer))
                 .append('\n');
         sb.append("  lightmap: ").append(lightmapUploads).append(" changes over ")
                 .append(lightmapFrames).append(" frames")
@@ -3563,6 +3585,8 @@ final class VkTerrainRenderer {
             setFenceValue(glTranslucentWaitSemaphore, translucentSignalFenceValue);
             EXTSemaphore.glWaitSemaphoreEXT(glTranslucentWaitSemaphore, noBuffers, textures, layouts);
 
+            compositeTimer.begin();
+            compositeTimerRunning = true;
             int prevProgram = GL11C.glGetInteger(GL20C.GL_CURRENT_PROGRAM);
             int prevActive = GL11C.glGetInteger(GL13C.GL_ACTIVE_TEXTURE);
             org.lwjgl.opengl.GL11.glPushAttrib(org.lwjgl.opengl.GL11.GL_ENABLE_BIT
@@ -3605,11 +3629,20 @@ final class VkTerrainRenderer {
     /** GL side: wait for Vulkan, draw the shared frame into the game's framebuffer, signal back. */
     private void composite() {
         frameSignalled = false;
-        compositeTimer.begin();
+        // The wait has a timer of its own inside, and elapsed-time queries do
+        // not nest, so this one starts after it. What it measures is the work.
+        //
+        // Ended only if it was started: the wait comes first and can throw, and
+        // closing a query that was never opened is a GL error and a ring left
+        // one slot out of step for the rest of the session.
+        compositeTimerRunning = false;
         try {
             compositeInner();
         } finally {
-            compositeTimer.end();
+            if (compositeTimerRunning) {
+                compositeTimerRunning = false;
+                compositeTimer.end();
+            }
         }
     }
 
@@ -3626,7 +3659,13 @@ final class VkTerrainRenderer {
             if (SHARED_SEMAPHORES) {
                 setFenceValue(glWaitSemaphore, signalFenceValue);
                 firstFrameStage("waiting on the Vulkan semaphore from OpenGL");
-                EXTSemaphore.glWaitSemaphoreEXT(glWaitSemaphore, noBuffers, textures, layouts);
+                compositeWaitTimer.begin();
+                try {
+                    EXTSemaphore.glWaitSemaphoreEXT(glWaitSemaphore, noBuffers, textures,
+                            layouts);
+                } finally {
+                    compositeWaitTimer.end();
+                }
                 firstFrameStage("semaphore taken, compositing");
             } else {
                 firstFrameStage("compositing (semaphores off, both sides go idle)");
@@ -3648,7 +3687,12 @@ final class VkTerrainRenderer {
             GL11C.glDepthMask(true);
 
             if (depthBlit) {
-                blitDepth();
+                depthBlitTimer.begin();
+                try {
+                    blitDepth();
+                } finally {
+                    depthBlitTimer.end();
+                }
             }
 
             // Before the colour goes into the frame: what the frame receives is
@@ -3660,7 +3704,7 @@ final class VkTerrainRenderer {
             // carries on undarkened, rather than taking the terrain renderer
             // down with it and dropping the player back to vanilla GL.
             boolean motion = false;
-            if (!motionFailed) {
+            if (!motionFailed && motionWanted()) {
                 int frameFbo = GL11C.glGetInteger(GL30C.GL_FRAMEBUFFER_BINDING);
                 try {
                     motion = motionPass();
@@ -4602,6 +4646,26 @@ final class VkTerrainRenderer {
      *
      * @return false when the frame is to be composited as it came out of Vulkan
      */
+    /**
+     * Whether anything is going to read the motion this frame.
+     *
+     * It has exactly two readers: the pass that averages successive frames,
+     * which is switched on only while rays are being traced, and the
+     * diagnostic that paints the motion instead of the world. Neither was
+     * asked before the motion was worked out — the only condition was that the
+     * pass had not already failed — so on every ordinary session, which is
+     * every session with tracing off, a half-resolution pass over the whole
+     * screen and a matrix inverse were run each frame for nobody.
+     *
+     * It never showed up as a cost worth chasing because it was measured
+     * inside one figure covering the whole composite, and at sixty frames a
+     * second the whole composite is two per cent of a frame. At six hundred it
+     * is a fifth of one.
+     */
+    private boolean motionWanted() {
+        return (accumStrength > 0.0f && tracingWanted()) || showMotion || motionOverWorld;
+    }
+
     private boolean accumPass(boolean motionReady) {
         if (!motionReady || accumStrength <= 0.0f || accumFailed || !tracingWanted()) {
             // Nothing is noisy, or nothing can be reprojected. Either way the
@@ -9843,6 +9907,8 @@ final class VkTerrainRenderer {
         if (glContextCurrent()) {
             destroyDepthImportTargets();
             compositeTimer.destroy();
+            compositeWaitTimer.destroy();
+            depthBlitTimer.destroy();
             depthImportTimer.destroy();
         } else {
             gameDepthTexture = 0;
