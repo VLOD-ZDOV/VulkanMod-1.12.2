@@ -868,8 +868,11 @@ final class VkChunkMirror {
                 entries.size(), totalBytes / (1024.0 * 1024.0),
                 geometryCapacity / (1024.0 * 1024.0), uploadCount,
                 stagingCapacity / (1024 * 1024), stagingWraps, offThread, onThread);
-        if (markOverruns > 0) {
-            line += String.format("; geometry mark found past the buffer %d time(s)", markOverruns);
+        if (markOverruns > 0 || advanceSlips > 0 || reentrantAllocations > 0) {
+            line += String.format("; geometry mark found past the buffer %d time(s), "
+                            + "%d advance(s) past their own checked limit, %d reentrant "
+                            + "allocation(s), %d of them during a growth",
+                    markOverruns, advanceSlips, reentrantAllocations, allocationsDuringGrowth);
         }
         if (materialsStaged == 0 && materialBuffer == 0) {
             return line;
@@ -1163,7 +1166,54 @@ final class VkChunkMirror {
         }
     }
 
+    /**
+     * How deep this thread is inside the allocator, and what that would mean.
+     *
+     * "All of it is serialised under one monitor" was offered three times as
+     * the reason a race is impossible here, and it is only half an argument: a
+     * Java monitor is reentrant, so it stops every other thread and stops
+     * nothing at all about this one. Growth calls out — it flushes uploads,
+     * waits on a fence, resolves the budget, drops entries — and if any of
+     * that ever reaches back into the allocator, the inner call moves the mark
+     * against a state the outer call is half-way through rebuilding, and both
+     * of them are holding the monitor legitimately.
+     *
+     * No such path is visible today. That is exactly why it is worth one
+     * counter rather than one more paragraph of reasoning: three passes have
+     * now argued this shape away, and the mark still moves.
+     */
+    private int allocatorDepth;
+    private boolean expandInFlight;
+    private long reentrantAllocations;
+    private long allocationsDuringGrowth;
+    /**
+     * Advances that ended past the limit checked for that very advance.
+     *
+     * The sharper question than "is the mark past the buffer". A mark past the
+     * capacity says the invariant is broken; this says whether it broke here.
+     * It can only count when something moved the mark between the check and
+     * the bump, which is one line apart — so a single count of this points
+     * inside the growth call, and a zero count with overruns still happening
+     * points at the capacity being stale or foreign instead.
+     */
+    private long advanceSlips;
+
     private long allocateGeometryRange(int capacity) {
+        allocatorDepth++;
+        if (allocatorDepth > 1) {
+            reentrantAllocations++;
+        }
+        if (expandInFlight) {
+            allocationsDuringGrowth++;
+        }
+        try {
+            return allocateGeometryRangeInner(capacity);
+        } finally {
+            allocatorDepth--;
+        }
+    }
+
+    private long allocateGeometryRangeInner(int capacity) {
         // Asked on the way in as well as on the way out, and the difference
         // between the two answers is the whole reason this is here twice.
         //
@@ -1188,9 +1238,16 @@ final class VkChunkMirror {
                 return range.offset;
             }
         }
-        ensureGeometryCapacity(nextGeometryOffset + capacity);
+        // Kept, so that the advance can be measured against the very limit that
+        // was checked for it rather than against whatever the capacity has
+        // become since.
+        long checked = nextGeometryOffset + capacity;
+        ensureGeometryCapacity(checked);
         long offset = nextGeometryOffset;
         nextGeometryOffset += capacity;
+        if (nextGeometryOffset > checked) {
+            advanceSlips++;
+        }
         // Checked where the mark is moved, not only where growth trips over it.
         //
         // A growth copy once found the mark fifty bytes past the buffer it
@@ -1223,9 +1280,12 @@ final class VkChunkMirror {
         markOverruns++;
         if (markOverruns <= 8) {
             LOGGER.warn("Geometry mark {} the buffer it indexes: {} of {} bytes, "
-                            + "while taking {} bytes on thread {} (occurrence {})",
+                            + "while taking {} bytes on thread {} (occurrence {}; "
+                            + "{} advance(s) past their own checked limit, {} reentrant "
+                            + "allocation(s), {} during a growth)",
                     when, nextGeometryOffset, geometryCapacity, capacity,
-                    Thread.currentThread().getName(), markOverruns);
+                    Thread.currentThread().getName(), markOverruns,
+                    advanceSlips, reentrantAllocations, allocationsDuringGrowth);
         }
     }
 
@@ -1316,6 +1376,15 @@ final class VkChunkMirror {
         if (geometryBuffer != 0 && required <= geometryCapacity) {
             return;
         }
+        expandInFlight = true;
+        try {
+            growGeometryBuffer(required);
+        } finally {
+            expandInFlight = false;
+        }
+    }
+
+    private void growGeometryBuffer(long required) {
         if (uploadsRecording) {
             flushUploads();
         }
