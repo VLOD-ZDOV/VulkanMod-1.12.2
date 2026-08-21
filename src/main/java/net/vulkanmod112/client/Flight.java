@@ -114,6 +114,23 @@ public final class Flight {
     private static final String PRESET = System.getProperty("vulkanmod112.flightPreset", "").trim();
 
     /**
+     * Which hour to hold the sky at, or -1 to let the world keep its own time.
+     *
+     * A world saves its clock, so the second run of a route is flown minutes
+     * later in the day than the first: the sun has moved, every shadow with
+     * it, and a comparison between the two frames is mostly a comparison of
+     * the hour. Held by default at mid-morning, which has a sun high enough to
+     * light the ground and low enough to cast something.
+     */
+    private static final int HOUR = Integer.getInteger("vulkanmod112.flightHour", 9);
+
+    /**
+     * Weather to hold: 0 the world's own, 1 clear, 2 rain, 3 storm. Clear by
+     * default, for the same reason as the hour.
+     */
+    private static final int WEATHER = Integer.getInteger("vulkanmod112.flightWeather", 1);
+
+    /**
      * Give up after this long without reaching the world.
      *
      * A run nobody is watching must end. Without this, a world that fails to
@@ -121,6 +138,10 @@ public final class Flight {
      * an unattended machine is the next morning.
      */
     private static final int PATIENCE = Integer.getInteger("vulkanmod112.flightPatience", 180);
+
+    /** Whether to keep each frame twice, on two consecutive frames. */
+    private static final boolean PAIRS =
+            Boolean.parseBoolean(System.getProperty("vulkanmod112.flightPairs", "false"));
 
     private static final int TICKS_PER_SECOND = 20;
 
@@ -254,6 +275,16 @@ public final class Flight {
         // rather than assumed.
         mc.gameSettings.showDebugInfo = PROFILER;
         applyPreset(mc);
+        // Pinned after the preset, because a preset does not write these and
+        // a route that is not flown at a fixed hour compares two skies rather
+        // than two builds.
+        if (HOUR >= 0) {
+            VulkanConfig.setTimeControl(2);
+            VulkanConfig.setTimeOfDay(HOUR);
+        }
+        if (WEATHER >= 0) {
+            VulkanConfig.setWeatherControl(WEATHER);
+        }
         if (mc.gameSettings.renderDistanceChunks != DISTANCE) {
             mc.gameSettings.renderDistanceChunks = DISTANCE;
             mc.renderGlobal.loadRenderers();
@@ -363,6 +394,16 @@ public final class Flight {
         if (mc.player == null) {
             return;
         }
+        // Wrapped before it is handed over, and this is not tidiness.
+        //
+        // The game normalises a player's yaw itself, once a tick. Hand it 405
+        // and next tick the current angle is 45 while the previous one is
+        // still 405 — and every frame between the two ticks is drawn at a
+        // mixture of the two, which is a camera whipping backwards through the
+        // entire circle. The route reported 45 and the picture was of 71, and
+        // a fault of that shape is indistinguishable from the renderer drawing
+        // the wrong thing, which is what this harness exists to look for.
+        yaw = net.minecraft.util.math.MathHelper.wrapDegrees(yaw);
         mc.player.setPositionAndRotation(x, y, z, yaw, pitch);
         mc.player.prevPosX = x;
         mc.player.prevPosY = y;
@@ -424,12 +465,30 @@ public final class Flight {
             return;
         }
         String name = pendingShot;
-        pendingShot = null;
+        // The same frame again on the very next one, when asked. A camera
+        // turning at eighteen degrees a second moves a twentieth of a degree
+        // between two frames, so a pair that differs by more than a rounding
+        // error says the picture being read is not the picture just drawn —
+        // which is the one thing that cannot be told apart from a fault in the
+        // renderer by looking at a single frame.
+        if (PAIRS && !name.endsWith("b")) {
+            pendingShot = name + "b";
+        } else {
+            pendingShot = null;
+        }
         Minecraft mc = Minecraft.getMinecraft();
         try {
             ScreenShotHelper.saveScreenshot(mc.gameDir, name + ".png",
                     mc.displayWidth, mc.displayHeight, mc.getFramebuffer());
-            Diagnostics.flushNow("flight " + TAG + " frame " + name);
+            // The camera goes in the line with the frame. Two frames the route
+            // says are of the same view have to be checkable against something
+            // other than the route saying so.
+            String where = mc.player == null ? "no player"
+                    : String.format(java.util.Locale.ROOT, "%.2f %.2f %.2f yaw %.3f pitch %.3f",
+                            mc.player.posX, mc.player.posY, mc.player.posZ,
+                            mc.player.rotationYaw, mc.player.rotationPitch);
+            VulkanMod112.LOGGER.info("Flight {} frame {} at {}", TAG, name, where);
+            Diagnostics.flushNow("flight " + TAG + " frame " + name + " at " + where);
         } catch (Throwable t) {
             VulkanMod112.LOGGER.warn("Flight could not keep frame {}", name, t);
         }

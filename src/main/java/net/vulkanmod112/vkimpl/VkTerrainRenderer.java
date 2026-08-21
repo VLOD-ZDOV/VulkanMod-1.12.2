@@ -888,6 +888,15 @@ final class VkTerrainRenderer {
      * area of the screen this mod had never touched.
      */
     private float skyGradient;
+
+    /**
+     * The animation clock, held at this value when it is not negative.
+     *
+     * {@code -Dvulkanmod112.frozenSeconds=<n>}. See where it is read for why a
+     * moving clock makes two frames incomparable.
+     */
+    private final float frozenSeconds =
+            Float.parseFloat(System.getProperty("vulkanmod112.frozenSeconds", "-1"));
     /**
      * How see-through leaves and plants are to a shadow ray, 0 for solid.
      *
@@ -7103,6 +7112,15 @@ final class VkTerrainRenderer {
         // the float keeps its precision however long the session runs.
         float seconds = (float) (((System.nanoTime() - startedNanos) / 1_000_000L) % 3_600_000L)
                 / 1000.0f;
+        // Held still when asked, which is what makes two pictures comparable.
+        // Everything animated here reads this one number, so a frame taken
+        // twenty seconds after another differs in every blade of grass and
+        // every ripple — differences that swamp whatever the two frames were
+        // being compared for. Pinning it is a development switch and costs a
+        // branch that predicts perfectly.
+        if (frozenSeconds >= 0.0f) {
+            seconds = frozenSeconds;
+        }
         MemoryUtil.memPutFloat(base + 624, seconds);
         MemoryUtil.memPutFloat(base + 628, directionalDynamicLight);
         // z: whether the material buffer is bound at all. When it is not, the

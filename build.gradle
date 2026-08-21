@@ -541,16 +541,26 @@ tasks.matching { it.name in ['runClient', 'runObfClient'] }.configureEach {
     // Everything else about the run is a property of its own, and all of them
     // are passed straight through so that a route can be pinned without
     // touching this file: -PflightTag, -PflightSeed, -PflightDistance,
-    // -PflightSeconds, -PflightSettle, -PflightShots, -PflightPatience.
+    // -PflightSeconds, -PflightSettle, -PflightShots, -PflightPatience,
+    // -PflightPos, -PflightProfiler, -PflightPreset, -PflightHour and
+    // -PflightWeather.
     if (project.hasProperty('flight')) {
         jvmArgs '-Dvulkanmod112.flight=' + project.property('flight')
         ['flightTag', 'flightSeed', 'flightDistance', 'flightSeconds',
          'flightSettle', 'flightShots', 'flightPatience', 'flightPos',
-         'flightProfiler', 'flightPreset'].each { name ->
+         'flightProfiler', 'flightPreset', 'flightHour', 'flightWeather',
+         'flightPairs'].each { name ->
             if (project.hasProperty(name)) {
                 jvmArgs '-Dvulkanmod112.' + name + '=' + project.property(name)
             }
         }
+    }
+    // -PfrozenSeconds=N holds the animation clock every effect here reads, so
+    // that two frames taken at different moments differ only in what they were
+    // taken to compare. Without it a blade of grass has moved between them and
+    // every pixel of foliage and water is a difference.
+    if (project.hasProperty('frozenSeconds')) {
+        jvmArgs '-Dvulkanmod112.frozenSeconds=' + project.property('frozenSeconds')
     }
     // -PforceFallback makes the Vulkan side refuse to start, which is what a
     // player on an unsupported driver gets. It is the only way to see that
