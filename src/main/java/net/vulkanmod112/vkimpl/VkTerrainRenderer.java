@@ -7005,7 +7005,12 @@ final class VkTerrainRenderer {
         // line below, which made the whole effect unreachable while looking
         // exactly like a setting that did nothing.
         MemoryUtil.memPutFloat(base + 100, celestialGlint);
-        MemoryUtil.memPutFloat(base + 104, 0.0f);
+        // z: how much of a gradient the sky has, so that water can reflect the
+        // sky the player actually has rather than a second one of its own.
+        // The same number the sky pass is given, and it has to be the same
+        // number: a reflection of a sky nobody is looking at is a wrong answer
+        // that looks like an effect.
+        MemoryUtil.memPutFloat(base + 104, skyGradient);
         MemoryUtil.memPutFloat(base + 108, 0.0f);
         for (int i = 0; i < dynamicLightCount * 4; i++) {
             MemoryUtil.memPutFloat(base + 112 + i * 4L, dynamicLights[i]);

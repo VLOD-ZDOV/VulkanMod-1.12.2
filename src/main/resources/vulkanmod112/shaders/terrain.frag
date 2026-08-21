@@ -1150,6 +1150,46 @@ bool sunOccluded(vec3 origin, vec3 dir) {
 }
 #endif
 
+/**
+ * The sky along a direction, built the way the sky pass builds it.
+ *
+ * What a water surface shows where the ray found nothing used to be one flat
+ * colour: the game's fog, which is the horizon. At a grazing angle that is
+ * exactly right and there is nothing to improve — the horizon is what a flat
+ * mirror shows you when you look along it. Look *down* at the water, though,
+ * and the ray leaves steeply into a part of the sky that is nothing like the
+ * horizon, and answering with the horizon anyway is what makes a lake read as
+ * paint rather than as water. It is the single largest difference between this
+ * and a shader pack's water, and it costs no march, no buffer and no pass.
+ *
+ * Deliberately the same arithmetic and the same three constants as the pass
+ * that paints the sky itself, rather than a second sky invented here. Two
+ * skies that disagree is a worse fault than one flat one, and this project has
+ * paid for that lesson elsewhere: a reference copy that does not match the
+ * composite loses the effect entirely and says nothing.
+ *
+ * Gated on the sky gradient's own strength, and that is not a spare switch
+ * being borrowed. With the gradient off the player's sky really is flat —
+ * vanilla paints one blue from horizon to zenith — so the flat answer is the
+ * honest reflection of it, and the old behaviour is what comes back.
+ *
+ * @param horizon the colour the game is fogging to, which is the horizon
+ */
+vec3 skyAlong(vec3 dir, vec3 horizon) {
+    float strength = frame.lightInfo.z;
+    if (strength <= 0.0) {
+        return horizon;
+    }
+    float up = clamp(dir.y, 0.0, 1.0);
+    float deep = pow(up, 0.65);
+    float day = clamp(frame.sun.y * 4.0, 0.0, 1.0);
+    float toSun = clamp(dot(dir, frame.sun.xyz), 0.0, 1.0);
+    float glow = pow(toSun, 6.0) * (1.0 - up) * day;
+    vec3 zenith = horizon * vec3(0.42, 0.46, 0.62);
+    vec3 warm = min(horizon * vec3(1.35, 1.12, 0.86), vec3(1.0));
+    return mix(horizon, mix(zenith, warm, glow), strength * max(deep, glow));
+}
+
 float fresnel(vec3 normal) {
     float facing = clamp(dot(normal, normalize(-vRelative)), 0.0, 1.0);
     float f = 1.0 - facing;
@@ -1799,9 +1839,13 @@ void main() {
         float water = frame.heightFog.w;
         if (water > 0.0 && material == MATERIAL_WATER) {
             float mirror = fresnel(mirrorNormal) * water;
-            // What the surface shows: the horizon by default, and whatever is
-            // actually standing there when the ray finds it.
-            vec3 mirrored = fogRgb;
+            // Worked out before the march rather than inside it, because the
+            // sky is the answer whether or not the march ever runs.
+            vec3 toEye = normalize(-vRelative);
+            vec3 ray = reflect(-toEye, mirrorNormal);
+            // What the surface shows: the sky along that ray by default, and
+            // whatever is actually standing there when the march finds it.
+            vec3 mirrored = skyAlong(ray, fogRgb);
             // How much of what is being mixed in is really there, as against
             // being the sky colour standing in for it.
             float confidence = 0.0;
@@ -1811,8 +1855,6 @@ void main() {
             // which is where a good part of the smearing was coming from. The
             // waves have always known this; the mirror did not.
             if (frame.screenMirror.x > 0.0 && normal.y > 0.9) {
-                vec3 toEye = normalize(-vRelative);
-                vec3 ray = reflect(-toEye, mirrorNormal);
                 // A ray heading back towards the eye is looking at the side of
                 // the world that was never drawn. Faded rather than cut, so a
                 // surface does not change its mind along a line.
