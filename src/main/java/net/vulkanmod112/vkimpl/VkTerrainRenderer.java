@@ -4033,11 +4033,35 @@ final class VkTerrainRenderer {
         return (float) (world - Math.floor(world / JITTER_LATTICE) * JITTER_LATTICE);
     }
 
+    /**
+     * How much of a sun-driven shadow to believe at this hour, 0 to 1.
+     *
+     * One ramp for all of them, and that is the whole point of it. There are
+     * three things here that darken the world because of where the sun is —
+     * the traced shadow, the contact march and the cloud sheet — and each had
+     * arrived at its own hour: the traced one eased in between two and thirty
+     * hundredths of sun height, the contact march climbed straight from zero
+     * to a fifth, and the cloud shadow appeared at five hundredths already at
+     * full strength. Three arrivals of one sunrise, and the third of them a
+     * step. A fourth system laid over that would be laid over a disagreement,
+     * which is why the shadow map waits on this.
+     *
+     * The curve is the traced one's, because it was the one chosen against a
+     * sunrise rather than for convenience: a shadow that begins the instant
+     * the sun clears the horizon appears over the whole world in one frame,
+     * and at that moment it is also at its longest and sweeping fastest.
+     */
+    private float sunRamp() {
+        float t = (sunDirection[1] - 0.02f) / (0.30f - 0.02f);
+        t = Math.max(0.0f, Math.min(1.0f, t));
+        return t * t * (3.0f - 2.0f * t);
+    }
+
     private void writeContactSun() {
         if (aoContactUniform < 0 || aoSunUniform < 0) {
             return;
         }
-        if (contactShadows <= 0.0f || sunDirection[1] <= 0.0f) {
+        if (contactShadows <= 0.0f || sunRamp() <= 0.0f) {
             GL20C.glUniform1f(aoContactUniform, 0.0f);
             GL20C.glUniform3f(aoSunUniform, 0.0f, 0.0f, 0.0f);
             return;
@@ -4064,9 +4088,9 @@ final class VkTerrainRenderer {
         GL20C.glUniform3f(aoSunUniform, vx / len, vy / len, vz / len);
         // Faded out as the sun reaches the horizon, where a shadow marched
         // along the ground stretches past anything on the screen and every
-        // sample lands on the same wall.
-        GL20C.glUniform1f(aoContactUniform,
-                contactShadows * Math.min(1.0f, sunDirection[1] * 5.0f));
+        // sample lands on the same wall. The curve is shared with the other
+        // two sun-driven shadows; see sunRamp.
+        GL20C.glUniform1f(aoContactUniform, contactShadows * sunRamp());
     }
 
     /**
@@ -4084,7 +4108,7 @@ final class VkTerrainRenderer {
             return;
         }
         int sheet = cloudTexture;
-        if (cloudShadows <= 0.0f || sheet == 0 || sunDirection[1] <= 0.05f) {
+        if (cloudShadows <= 0.0f || sheet == 0 || sunRamp() <= 0.0f) {
             GL20C.glUniform1f(aoCloudShadowUniform, 0.0f);
             return;
         }
@@ -4112,7 +4136,7 @@ final class VkTerrainRenderer {
         GL13C.glActiveTexture(GL13C.GL_TEXTURE2);
         GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, sheet);
         GL13C.glActiveTexture(GL13C.GL_TEXTURE0);
-        GL20C.glUniform1f(aoCloudShadowUniform, cloudShadows);
+        GL20C.glUniform1f(aoCloudShadowUniform, cloudShadows * sunRamp());
     }
 
     private boolean ensureAoTargets() {
@@ -4548,13 +4572,25 @@ final class VkTerrainRenderer {
                         // is why it was worse the wider the view got.
                         + "    vec2 toEdge = min(uv, vec2(1.0) - uv);\n"
                         + "    float edge = clamp(min(toEdge.x, toEdge.y) / 0.10, 0.0, 1.0);\n"
-                        + "    float lit = clamp(ao, 0.0, 1.0)\n"
-                        + "            * (1.0 - uContact * contact * 0.75 * edge)\n"
-                        // Half of what the slider says, because the sheet is a mask
-                        // of ones and zeros: the value read is the share of the sky
-                        // covered, not the share of light removed, and a cloud does
-                        // not take all of the light under it.
-                        + "            * (1.0 - uCloudShadow * cloud * 0.5);\n"
+                        // The two sun-driven shadows are one shadow, so they
+                        // are taken together rather than one after the other.
+                        //
+                        // Multiplying them compounded: a contact shadow lying
+                        // under a cloud came out darker than either could make
+                        // it, and darker again wherever a traced shadow had
+                        // already lowered the same surface. They are not two
+                        // occluders in front of two lights — they are two ways
+                        // of finding out about the one sun, so the answer is
+                        // whichever of them found more of it, not the product.
+                        //
+                        // The cloud is worth half of what the slider says,
+                        // because the sheet is a mask of ones and zeros: the
+                        // value read is the share of the sky covered, not the
+                        // share of light removed, and a cloud does not take
+                        // all of the light under it.
+                        + "    float sunBlocked = max(uContact * contact * 0.75 * edge,\n"
+                        + "                           uCloudShadow * cloud * 0.5);\n"
+                        + "    float lit = clamp(ao, 0.0, 1.0) * (1.0 - sunBlocked);\n"
                         + "    gl_FragColor = vec4(clamp(lit, 0.0, 1.0));\n"
                         + "}\n");
         aoInvSize = GL20C.glGetUniformLocation(aoProgram, "uInvSize");
