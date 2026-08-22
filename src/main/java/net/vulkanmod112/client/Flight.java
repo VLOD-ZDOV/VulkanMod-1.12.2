@@ -189,6 +189,14 @@ public final class Flight {
     /** How many frames have been kept. */
     private static int shotsTaken;
 
+    /** Where the camera was last tick, so that the frames between can be drawn between. */
+    private static double lastX;
+    private static double lastY;
+    private static double lastZ;
+    private static float lastYaw;
+    private static float lastPitch;
+    private static boolean havePrevious;
+
     private Flight() {
     }
 
@@ -244,7 +252,7 @@ public final class Flight {
                 // Held in place for the whole wait rather than left alone,
                 // because the player falls otherwise and the route would start
                 // from somewhere it did not choose.
-                place(mc, baseX, baseY, baseZ, yawAt(0), pitchAt(0));
+                place(mc, baseX, baseY, baseZ, yawAt(0), pitchAt(0), true);
                 if (ticks >= SETTLE * TICKS_PER_SECOND) {
                     stage = Stage.FLYING;
                     ticks = 0;
@@ -378,14 +386,19 @@ public final class Flight {
             // is what makes chunks arrive at the rate a player would meet.
             x += ticks * 0.4;
         }
-        place(mc, x, baseY, z, yawAt(t), pitchAt(t));
+        // Decided before the camera is placed, because a tick that is about
+        // to be photographed is placed differently: pinned rather than
+        // interpolated, so the picture is of the angle the route names.
+        //
         // Evenly spaced, ends included: the first and last frames of a spin
         // are the same view, and that pair is the whole point of the route.
-        if (shotsTaken < SHOTS && ticks >= shotTick(shotsTaken, length)) {
+        boolean shooting = shotsTaken < SHOTS && ticks >= shotTick(shotsTaken, length);
+        if (shooting) {
             pendingShot = "flight-" + TAG + "-" + ROUTE + "-"
                     + String.format("%02d", shotsTaken);
             shotsTaken++;
         }
+        place(mc, x, baseY, z, yawAt(t), pitchAt(t), shooting);
         // Five ticks of grace after the last frame is asked for. The frame
         // that saves it has not run yet at this point — a picture is taken at
         // the end of a frame and this is the tick before one — so closing the
@@ -403,7 +416,8 @@ public final class Flight {
      * the camera sliding towards it across the frame and a screenshot taken
      * from a named angle is not of that angle.
      */
-    private static void place(Minecraft mc, double x, double y, double z, float yaw, float pitch) {
+    private static void place(Minecraft mc, double x, double y, double z, float yaw, float pitch,
+                              boolean pinned) {
         if (mc.player == null) {
             return;
         }
@@ -417,17 +431,44 @@ public final class Flight {
         // a fault of that shape is indistinguishable from the renderer drawing
         // the wrong thing, which is what this harness exists to look for.
         yaw = net.minecraft.util.math.MathHelper.wrapDegrees(yaw);
+        // Where the camera was a tick ago, so the frames in between are drawn
+        // in between.
+        //
+        // Pinning both ends of that pair is what a photograph needs and what
+        // ordinary motion must not have: the route moves the camera twenty
+        // times a second, and with nothing to interpolate towards, five
+        // hundred frames a second look exactly like twenty. Worse than looking
+        // wrong, it measures wrong — everything here that skips work when the
+        // camera has not moved gets an easier ride than it would in a game
+        // somebody is playing.
+        //
+        // The previous angle is carried as a difference rather than as the
+        // last value, so that a route crossing the half-turn does not hand the
+        // interpolation a pair three hundred and sixty degrees apart and spin
+        // the camera backwards through a whole circle for one tick.
+        double fromX = pinned || !havePrevious ? x : lastX;
+        double fromY = pinned || !havePrevious ? y : lastY;
+        double fromZ = pinned || !havePrevious ? z : lastZ;
+        float fromYaw = pinned || !havePrevious ? yaw
+                : yaw - net.minecraft.util.math.MathHelper.wrapDegrees(yaw - lastYaw);
+        float fromPitch = pinned || !havePrevious ? pitch : lastPitch;
+        lastX = x;
+        lastY = y;
+        lastZ = z;
+        lastYaw = yaw;
+        lastPitch = pitch;
+        havePrevious = true;
         mc.player.setPositionAndRotation(x, y, z, yaw, pitch);
-        mc.player.prevPosX = x;
-        mc.player.prevPosY = y;
-        mc.player.prevPosZ = z;
-        mc.player.lastTickPosX = x;
-        mc.player.lastTickPosY = y;
-        mc.player.lastTickPosZ = z;
-        mc.player.prevRotationYaw = yaw;
-        mc.player.prevRotationPitch = pitch;
+        mc.player.prevPosX = fromX;
+        mc.player.prevPosY = fromY;
+        mc.player.prevPosZ = fromZ;
+        mc.player.lastTickPosX = fromX;
+        mc.player.lastTickPosY = fromY;
+        mc.player.lastTickPosZ = fromZ;
+        mc.player.prevRotationYaw = fromYaw;
+        mc.player.prevRotationPitch = fromPitch;
         mc.player.rotationYawHead = yaw;
-        mc.player.prevRotationYawHead = yaw;
+        mc.player.prevRotationYawHead = fromYaw;
         mc.player.motionX = 0.0;
         mc.player.motionY = 0.0;
         mc.player.motionZ = 0.0;
