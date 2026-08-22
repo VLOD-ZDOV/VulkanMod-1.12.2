@@ -1648,9 +1648,24 @@ void main() {
                 // are plainest, and grew towards grazing, where the bed is
                 // barely visible at all. Refraction was strongest where it
                 // could not be seen and absent where it could.
-                vec2 tilt = normal.xz
-                            * frame.lightShadow.w * REFRACT_REACH / max(1.0, clip.w);
-                vec2 shifted = clamp(uv + tilt, vec2(0.0), vec2(1.0));
+                // Shifted by moving the point in the world and asking where
+                // that lands, rather than by adding world x and z to a screen
+                // coordinate.
+                //
+                // Those are different spaces. Screen x is to the right of the
+                // camera and screen y is up it; world x and z are north and
+                // east and do not care where the camera is pointing. Added
+                // together, the bed slid the wrong way as the view turned —
+                // north on the water became right on the screen only while
+                // facing one direction, and reversed when facing the other.
+                // The projection is the conversion, and it also does the
+                // distance falloff that the divide by w was standing in for.
+                vec3 tilted = vRelative + vec3(normal.x, 0.0, normal.z)
+                        * frame.lightShadow.w * REFRACT_REACH;
+                vec4 tiltedClip = frame.mvp * vec4(tilted, 1.0);
+                vec2 shifted = tiltedClip.w > 0.0001
+                        ? clamp(tiltedClip.xy / tiltedClip.w * 0.5 + 0.5, vec2(0.0), vec2(1.0))
+                        : uv;
                 // Only if what is there is really behind the water. A sample in
                 // front of it is something standing between the eye and the
                 // surface, and smearing that across the water is the artefact
@@ -1755,7 +1770,19 @@ void main() {
                 // measure with: how much water is above this bed is a question
                 // about the column under this pixel.
                 float straightDepth = textureLod(sceneDepth, uv, 0.0).r;
-                float through = max(distanceOf(straightDepth) - distanceOf(here), 0.0);
+                // Straight down, and now actually straight down.
+                //
+                // Both samples lie on one ray from the eye, so the bed is the
+                // surface point scaled along that ray — and the drop between
+                // them is the y of the difference, not its length. Taking the
+                // difference of the two linearised depths instead measured
+                // along the ray, which at a grazing angle is several times the
+                // depth of the water: the same shallows read as an ocean when
+                // looked at from across the pond and as a puddle from above,
+                // and absorption and foam both ride on this number.
+                float dHere = max(distanceOf(here), 1.0e-4);
+                float dBed = distanceOf(straightDepth);
+                float through = max(vRelative.y * (1.0 - dBed / dHere), 0.0);
                 // Per block, and each channel its own. Not physical constants:
                 // the sea in this game is a handful of blocks deep, so the real
                 // ones would do nothing at all over that distance.
