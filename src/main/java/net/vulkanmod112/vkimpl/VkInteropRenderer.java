@@ -525,22 +525,69 @@ final class VkInteropRenderer {
         throw new IllegalStateException("No suitable memory type (flags 0x" + Integer.toHexString(properties) + ")");
     }
 
+    /**
+     * Gives everything back, whether or not the setting up ever finished.
+     *
+     * It used to leave at the door unless the whole of {@code init} had run,
+     * and the one caller that most needs it is the one where it did not: a
+     * failure partway through leaves an exported image, its memory, the GL
+     * texture and memory object built on top of it and two imported
+     * semaphores, and nothing else in this process can reach them again — the
+     * renderer is never stored anywhere when its construction throws. So the
+     * gate is gone and every handle is given back on its own terms.
+     *
+     * Each one is cleared as it goes, which is what makes calling this twice
+     * safe: the second call finds zeros and does nothing. Vulkan accepts a
+     * null handle by specification; the GL names are checked because a texture
+     * name of zero is a legal object there rather than nothing.
+     */
     synchronized void destroy() {
-        if (!ready) {
-            return;
+        // The GL side first: it is built on top of the Vulkan memory, and
+        // handing that memory back while a texture still names it is the shape
+        // of the two crashes this project has already had.
+        if (glTexture > 0) {
+            GL11C.glDeleteTextures(glTexture);
+        }
+        glTexture = -1;
+        if (glMemoryObject != 0) {
+            EXTMemoryObject.glDeleteMemoryObjectsEXT(new int[] {glMemoryObject});
+            glMemoryObject = 0;
+        }
+        if (glWaitSemaphore != 0) {
+            EXTSemaphore.glDeleteSemaphoresEXT(new int[] {glWaitSemaphore});
+            glWaitSemaphore = 0;
+        }
+        if (glSignalSemaphore != 0) {
+            EXTSemaphore.glDeleteSemaphoresEXT(new int[] {glSignalSemaphore});
+            glSignalSemaphore = 0;
         }
         VkDevice device = device();
+        if (device == null) {
+            ready = false;
+            return;
+        }
         vkDestroyFence(device, fence, null);
+        fence = 0;
         vkDestroyCommandPool(device, commandPool, null);
+        commandPool = 0;
         vkDestroySemaphore(device, vkSignalSemaphore, null);
+        vkSignalSemaphore = 0;
         vkDestroySemaphore(device, vkWaitSemaphore, null);
+        vkWaitSemaphore = 0;
         vkDestroyPipeline(device, pipeline, null);
+        pipeline = 0;
         vkDestroyPipelineLayout(device, pipelineLayout, null);
+        pipelineLayout = 0;
         vkDestroyFramebuffer(device, framebuffer, null);
+        framebuffer = 0;
         vkDestroyRenderPass(device, renderPass, null);
+        renderPass = 0;
         vkDestroyImageView(device, imageView, null);
+        imageView = 0;
         vkDestroyImage(device, image, null);
+        image = 0;
         vkFreeMemory(device, imageMemory, null);
+        imageMemory = 0;
         ready = false;
     }
 

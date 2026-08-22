@@ -865,13 +865,29 @@ public final class VulkanContextImpl implements VulkanBridge {
             return false;
         }
         if (interopRenderer == null) {
+            // Declared out here so that the failure path can still reach it:
+            // a renderer whose construction throws is never stored anywhere.
+            VkInteropRenderer renderer = null;
             try {
-                VkInteropRenderer renderer = new VkInteropRenderer(this, width, height);
+                renderer = new VkInteropRenderer(this, width, height);
                 renderer.init();
                 interopRenderer = renderer;
             } catch (Throwable t) {
                 LOGGER.error("Zero-copy GL interop initialization failed", t);
                 interopCapable = false;
+                // Give back whatever the half-built renderer had taken. It is
+                // never stored when its construction throws, so this is the
+                // only moment anything can reach an exported image, the GL
+                // texture built on it and two imported semaphores — after this
+                // they belong to nobody until the process ends.
+                try {
+                    if (renderer != null) {
+                        renderer.destroy();
+                    }
+                } catch (Throwable ignored) {
+                    // A failure while cleaning up must not replace the failure
+                    // being reported: that one says why interop is off.
+                }
                 return false;
             }
         }

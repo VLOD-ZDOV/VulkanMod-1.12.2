@@ -10070,6 +10070,24 @@ final class VkTerrainRenderer {
         depthBlit = false;
         glColorTexture = -1;
         glDepthTexture = -1;
+        // Wait for OpenGL as well, before any of the memory underneath it is
+        // handed back.
+        //
+        // vkDeviceWaitIdle above waits for Vulkan and for nothing else, and
+        // the images below are shared: OpenGL has been sampling them all
+        // frame, and its own work is queued on the same card. Deleting a GL
+        // texture is safe — the driver keeps the object alive until its
+        // commands are done — but freeing the Vulkan memory that texture was
+        // built on is not, because nothing told Vulkan that GL is still
+        // reading it. This runs whenever the window changes size, and the two
+        // crashes this project has had were both of exactly this shape: memory
+        // released while something still named it.
+        //
+        // A full stall, and it costs nothing worth counting: the only paths
+        // here are a resize, a resource reload and shutting down.
+        if (glContextCurrent()) {
+            GL11C.glFinish();
+        }
         vkDestroyFramebuffer(device(), framebuffer, null);
         if (translucentFramebuffer != 0) {
             vkDestroyFramebuffer(device(), translucentFramebuffer, null);

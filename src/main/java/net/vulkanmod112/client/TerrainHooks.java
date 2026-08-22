@@ -386,6 +386,17 @@ public final class TerrainHooks {
             }
             return taken;
         } catch (Throwable t) {
+            // Permanent, and more things lean on that than it looks.
+            //
+            // Inside a frame there are fences reset before their submit and
+            // semaphores signalled from one side before the other consumes
+            // them, and each of those pairs is left half-finished if anything
+            // throws between the two. None of that can strand the next frame,
+            // because after this line there is no next frame: an audit of
+            // seven such windows found every one of them unreachable for this
+            // reason alone. Anything that ever lets the renderer start again
+            // makes all seven reachable at once, and would have to walk the
+            // fences and semaphores back to a known state first.
             broken = true;
             LOGGER.error("Vulkan terrain rendering failed — falling back to vanilla GL permanently", t);
             Diagnostics.flushNow("terrain failed permanently: " + t);
