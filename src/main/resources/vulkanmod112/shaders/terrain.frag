@@ -204,7 +204,26 @@ const float CREATURE_LIKELY_DEPTH = 3.0;
  * two on purpose: it is the half people recognise without being told.
  */
 const float WET_DARKEN = 0.30;
-const float WET_SHEEN = 0.55;
+/*
+ * How much of the sky a wet floor gathers, at the angle where it gathers most.
+ *
+ * Was 0.55, and measured against the same frame with the effect off, a wet
+ * floor came out *brighter* than a dry one: up to twenty-one levels of two
+ * hundred and fifty-five brighter on the ground nearest the camera. Water on a
+ * surface darkens it — that is the whole of what makes it read as wet — and
+ * the sheen was more than undoing the darkening, so rain painted the world a
+ * pale blue instead of wetting it. Reported twice in those words, and the
+ * second time as the reason a block one step up looks untouched while the
+ * floor at your feet does not: the two are seen at different angles, and this
+ * term was the only thing in the effect that depends on the angle.
+ *
+ * Chosen so that the net is a darkening at every angle. With ground at half
+ * brightness and a sky of about two thirds: dry 0.50, wet looking straight
+ * down 0.37, wet at a grazing angle 0.42. It still lifts towards the sky as
+ * the angle flattens, which is the thing worth having, but it can no longer
+ * cross back over dry.
+ */
+const float WET_SHEEN = 0.28;
 /**
  * What is left of the sheen when looking straight down at a wet surface.
  *
@@ -218,6 +237,15 @@ const float WET_SHEEN = 0.55;
  * which is a description of this curve rather than of the weather.
  */
 const float WET_SHEEN_FLOOR = 0.18;
+/*
+ * And the most, at the angle where a film of water is nearly a mirror.
+ *
+ * Was one, which is what a mirror returns and what made the effect swing by a
+ * factor of five between looking down at a floor and looking along it. A
+ * block a step up is seen along, the floor at your feet is seen down at, and
+ * two neighbouring blocks in the same rain came out visibly different.
+ */
+const float WET_SHEEN_GRAZE = 0.80;
 
 /**
  * Which way the haze leans, per unit of leaning towards the sun.
@@ -1553,7 +1581,7 @@ void main() {
         // remembered sky is worse than a floor that only darkens.
         if (frame.fogColor.a > 0.5) {
             shaded = mix(shaded, frame.fogColor.rgb,
-                    mix(WET_SHEEN_FLOOR, 1.0, fresnel(geometricNormal))
+                    mix(WET_SHEEN_FLOOR, WET_SHEEN_GRAZE, fresnel(geometricNormal))
                             * wet * WET_SHEEN);
         }
     }
