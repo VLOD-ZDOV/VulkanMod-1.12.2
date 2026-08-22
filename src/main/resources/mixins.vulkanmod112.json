@@ -13,6 +13,7 @@
     "GuiVideoSettingsMixin",
     "EntityRenderDistanceMixin",
     "TileEntityRenderDistanceMixin",
+    "ItemSpriteMixin",
     "TextureMapAnimationMixin",
     "AtlasAnimationMixin",
     "GameShutdownMixin",

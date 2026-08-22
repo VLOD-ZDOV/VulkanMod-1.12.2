@@ -111,6 +111,7 @@ public final class VulkanConfig {
      * silent before anything depends on it.
      */
     static final boolean DEF_MATERIAL_TAGS = false;
+    static final boolean DEF_SMART_ANIMATIONS = false;
     /**
      * Paint the terrain by what it is made of instead of by its texture.
      *
@@ -570,6 +571,7 @@ public final class VulkanConfig {
     private static volatile boolean ownVisibilityWalk = DEF_OWN_VISIBILITY_WALK;
     private static volatile boolean fastRebuildNear = DEF_FAST_REBUILD_NEAR;
     private static volatile boolean materialTags = DEF_MATERIAL_TAGS;
+    private static volatile boolean smartAnimations = DEF_SMART_ANIMATIONS;
     private static boolean showMaterials = DEF_SHOW_MATERIALS;
     private static boolean showOcclusion = DEF_SHOW_OCCLUSION;
     private static boolean showMotion = DEF_SHOW_MOTION;
@@ -758,6 +760,17 @@ public final class VulkanConfig {
                         + "chunk object somewhere else in memory. Off by default because it "
                         + "replaces vanilla logic, and the way that goes wrong is that something "
                         + "stops being rebuilt.");
+        smartAnimations = config.getBoolean("smartAnimations", CATEGORY_OPTIMIZATION,
+                DEF_SMART_ANIMATIONS,
+                "Update only the animated block textures that are actually on screen. Vanilla "
+                        + "uploads a new frame for every animated sprite in the atlas every "
+                        + "tick, whether or not one block using it is in sight, and a modpack "
+                        + "has hundreds. A chunk records what it uses while it is built, so "
+                        + "chunks in view have to be rebuilt — F3+A — before this saves "
+                        + "anything. Fluids, fire and portals are never skipped, nor is any "
+                        + "sprite that no chunk has ever used, which is what keeps an item in a "
+                        + "menu moving. Experimental: a texture that is both a block and an "
+                        + "item can stand still in your hand while no such block is in sight.");
         materialTags = config.getBoolean("materialTags", CATEGORY_OPTIMIZATION,
                 DEF_MATERIAL_TAGS,
                 "Record what each stretch of a chunk's geometry is made of while the chunk is "
@@ -1319,6 +1332,7 @@ public final class VulkanConfig {
         setOwnVisibilityWalk(DEF_OWN_VISIBILITY_WALK);
         setFastRebuildNear(DEF_FAST_REBUILD_NEAR);
         setMaterialTags(DEF_MATERIAL_TAGS);
+        setSmartAnimations(DEF_SMART_ANIMATIONS);
         setShowMaterials(DEF_SHOW_MATERIALS);
         setBuildNearOffThread(DEF_BUILD_NEAR_OFF_THREAD);
         setFastFrustumTest(DEF_FAST_FRUSTUM_TEST);
@@ -1437,6 +1451,23 @@ public final class VulkanConfig {
 
     public static boolean isMaterialTags() {
         return materialTags;
+    }
+
+    public static boolean isSmartAnimations() {
+        return smartAnimations;
+    }
+
+    /**
+     * Raises the same rebuild flag as the tags, and for the same reason: what
+     * a chunk uses is written into it while it is built, so a chunk built
+     * before the switch moved knows nothing and has to say so.
+     */
+    public static void setSmartAnimations(boolean value) {
+        if (smartAnimations != value) {
+            materialTagsNeedRebuild = true;
+        }
+        smartAnimations = value;
+        store(CATEGORY_OPTIMIZATION, "smartAnimations", value);
     }
 
     /**
@@ -2464,6 +2495,7 @@ public final class VulkanConfig {
         publish("vulkanmod112.preloadQueue", Integer.toString(preloadQueue));
         publish("vulkanmod112.preloadScan", Integer.toString(preloadScan));
         publish("vulkanmod112.aoRadius", Integer.toString(aoRadius));
+        publish("vulkanmod112.smartAnimations", Boolean.toString(smartAnimations));
         publish("vulkanmod112.showMaterials", Boolean.toString(showMaterials));
         publish("vulkanmod112.showOcclusion", Boolean.toString(showOcclusion));
         publish("vulkanmod112.showMotion", Boolean.toString(showMotion));

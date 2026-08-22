@@ -325,6 +325,13 @@ public final class TerrainHooks {
             lastVanillaChunks = chunks == null ? 0 : chunks.size();
             updateVanillaBufferDrop();
             rebuildForMaterialTags();
+            // Which animated sprites the frame is going to need. Taken from
+            // the solid layer alone: all four layers carry the same chunks,
+            // and a chunk with no water in it still has water in its record if
+            // any of its four layers drew some.
+            if (VulkanConfig.isSmartAnimations()) {
+                AnimatedSprites.markVisible(chunks);
+            }
         }
         // Leaving before packChunks matters when the layer is not taken: water
         // and glass make a long chunk list at high render distances, and every

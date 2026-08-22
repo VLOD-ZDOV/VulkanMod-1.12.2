@@ -1,12 +1,18 @@
 package net.vulkanmod112.mixin;
 
+import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import net.minecraft.client.renderer.texture.TextureMap;
+import net.minecraft.client.renderer.GlStateManager;
+import net.vulkanmod112.client.AnimatedSprites;
 import net.vulkanmod112.client.TerrainHooks;
 import net.vulkanmod112.client.VulkanConfig;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+
+import java.util.List;
 
 /**
  * Lets animated block textures be turned off.
@@ -20,11 +26,31 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(TextureMap.class)
 public abstract class TextureMapAnimationMixin {
 
+    @Shadow
+    private List<TextureAtlasSprite> listAnimatedSprites;
+
     @Inject(method = "updateAnimations", at = @At("HEAD"), cancellable = true)
     private void vulkanmod112$skipAnimations(CallbackInfo ci) {
         if (!VulkanConfig.areAnimationsEnabled()) {
             ci.cancel();
+            return;
         }
+        if (!VulkanConfig.isSmartAnimations()) {
+            return;
+        }
+        // The same work, over the sprites that something on screen is using.
+        // The bind is vanilla's own first line and has to be repeated here:
+        // every sprite uploads into the atlas that is bound, and this method
+        // is the only thing that binds it.
+        GlStateManager.bindTexture(((TextureMap) (Object) this).getGlTextureId());
+        AnimatedSprites.updateWanted(this.listAnimatedSprites);
+        // Cancelling takes the return hook with it, and that hook is what
+        // hands the frames to the Vulkan copy of the atlas — without it the
+        // blocks this renderer draws would animate in OpenGL and stand still
+        // in Vulkan, which is the shape of a bug nobody would connect to a
+        // setting called Smart Animations.
+        TerrainHooks.flushAtlasAnimations();
+        ci.cancel();
     }
 
     /**

@@ -7,10 +7,12 @@ import net.minecraft.client.renderer.chunk.ChunkCompileTaskGenerator;
 import net.minecraft.client.renderer.chunk.RenderChunk;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.IBlockAccess;
+import net.vulkanmod112.client.AnimatedSprites;
 import net.vulkanmod112.client.ChunkBuildStats;
 import net.vulkanmod112.client.MaterialRuns;
 import net.vulkanmod112.client.VulkanConfig;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
@@ -33,7 +35,24 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * predicted branch on a call that already dispatches through a block model.
  */
 @Mixin(RenderChunk.class)
-public abstract class MaterialTagMixin {
+public abstract class MaterialTagMixin implements AnimatedSprites.SpriteMarked {
+
+    /**
+     * Which animated sprites this chunk's blocks use, or null when nothing was
+     * recorded — which has to read as "everything", never as "none".
+     */
+    @Unique
+    private volatile long[] vulkanmod112$sprites;
+
+    @Override
+    public long[] vulkanmod112$animatedSprites() {
+        return vulkanmod112$sprites;
+    }
+
+    @Override
+    public void vulkanmod112$animatedSprites(long[] mask) {
+        vulkanmod112$sprites = mask;
+    }
 
     @Redirect(method = "rebuildChunk", at = @At(value = "INVOKE",
             target = "Lnet/minecraft/client/renderer/BlockRendererDispatcher;renderBlock"
@@ -49,6 +68,13 @@ public abstract class MaterialTagMixin {
             // one before it ended, and asking the buffer is what keeps this
             // right for a block that writes into two layers at once.
             MaterialRuns.record(state, builder, builder.getVertexCount());
+        }
+        if (VulkanConfig.isSmartAnimations()) {
+            // Which sprites this chunk needs kept moving. Worked out once per
+            // block state and then a handful of ors, because the answer is a
+            // property of the state and there are a few thousand of those
+            // against a few million blocks.
+            AnimatedSprites.recordBlock(state);
         }
         return drew;
     }
@@ -72,11 +98,17 @@ public abstract class MaterialTagMixin {
     private void vulkanmod112$beginRebuild(float x, float y, float z,
                                            ChunkCompileTaskGenerator generator, CallbackInfo ci) {
         ChunkBuildStats.begin(x, y, z);
+        if (VulkanConfig.isSmartAnimations()) {
+            AnimatedSprites.beginChunk();
+        }
     }
 
     @Inject(method = "rebuildChunk", at = @At("RETURN"))
     private void vulkanmod112$endRebuild(float x, float y, float z,
                                          ChunkCompileTaskGenerator generator, CallbackInfo ci) {
         ChunkBuildStats.end();
+        if (VulkanConfig.isSmartAnimations()) {
+            AnimatedSprites.finishChunk((RenderChunk) (Object) this);
+        }
     }
 }

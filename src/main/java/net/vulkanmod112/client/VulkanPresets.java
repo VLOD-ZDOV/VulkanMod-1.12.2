@@ -143,6 +143,11 @@ public final class VulkanPresets {
         // they do set were being judged through the fog.
         int fogDistance = VulkanConfig.DEF_FOG_DISTANCE;
         boolean fog = true;
+
+        // Written by every preset as off while it is experimental, which is
+        // still owning it: a preset that leaves a setting alone is a setting
+        // nobody can get back to a known state.
+        boolean smartAnimations;
     }
 
     /**
@@ -434,6 +439,7 @@ public final class VulkanPresets {
         VulkanConfig.setRoundMoon(look.roundMoon);
         VulkanConfig.setFogDistance(look.fogDistance);
         VulkanConfig.setFogEnabled(look.fog);
+        VulkanConfig.setSmartAnimations(look.smartAnimations);
         if (look.geometryBudgetMiB >= 0) {
             VulkanConfig.setGeometryBudgetMiB(look.geometryBudgetMiB);
         }

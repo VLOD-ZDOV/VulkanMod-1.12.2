@@ -115,7 +115,7 @@ public final class VulkanPatchGroups {
         group(TEXTURES, "Animated Textures",
                 "Animated blocks stop being captured for the Vulkan atlas, so water and lava "
                         + "stand still in the parts of the world this renderer draws.",
-                "AtlasAnimationMixin", "TextureMapAnimationMixin");
+                "AtlasAnimationMixin", "ItemSpriteMixin", "TextureMapAnimationMixin");
         group(TWEAKS, "Optimisations",
                 "The optional speed-ups switch off together: chunk pre-loading, the build "
                         + "thread count, the near plane, the entity distance caps and the "

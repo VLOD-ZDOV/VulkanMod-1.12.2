@@ -2220,6 +2220,10 @@ final class VkTerrainRenderer {
                 .append(depthBlit ? glTimeText(depthBlitTimer) + " by hardware copy"
                         : glTimeText(depthImportTimer))
                 .append('\n');
+        String animations = net.vulkanmod112.client.AnimatedSprites.stats();
+        if (animations != null && net.vulkanmod112.client.VulkanConfig.isSmartAnimations()) {
+            sb.append(animations).append('\n');
+        }
         sb.append("  lightmap: ").append(lightmapUploads).append(" changes over ")
                 .append(lightmapFrames).append(" frames")
                 .append(lightmapFrames > 0

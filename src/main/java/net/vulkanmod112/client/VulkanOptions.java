@@ -821,6 +821,32 @@ final class VulkanOptions {
                                     public void set(boolean value) {
                                         VulkanConfig.setAnimationsEnabled(value);
                                     }
+                                }),
+                        new VSwitchOption("Smart Animations",
+                                "Update only the animated textures something on screen is "
+                                        + "actually using, instead of every one in the atlas "
+                                        + "every tick. Vanilla has no idea which is which, so a "
+                                        + "chunk records what it uses while it is built — which "
+                                        + "means the chunks in view have to be rebuilt, F3+A, "
+                                        + "before this saves anything. Fluids, fire and portals "
+                                        + "are never skipped, nor is any texture no chunk has "
+                                        + "ever used, which is what keeps a picture in a menu "
+                                        + "moving. Experimental, and here is the edge: a texture "
+                                        + "that is both a block and an item can stand still in "
+                                        + "your hand while no such block is in sight.",
+                                Cost.of(Level.LOW, Level.NONE, Level.NONE),
+                                "Needs the chunks in view rebuilt — F3+A — and does nothing "
+                                        + "while Animated Textures is off.",
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return VulkanConfig.isSmartAnimations();
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        VulkanConfig.setSmartAnimations(value);
+                                    }
                                 })),
                 new VOptionBlock("Effects",
                         new VSwitchOption("Cache TNT Model",
