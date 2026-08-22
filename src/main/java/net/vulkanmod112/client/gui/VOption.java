@@ -12,6 +12,18 @@ public abstract class VOption {
 
     /** One resource's share of an option's cost. */
     public enum Level {
+        /*
+         * Three of these are savings, and they exist because the panel was
+         * read backwards. The Vulkan terrain showed two, three and three, and
+         * the question that came back was "isn't it supposed to take work
+         * off the processor?" — it is, and the panel had no way of saying so:
+         * every number it could print was a cost. A setting that gives a
+         * resource back now prints that, in a colour of its own, with the bars
+         * filled the same way and the word saying which direction they mean.
+         */
+        SAVES_HIGH("saves a lot", 0x59B4FF, "\u00a7b", -3),
+        SAVES_MEDIUM("saves", 0x59B4FF, "\u00a7b", -2),
+        SAVES_LOW("saves a little", 0x59B4FF, "\u00a7b", -1),
         NONE("none", 0x707070, "\u00a77", 0),
         LOW("low", 0x55C355, "\u00a7a", 1),
         MEDIUM("medium", 0xE0C040, "\u00a7e", 2),
@@ -32,8 +44,22 @@ public abstract class VOption {
          * its colour there too.
          */
         public final String format;
-        /** Filled segments in the bar drawn next to the name. */
+        /**
+         * Filled segments in the bar drawn next to the name, negative for a
+         * saving. Read through {@link #filled()}; the sign is the direction
+         * and belongs to the colour and the word, not to the count.
+         */
         public final int bars;
+
+        /** How many of the three segments are filled, whichever way it goes. */
+        public int filled() {
+            return bars < 0 ? -bars : bars;
+        }
+
+        /** Whether this gives the resource back instead of taking it. */
+        public boolean saves() {
+            return bars < 0;
+        }
 
         Level(String label, int color, String format, int bars) {
             this.label = label;

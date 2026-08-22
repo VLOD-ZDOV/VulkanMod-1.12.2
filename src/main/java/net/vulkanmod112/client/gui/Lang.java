@@ -128,6 +128,7 @@ public final class Lang {
 
     /** Chrome that belongs to no option. */
     private static final String[] UI_STRINGS = {
+            "Against this setting off. Blue gives back.",
             "Reset", "Cost", "CPU", "GPU", "VRAM", "Vulkan unavailable",
             "Profiles", "Save As", "Load", "Rename", "Delete", "Saved", "Loaded", "Renamed",
             "That name is taken", "Could not write that profile", "Could not read that profile",

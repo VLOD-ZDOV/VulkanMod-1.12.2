@@ -143,8 +143,15 @@ final class VulkanOptions {
                                 "Draw the opaque world through Vulkan instead of OpenGL. "
                                         + "Turning it off returns to vanilla rendering immediately. "
                                         + "The Vulkan path keeps a second copy of the world geometry "
-                                        + "in video memory, which is where the VRAM cost comes from.",
-                                Cost.of(Level.MEDIUM, Level.HIGH, Level.HIGH), null,
+                                        + "in video memory, which is where the VRAM cost comes from. "
+                                        + "On the processor it gives more than it takes, but only "
+                                        + "past a point: measured against the renderer it replaces, "
+                                        + "it starts a frame about half a millisecond more "
+                                        + "expensive and then spends less than half as much per "
+                                        + "chunk, so the two are level at about eighteen chunks of "
+                                        + "render distance and it is ahead above that. Below it, "
+                                        + "the saving shown here is not there yet.",
+                                Cost.of(Level.SAVES_LOW, Level.HIGH, Level.HIGH), null,
                                 new VSwitchOption.Access() {
                                     @Override
                                     public boolean get() {
@@ -505,7 +512,7 @@ final class VulkanOptions {
                                         + "falling back to vanilla rendering has to rebuild every "
                                         + "chunk first, which it will do — a pause, not a hole in "
                                         + "the world.",
-                                Cost.of(Level.NONE, Level.NONE, Level.NONE), null,
+                                Cost.of(Level.NONE, Level.NONE, Level.SAVES_HIGH), null,
                                 new VSwitchOption.Access() {
                                     @Override
                                     public boolean get() {
@@ -595,7 +602,7 @@ final class VulkanOptions {
                                         + "a quarter to a half of the frame at high render "
                                         + "distances. On by default; the switch is here to rule it "
                                         + "out, not to choose.",
-                                Cost.of(Level.NONE, Level.NONE, Level.NONE), null,
+                                Cost.of(Level.SAVES_LOW, Level.NONE, Level.NONE), null,
                                 new VSwitchOption.Access() {
                                     @Override
                                     public boolean get() {
@@ -623,7 +630,7 @@ final class VulkanOptions {
                                         + "own answer 707 million times without a disagreement. "
                                         + "Turn it off if you ever see a chunk missing that comes "
                                         + "back when you approach it.",
-                                Cost.of(Level.NONE, Level.NONE, Level.NONE), null,
+                                Cost.of(Level.SAVES_MEDIUM, Level.NONE, Level.NONE), null,
                                 new VSwitchOption.Access() {
                                     @Override
                                     public boolean get() {
@@ -834,7 +841,7 @@ final class VulkanOptions {
                                         + "moving. Experimental, and here is the edge: a texture "
                                         + "that is both a block and an item can stand still in "
                                         + "your hand while no such block is in sight.",
-                                Cost.of(Level.LOW, Level.NONE, Level.NONE),
+                                Cost.of(Level.SAVES_LOW, Level.SAVES_LOW, Level.NONE),
                                 "Needs the chunks in view rebuilt — F3+A — and does nothing "
                                         + "while Animated Textures is off.",
                                 new VSwitchOption.Access() {

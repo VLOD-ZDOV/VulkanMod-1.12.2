@@ -396,6 +396,16 @@ public final class GuiVulkanSettings extends GuiScreen {
             y = drawCostRow(left, y, Lang.tr(Lang.UI, "CPU"), cost.cpu);
             y = drawCostRow(left, y, Lang.tr(Lang.UI, "GPU"), cost.gpu);
             y = drawCostRow(left, y, Lang.tr(Lang.UI, "VRAM"), cost.vram);
+            // What the three rows are measured against, said once rather than
+            // guessed at. Without it the bars read as "how heavy is this
+            // setting", and a setting whose whole purpose is to give a
+            // resource back looked like the most expensive thing on the page.
+            for (Object line : this.fontRenderer.listFormattedStringToWidth(
+                    Lang.tr(Lang.UI, "Against this setting off. Blue gives back."),
+                    this.tooltipWidth - 8)) {
+                this.fontRenderer.drawString((String) line, left + 4, y, 0x707070);
+                y += 10;
+            }
         }
         if (this.hovered.appliesWhen() != null) {
             y += 4;
@@ -418,7 +428,7 @@ public final class GuiVulkanSettings extends GuiScreen {
         int barsLeft = left + 4 + 30;
         for (int i = 0; i < 3; i++) {
             int x = barsLeft + i * 10;
-            boolean filled = i < level.bars;
+            boolean filled = i < level.filled();
             drawRect(x, y, x + 8, y + 7, filled ? 0xFF000000 | level.color : 0x40FFFFFF);
         }
         this.fontRenderer.drawString(costLabel(level), barsLeft + 34, y, level.color);
