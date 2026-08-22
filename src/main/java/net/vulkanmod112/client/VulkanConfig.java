@@ -795,7 +795,10 @@ public final class VulkanConfig {
         showMotion = config.getBoolean("showMotion", CATEGORY_ADVANCED, DEF_SHOW_MOTION,
                 "Paint the world with how each pixel moved since the last frame instead of with "
                         + "itself: which way it went is the colour, how fast is the brightness, "
-                        + "and anything that did not move is black. Nothing on screen depends on this yet — it is what "
+                        + "and anything that did not move is black. Frame averaging is what "
+                        + "reads it — the pass that turns one traced ray per pixel from grain "
+                        + "into a soft edge — so it is worked out only while something is being "
+                        + "traced or while this view is open. It is what "
                         + "reflections and any effect that remembers previous frames are built "
                         + "on, and this is how to see whether it is right.");
         motionOverWorld = config.getBoolean("motionOverWorld", CATEGORY_ADVANCED,
@@ -1096,12 +1099,14 @@ public final class VulkanConfig {
                         + "through the ordinary model path and what reading a pose per part "
                         + "costs. Nothing on screen changes.");
         rayTracing = config.getBoolean("rayTracing", CATEGORY_ADVANCED, DEF_RAY_TRACING,
-                "Build acceleration structures over the terrain. Nothing draws with them yet — "
-                        + "this stage measures whether keeping them up to date is affordable at "
-                        + "all, which is the one thing that decides whether ray tracing is "
-                        + "possible here. Needs Vulkan 1.2 and the acceleration-structure "
-                        + "extension; the diagnostics report says what happened. Takes effect on "
-                        + "the next start.");
+                "Build acceleration structures over the terrain, which is what a ray needs "
+                        + "something to hit. Four effects wait on this and do nothing without "
+                        + "it: the sun's shadow, the shadow a moving light casts, traced block "
+                        + "light, and the light that comes through a canopy. Needs Vulkan 1.2 "
+                        + "and the acceleration-structure extension; the diagnostics report says "
+                        + "what happened, and the structures cost video memory and build time "
+                        + "whether or not anything is tracing against them. Takes effect on the "
+                        + "next start.");
         vulkanDevice = config.getInt("vulkanDevice", CATEGORY_ADVANCED, DEF_VULKAN_DEVICE, -1, 7,
                 "Which GPU Vulkan renders on, by the number the log gives it. -1 chooses "
                         + "automatically, and automatic means the card OpenGL is already running "

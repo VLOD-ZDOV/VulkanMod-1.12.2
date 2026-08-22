@@ -312,11 +312,21 @@ public final class SettingsHealth {
         return "these are traced against the world, and ray tracing is off";
     }
 
-    /** The three that need rays, whatever else is true. */
+    /**
+     * The four that need rays, whatever else is true.
+     *
+     * Light through a canopy was the fourth and was missing, which is the one
+     * case where this list has to be right: the preset named for looks sets it
+     * to full strength, and it cannot act unless something is being traced. So
+     * "show me everything beautiful" quietly promised an effect that was not
+     * running, and the one line in this mod whose whole job is to say that was
+     * not saying it.
+     */
     private static void appendTracedEffects(StringBuilder out) {
         add(out, "sun shadows", VulkanConfig.getSunShadows());
         add(out, "traced light shadows", VulkanConfig.getTracedLights());
         add(out, "traced block light", VulkanConfig.getTracedBlockLight());
+        add(out, "light through leaves", VulkanConfig.getLeafShadows());
     }
 
     private static void add(StringBuilder out, String name, int strength) {

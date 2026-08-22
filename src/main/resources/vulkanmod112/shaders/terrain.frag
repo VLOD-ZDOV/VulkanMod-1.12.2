@@ -31,14 +31,19 @@ layout(set = 0, binding = 3, std140) uniform Frame {
     vec4 fogParams;  // x = start, y = end, z = density
     // x = how many of lights[] are in use.
     // y = how brightly the sun and moon glint off water and ice, 0 = off.
-    // zw are spare and zeroed.
+    // z = how much deeper the sky gets away from the horizon, 0 = off. Read by
+    //     skyAlong, which is what a water surface reflects along its ray.
+    // w is spare and zeroed.
     vec4 lightInfo;
     vec4 lights[32]; // xyz = position relative to the camera, w = light level
     // x = seconds, y = directional light strength (0 = off),
     // z = 1 when vMaterial is real, w = 1 to paint the world by material
     vec4 frameInfo;
     // x = strength (0 = off), y = thickening per block,
-    // z = how many entries of materialSprites are in use
+    // z = how many entries of materialSprites are in use,
+    // w = how much of the water's Fresnel term to believe, 0 = off. It lives
+    //     here for want of a fourth component anywhere better; see where the
+    //     mirror is mixed for what it means.
     vec4 heightFog;
     // Pairs: a rectangle of the block atlas, then the material it stands for
     // in .x. See spriteMaterial for why the translucent layer needs these.
@@ -86,6 +91,11 @@ layout(set = 0, binding = 3, std140) uniform Frame {
     // x = how far the camera is above this world's sea level, in blocks.
     //     Adding vRelative.y to it gives the fragment's own height above the
     //     sea, which is what the height fog is measured from.
+    // y = how much light a canopy lets through, 0 = a leaf stops a ray like
+    //     stone. Read only where rays are traced.
+    // z = 1 when the frame carries more than eight bits a channel, which is
+    //     what decides how far a glint is allowed to go past white.
+    // w is spare and zeroed.
     vec4 world;
 } frame;
 
