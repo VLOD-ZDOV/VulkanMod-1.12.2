@@ -137,6 +137,7 @@ public final class SettingsHealth {
      */
     public static String describeInert() {
         StringBuilder out = new StringBuilder();
+        appendUnmetDependencies(out);
         String why = TerrainHooks.whyNotDrawing();
         if (why != null) {
             StringBuilder names = new StringBuilder();
@@ -242,6 +243,61 @@ public final class SettingsHealth {
                     + "for it to show, so every creature comes out the same flat white";
         }
         return null;
+    }
+
+    /**
+     * Effects that are switched on, whose renderer is drawing, and which still
+     * cannot act because another setting they need is where it is.
+     *
+     * Every one of these is a slider that visibly does nothing, with no way
+     * for the player to find out why: the dependency is in neither the
+     * description nor the note beside it, and the effect is not broken. They
+     * were found by walking the conditions of every effect back to their
+     * sources, after the same class had already slipped through once with
+     * light through a canopy.
+     *
+     * Only conditions that are precise and rare are said here. "It is not
+     * raining" is left out on purpose — a wet-surfaces slider doing nothing on
+     * a clear day is weather, and a line about it in every log is noise that
+     * teaches people to stop reading the rest.
+     */
+    private static void appendUnmetDependencies(StringBuilder out) {
+        StringBuilder names = new StringBuilder();
+        // The exposure slider is applied inside the pass that grades the
+        // frame, and that pass does not run at all unless something is being
+        // graded or the frame is floating. Fifty is the neutral value, so
+        // anything else is somebody asking for a change and not getting it.
+        if (VulkanConfig.getExposure() != 50 && VulkanConfig.getSceneTone() <= 0
+                && !VulkanConfig.isHdrFrame()) {
+            add(names, "exposure — it is applied by the grading pass, and that "
+                    + "runs only with scene tone above zero or a high dynamic range frame", true);
+        }
+        // A cloud shadow is the game's own cloud sheet read as a mask. With
+        // clouds switched off in the video settings there is no sheet, and the
+        // effect has nothing to sample.
+        if (VulkanConfig.getCloudShadows() > 0 && cloudsOff()) {
+            add(names, "cloud shadows — the game's own clouds are switched off, and this reads "
+                    + "their sheet", true);
+        }
+        // Caustics brighten the bed seen through the surface, and the bed is
+        // fetched by the refraction. Without waves there is also no pattern to
+        // draw with.
+        if (VulkanConfig.getWaterCaustics() > 0
+                && (VulkanConfig.getWaterWaves() <= 0
+                        || (VulkanConfig.getWaterRefraction() <= 0
+                                && VulkanConfig.getScreenReflections() <= 0))) {
+            add(names, "water caustics — they need the waves that shape them and the refraction "
+                    + "that fetches the bed they fall on", true);
+        }
+        if (names.length() > 0) {
+            out.append(names);
+        }
+    }
+
+    /** Whether the game is drawing clouds at all. */
+    private static boolean cloudsOff() {
+        net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getMinecraft();
+        return mc == null || mc.gameSettings == null || mc.gameSettings.clouds == 0;
     }
 
     private static void appendTerrainEffects(StringBuilder out) {

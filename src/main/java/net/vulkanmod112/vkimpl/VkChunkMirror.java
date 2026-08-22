@@ -1205,6 +1205,9 @@ final class VkChunkMirror {
      */
     private long markMovedUnderCheck;
 
+    /** Whether the one stack this is worth taking has been taken. */
+    private boolean markOverrunStackLogged;
+
     private long allocateGeometryRange(int capacity) {
         allocatorDepth++;
         if (allocatorDepth > 1) {
@@ -1232,6 +1235,21 @@ final class VkChunkMirror {
         // in different places, and knowing which it is halves the search.
         if (nextGeometryOffset > geometryCapacity) {
             noteMarkOverrun("was already past", capacity);
+            // Once per session, who was on the stack.
+            //
+            // Four counters have now been added around this and every one of
+            // them came back zero, which says the mark was not moved by the
+            // allocator and not moved during a growth — and says nothing at
+            // all about who did move it. A stack does: it is the difference
+            // between "something outside this class writes the field" and
+            // "the allocator wrote it when the limit had not grown yet", and
+            // no counter can tell those apart. Thrown and caught on the spot
+            // purely to be printed, and only the first time.
+            if (!markOverrunStackLogged) {
+                markOverrunStackLogged = true;
+                LOGGER.error("Geometry mark was already past the buffer; this is the stack that "
+                        + "found it", new Throwable("geometry mark overrun"));
+            }
         }
         for (int i = 0; i < freeRanges.size(); i++) {
             FreeRange range = freeRanges.get(i);
@@ -1264,14 +1282,25 @@ final class VkChunkMirror {
         // eight rounds the counters below complain and the frame goes on.
         long offset = nextGeometryOffset;
         long checked = offset + capacity;
+        boolean settled = false;
         for (int attempt = 0; attempt < 8; attempt++) {
             ensureGeometryCapacity(checked);
             if (nextGeometryOffset == offset) {
+                settled = true;
                 break;
             }
             markMovedUnderCheck++;
             offset = nextGeometryOffset;
             checked = offset + capacity;
+        }
+        if (!settled) {
+            // Eight rounds and the mark was still moving. The last limit
+            // worked out was never asked for, and writing it here would be the
+            // very fault this loop exists to close, one level further down.
+            // So the mark is taken as it now stands and room is made for that.
+            offset = nextGeometryOffset;
+            checked = offset + capacity;
+            ensureGeometryCapacity(checked);
         }
         nextGeometryOffset = checked;
         // Checked where the mark is moved, not only where growth trips over it.
