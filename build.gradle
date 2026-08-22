@@ -549,7 +549,8 @@ tasks.matching { it.name in ['runClient', 'runObfClient'] }.configureEach {
         ['flightTag', 'flightSeed', 'flightDistance', 'flightSeconds',
          'flightSettle', 'flightShots', 'flightPatience', 'flightPos',
          'flightProfiler', 'flightPreset', 'flightHour', 'flightWeather',
-         'flightPairs', 'flightClouds', 'flightPitch'].each { name ->
+         'flightPairs', 'flightClouds', 'flightPitch',
+         'flightYaw'].each { name ->
             if (project.hasProperty(name)) {
                 jvmArgs '-Dvulkanmod112.' + name + '=' + project.property(name)
             }

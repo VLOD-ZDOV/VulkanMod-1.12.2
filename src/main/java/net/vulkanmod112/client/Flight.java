@@ -149,6 +149,9 @@ public final class Flight {
      */
     private static final int CLOUDS = Integer.getInteger("vulkanmod112.flightClouds", 0);
 
+    /** Which way to face, in degrees. Aiming at a reflection needs this. */
+    private static final int YAW = Integer.getInteger("vulkanmod112.flightYaw", 45);
+
     /** How far down to look, in degrees. Water wants a steeper angle than terrain. */
     private static final int PITCH = Integer.getInteger("vulkanmod112.flightPitch", 12);
 
@@ -494,14 +497,14 @@ public final class Flight {
     private static float yawAt(float t) {
         if ("spin".equals(ROUTE)) {
             // A whole turn, so the last frame is the first one again.
-            return 45.0f + 360.0f * t;
+            return YAW + 360.0f * t;
         }
         if ("line".equals(ROUTE)) {
             // Along the line of travel, which is what makes the chunks that
             // are arriving the ones being looked at.
             return -90.0f;
         }
-        return 45.0f;
+        return YAW;
     }
 
     private static float pitchAt(float t) {
