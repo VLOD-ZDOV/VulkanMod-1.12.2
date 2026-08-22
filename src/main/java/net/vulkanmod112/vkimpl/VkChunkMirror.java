@@ -868,11 +868,13 @@ final class VkChunkMirror {
                 entries.size(), totalBytes / (1024.0 * 1024.0),
                 geometryCapacity / (1024.0 * 1024.0), uploadCount,
                 stagingCapacity / (1024 * 1024), stagingWraps, offThread, onThread);
-        if (markOverruns > 0 || advanceSlips > 0 || reentrantAllocations > 0) {
+        if (markOverruns > 0 || markMovedUnderCheck > 0 || reentrantAllocations > 0) {
             line += String.format("; geometry mark found past the buffer %d time(s), "
-                            + "%d advance(s) past their own checked limit, %d reentrant "
+                            + "%d limit(s) recomputed after growth moved the mark, "
+                            + "%d reentrant "
                             + "allocation(s), %d of them during a growth",
-                    markOverruns, advanceSlips, reentrantAllocations, allocationsDuringGrowth);
+                    markOverruns, markMovedUnderCheck, reentrantAllocations,
+                    allocationsDuringGrowth);
         }
         if (materialsStaged == 0 && materialBuffer == 0) {
             return line;
@@ -1187,16 +1189,21 @@ final class VkChunkMirror {
     private long reentrantAllocations;
     private long allocationsDuringGrowth;
     /**
-     * Advances that ended past the limit checked for that very advance.
+     * Times growth moved the mark out from under the limit checked for it.
      *
-     * The sharper question than "is the mark past the buffer". A mark past the
-     * capacity says the invariant is broken; this says whether it broke here.
-     * It can only count when something moved the mark between the check and
-     * the bump, which is one line apart — so a single count of this points
-     * inside the growth call, and a zero count with overruns still happening
-     * points at the capacity being stale or foreign instead.
+     * This replaced a counter that asked whether an advance had ended past its
+     * own limit. That one did its job: it said the fault was here rather than
+     * in the capacity, which is what pointed at these three lines. It cannot
+     * say anything now, because the limit is recomputed until it belongs to
+     * the mark it will be added to — so what is worth counting is how often
+     * that recomputation was needed, which is how often the fault would have
+     * happened.
+     *
+     * Expected to be small and nonzero: growth repacks chunks into the new
+     * buffer through this same method, so a nested allocation is ordinary. It
+     * was the limit going stale that was not.
      */
-    private long advanceSlips;
+    private long markMovedUnderCheck;
 
     private long allocateGeometryRange(int capacity) {
         allocatorDepth++;
@@ -1238,16 +1245,35 @@ final class VkChunkMirror {
                 return range.offset;
             }
         }
-        // Kept, so that the advance can be measured against the very limit that
-        // was checked for it rather than against whatever the capacity has
-        // become since.
-        long checked = nextGeometryOffset + capacity;
-        ensureGeometryCapacity(checked);
+        // The limit and the mark it belongs to, tied together.
+        //
+        // This is the window the mark was escaping through, and it is three
+        // lines long. The limit was worked out from the mark, then growth was
+        // asked for it, and only then was the mark read again — and growth can
+        // allocate: repacking the chunks into the new buffer comes back
+        // through this very method. A Java monitor is reentrant, so nothing
+        // stops it and nothing about it looks like a race. The outer call then
+        // added its size to a mark that had moved while its limit had not, and
+        // ended up past a buffer that had just been made big enough for where
+        // the mark used to be. Fifty bytes over, rarely, which is the size of
+        // one nested allocation and not of any arithmetic mistake.
+        //
+        // Asked again whenever the mark moves underneath, so that the size is
+        // always added to the start that was actually checked. Bounded because
+        // a loop that cannot end is worse than the fault it guards: after
+        // eight rounds the counters below complain and the frame goes on.
         long offset = nextGeometryOffset;
-        nextGeometryOffset += capacity;
-        if (nextGeometryOffset > checked) {
-            advanceSlips++;
+        long checked = offset + capacity;
+        for (int attempt = 0; attempt < 8; attempt++) {
+            ensureGeometryCapacity(checked);
+            if (nextGeometryOffset == offset) {
+                break;
+            }
+            markMovedUnderCheck++;
+            offset = nextGeometryOffset;
+            checked = offset + capacity;
         }
+        nextGeometryOffset = checked;
         // Checked where the mark is moved, not only where growth trips over it.
         //
         // A growth copy once found the mark fifty bytes past the buffer it
@@ -1281,11 +1307,11 @@ final class VkChunkMirror {
         if (markOverruns <= 8) {
             LOGGER.warn("Geometry mark {} the buffer it indexes: {} of {} bytes, "
                             + "while taking {} bytes on thread {} (occurrence {}; "
-                            + "{} advance(s) past their own checked limit, {} reentrant "
-                            + "allocation(s), {} during a growth)",
+                            + "{} limit(s) recomputed after growth moved the mark, {} "
+                            + "reentrant allocation(s), {} during a growth)",
                     when, nextGeometryOffset, geometryCapacity, capacity,
                     Thread.currentThread().getName(), markOverruns,
-                    advanceSlips, reentrantAllocations, allocationsDuringGrowth);
+                    markMovedUnderCheck, reentrantAllocations, allocationsDuringGrowth);
         }
     }
 
