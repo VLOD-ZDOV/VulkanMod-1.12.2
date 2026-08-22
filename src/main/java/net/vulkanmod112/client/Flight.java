@@ -149,6 +149,9 @@ public final class Flight {
      */
     private static final int CLOUDS = Integer.getInteger("vulkanmod112.flightClouds", 0);
 
+    /** How far down to look, in degrees. Water wants a steeper angle than terrain. */
+    private static final int PITCH = Integer.getInteger("vulkanmod112.flightPitch", 12);
+
     /** Whether to keep each frame twice, on two consecutive frames. */
     private static final boolean PAIRS =
             Boolean.parseBoolean(System.getProperty("vulkanmod112.flightPairs", "false"));
@@ -502,9 +505,9 @@ public final class Flight {
     }
 
     private static float pitchAt(float t) {
-        // Slightly down at every angle: level puts half the screen in sky,
-        // and sky is the one thing here that costs nothing to draw.
-        return 12.0f;
+        // Slightly down at every angle by default: level puts half the screen
+        // in sky, and sky is the one thing here that costs nothing to draw.
+        return PITCH;
     }
 
     /**
