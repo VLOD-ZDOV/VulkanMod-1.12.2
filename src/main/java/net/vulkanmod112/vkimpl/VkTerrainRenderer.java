@@ -7564,6 +7564,17 @@ final class VkTerrainRenderer {
      * these samplers hold the block atlas, which reflections and refraction
      * would both happily read as though it were the world.
      */
+    /**
+     * Whether anything in the terrain shader needs the picture of the world as
+     * it stood a moment ago.
+     *
+     * When nothing does, both of those samplers are pointed at the block atlas
+     * instead — there has to be something bound, and the atlas is already
+     * there. Which means anything that reads them without being counted here
+     * reads block textures and calls the answer a depth: the sun glint's
+     * occlusion march did exactly that, and was being blanked in a pattern
+     * taken from the colour of grass.
+     */
     private boolean sceneWanted() {
         return screenReflections > 0.0f || waterRefraction > 0.0f;
     }

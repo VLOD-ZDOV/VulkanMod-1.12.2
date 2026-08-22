@@ -1121,62 +1121,34 @@ vec4 traceReflection(vec3 origin, vec3 dir) {
     return vec4(0.0);
 }
 
-// Not built into the tracing variant, for the same reason the glint that
-// calls this is not: there is no acceleration structure to ask here without
-// RAY_QUERY, and no glint to shadow in the build that has one. See
-// WHY_NOT_WITH_RAY_QUERY.
-#ifndef RAY_QUERY
-// How far the march below is allowed to travel, in blocks. A mountain that
-// blocks the sun is not bounded by GLINT_REACH — that constant fades the
-// glint by the water's distance from the eye, an unrelated axis, since the
-// march runs from the water towards the sun rather than towards the camera.
-// Wide enough for a hill at the edge of ordinary render distance; a step
-// count this low cannot afford to also cover the horizon.
-const float SUN_OCCLUSION_REACH = 160.0;
-
-/**
- * Whether the sun or moon this fragment is about to glint for is standing
- * behind something, read off the same depth buffer traceReflection already
- * reads — the picture already on screen is the only record of the terrain
- * this pass has, so a mountain shows up here exactly because it was drawn
- * opaque earlier in the frame.
+/*
+ * There was a screen-space march here that asked whether the sun this
+ * fragment is about to glint for is standing behind something, and it has
+ * been taken out. What it produced was the single most reported defect on
+ * water in this mod.
  *
- * Deliberately coarser than traceReflection: a reflection has to land on the
- * right pixel, a shadow only needs one bit. There is no bisection and no
- * thickness test, so the step that first lands behind the depth buffer is
- * taken as the hit, short of the true surface by up to that step's own
- * length. That is the wrong end to round on for a mirror; it is the cheap
- * and correct end here, since a miss leaves the streak this function exists
- * to remove and a false hit only shades one pixel that was headed for
- * shadow anyway.
+ * The march walked from the water towards the sun and asked the depth buffer,
+ * at each step, whether it had ended up behind what was drawn there. A depth
+ * buffer records a surface and not a solid, so that question has no answer:
+ * every ray that clears the far bank passes behind the far bank on its way
+ * up, and "went into it" and "went over it" look identical. Neighbouring
+ * pixels sample different texels at every step and so disagree — one keeps
+ * all of its glint, the other loses all of it — and the result was a field of
+ * dots in an ordered grid with a hard edge, sitting in the middle of the
+ * sun's own reflection.
  *
- * Called only where the glint is already nonzero — most of a lake is outside
- * the specular lobe on any given frame, and this has nothing to add there.
+ * Five things were tried against a fixed camera, a fixed hour and a frozen
+ * clock: a thickness slab, a cap on that slab, the share of the march that
+ * was blocked rather than the first hit, a near-field march of eight blocks,
+ * and a lower ramp clear of rounding. Every one of them left the speckle;
+ * removing the march left a clean highlight and nothing else changed.
+ *
+ * The price is that the glint can appear on water the sun cannot actually
+ * reach — behind a hill, most visibly near sunrise. Nobody has reported that;
+ * the speckle was reported twice. The proper answer to it is a shadow map,
+ * which is a thing this renderer can now have.
  */
-bool sunOccluded(vec3 origin, vec3 dir) {
-    float t = 0.5;
-    float step = 1.0;
-    for (int i = 0; i < 14; i++) {
-        vec4 clip = frame.mvp * vec4(origin + dir * t, 1.0);
-        if (clip.w <= 0.0001) {
-            return false;
-        }
-        vec3 onScreen = vec3(clip.xy / clip.w * 0.5 + 0.5, clip.z / clip.w);
-        if (onScreen.x < 0.0 || onScreen.x > 1.0 || onScreen.y < 0.0 || onScreen.y > 1.0) {
-            return false;
-        }
-        if (onScreen.z > textureLod(sceneDepth, onScreen.xy, 0.0).r) {
-            return true;
-        }
-        t += step;
-        if (t > SUN_OCCLUSION_REACH) {
-            return false;
-        }
-        step *= 1.6;
-    }
-    return false;
-}
-#endif
+
 
 /**
  * The sky along a direction, built the way the sky pass builds it.
@@ -2014,9 +1986,6 @@ void main() {
             // here, after the lobe is known nonzero, so the march below runs
             // on the sliver of a lake that is actually glinting rather than
             // on every wet pixel on screen.
-            if (g > 0.0 && sunOccluded(vRelative, toLight)) {
-                g = 0.0;
-            }
             g *= glintStrength * mix(GLINT_MAX_LDR, GLINT_MAX_HDR, frame.world.z)
                     * vLight.y * (byDay ? 1.0 : MOON_SHARE);
             if (g > 0.0) {
