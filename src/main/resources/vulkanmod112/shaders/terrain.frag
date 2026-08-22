@@ -2034,6 +2034,32 @@ void main() {
         // decided it, which multiplies the sides of a block by 0.8 and 0.6 and
         // its underside by 0.5 — so a block glowed from its top and two sides
         // and not the other two. Both were reported from a screenshot.
-        outColor = vec4(shaded, 0.5 + 0.5 * emits * fogKeep);
+        //
+        // And when it is not a light, the alpha carries how much of the sky
+        // reaches this surface instead, in the lower half of the range that
+        // nothing was using.
+        //
+        // This is what lets a shadow drawn over the finished frame behave like
+        // the traced one. The traced shadow lowers sky light and leaves block
+        // light alone, so a cave wall lit by a torch is not darkened by the
+        // sun — the screen-space shadows could not do that, because by the
+        // time the frame exists the two halves of the light have been
+        // multiplied into one colour and nothing downstream can tell them
+        // apart. The share is known exactly here and only here.
+        //
+        // Written after the traced shadow rather than before it, which also
+        // settles the third disagreement: a surface the ray already put in
+        // shadow arrives with its sky light lowered, so the screen-space
+        // shadow has little left to take. The two stop compounding without
+        // either of them being told about the other.
+        //
+        // A light keeps the old meaning and gives up the sky share, which
+        // costs nothing worth having: a glowstone block is not a surface
+        // anybody looks at for a shadow. The floor of 0.006 is the composite's
+        // test for "is there terrain here" — a black sky share must not read
+        // as no terrain.
+        outColor = vec4(shaded, emits > 0.0
+                ? 0.5 + 0.5 * emits * fogKeep
+                : max(0.006, skyLight * 0.49));
     }
 }

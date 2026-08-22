@@ -4258,7 +4258,13 @@ final class VkTerrainRenderer {
                         + "    vec2 uv = gl_FragCoord.xy * uInvSize;\n"
                         + "    float d = texture2D(uSource, uv).r;\n"
                         // Nothing was drawn here, so there is nothing to shade.
-                        + "    if (d >= 0.9999) { gl_FragColor = vec4(1.0); return; }\n"
+                        // Sky: nothing to occlude and no sun to lose. Red is
+                        // full light, green is no shadow — the two channels
+                        // mean opposite things, and writing ones into both is
+                        // how the sky came out black the first time this pass
+                        // stopped carrying one number in all four.
+                        + "    if (d >= 0.9999) { gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);\n"
+                        + "        return; }\n"
                         + "    vec3 p = viewPos(uv, d);\n"
                         // Two neighbours an axis, and the nearer of each pair
                         // wins. The hardware's own derivative would be cheaper
@@ -4590,8 +4596,17 @@ final class VkTerrainRenderer {
                         // all of the light under it.
                         + "    float sunBlocked = max(uContact * contact * 0.75 * edge,\n"
                         + "                           uCloudShadow * cloud * 0.5);\n"
-                        + "    float lit = clamp(ao, 0.0, 1.0) * (1.0 - sunBlocked);\n"
-                        + "    gl_FragColor = vec4(clamp(lit, 0.0, 1.0));\n"
+                        // Kept apart rather than multiplied together here.
+                        //
+                        // They are two different questions with two different
+                        // answers downstream: how enclosed a point is holds
+                        // whatever the light is doing, while how much of the
+                        // sun is blocked has to be weighed by how much sun the
+                        // surface was getting in the first place — and that is
+                        // known only where the terrain was shaded. Red carries
+                        // the occlusion, green the sun.
+                        + "    gl_FragColor = vec4(clamp(ao, 0.0, 1.0),\n"
+                        + "                        clamp(sunBlocked, 0.0, 1.0), 0.0, 1.0);\n"
                         + "}\n");
         aoInvSize = GL20C.glGetUniformLocation(aoProgram, "uInvSize");
         aoProjUniform = GL20C.glGetUniformLocation(aoProgram, "uProj");
@@ -5307,6 +5322,8 @@ final class VkTerrainRenderer {
                     GL20C.glUniform1f(sceneOcclusionAoOnly, showOcclusion ? 1.0f : 0.0f);
                     GL13C.glActiveTexture(GL13C.GL_TEXTURE1);
                     GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, aoTexture);
+                    GL13C.glActiveTexture(GL13C.GL_TEXTURE2);
+                    GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, glColorTexture);
                     GL13C.glActiveTexture(GL13C.GL_TEXTURE0);
                     GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, sceneCopyTexture);
                     fullscreenQuad();
@@ -5786,6 +5803,11 @@ final class VkTerrainRenderer {
             sceneOcclusionProgram = buildQuadProgram(
                     "uniform sampler2D uColor;\n"
                             + "uniform sampler2D uAo;\n"
+                            // The terrain as Vulkan drew it, for its alpha
+                            // alone: the share of the sky this surface gets.
+                            // Nothing else here knows it, and without it the
+                            // sun's shadow darkens a wall lit by a torch.
+                            + "uniform sampler2D uTerrain;\n"
                             + "uniform vec2 uInvSize;\n"
                             // Flat grey instead of the darkened world, for the
                             // same diagnostic the simpler composite path has
@@ -5797,13 +5819,30 @@ final class VkTerrainRenderer {
                             + "void main() {\n"
                             + "    vec2 uv = gl_FragCoord.xy * uInvSize;\n"
                             + "    vec3 c = texture2D(uColor, uv).rgb;\n"
-                            + "    vec3 ao = vec3(texture2D(uAo, uv).r);\n"
-                            + "    gl_FragColor = vec4(mix(c * ao, ao, uAoOnly), 1.0);\n"
+                            // This pass runs over the finished frame, so a
+                            // pixel here may be a creature or another mod's
+                            // machine as easily as a block. Where the terrain
+                            // wrote something, its alpha says how much sky
+                            // that surface receives and the sun's share of the
+                            // shadow is weighed by it — which is what the
+                            // traced shadow does and what makes the two agree.
+                            // Where it wrote nothing there is nothing to ask,
+                            // and the old behaviour stands.
+                            + "    vec2 shade = texture2D(uAo, uv).rg;\n"
+                            + "    float ta = texture2D(uTerrain, uv).a;\n"
+                            + "    float sky = ta < 0.004 || ta > 0.5\n"
+                            + "            ? 1.0 : clamp(ta / 0.49, 0.0, 1.0);\n"
+                            + "    vec3 ao = vec3(shade.r * (1.0 - shade.g * sky));\n"
+                            // The diagnostic shows occlusion alone, not
+                            // occlusion times shadow: it answers one question.
+                            + "    gl_FragColor = vec4(mix(c * ao, vec3(shade.r), uAoOnly),\n"
+                            + "                        1.0);\n"
                             + "}\n");
             int prev = GL11C.glGetInteger(GL20C.GL_CURRENT_PROGRAM);
             GL20C.glUseProgram(sceneOcclusionProgram);
             GL20C.glUniform1i(GL20C.glGetUniformLocation(sceneOcclusionProgram, "uColor"), 0);
             GL20C.glUniform1i(GL20C.glGetUniformLocation(sceneOcclusionProgram, "uAo"), 1);
+            GL20C.glUniform1i(GL20C.glGetUniformLocation(sceneOcclusionProgram, "uTerrain"), 2);
             sceneOcclusionInvSize =
                     GL20C.glGetUniformLocation(sceneOcclusionProgram, "uInvSize");
             sceneOcclusionAoOnly =
@@ -8734,7 +8773,8 @@ final class VkTerrainRenderer {
                         // Colour and mask together in one texture: the colour
                         // to recognise the terrain again in the finished frame,
                         // the mask to say which of it is a light.
-                        + "    c.rgb *= mix(1.0, texture2D(uAo, uv).r, uAo_on);\n"
+                        + "    vec2 shade = texture2D(uAo, uv).rg;\n"
+                        + "    c.rgb *= mix(1.0, shade.r * (1.0 - shade.g), uAo_on);\n"
                         + "    gl_FragColor = vec4(c.rgb, clamp((c.a - 0.5) * 2.0, 0.0, 1.0));\n"
                         + "}\n");
         bloomMaskInvSize = GL20C.glGetUniformLocation(bloomMaskProgram, "uInvSize");
@@ -8813,14 +8853,27 @@ final class VkTerrainRenderer {
                 // How much of its surroundings this point can see. The game
                 // shades a face by which way it points and by nothing else, so
                 // without this an inside corner is lit exactly like open wall.
-                + "    float ao = mix(1.0, texture2D(uAo, uv).r, uAo_on);\n"
+                // How enclosed this point is, and how much of the sun it
+                // loses — the second weighed by how much sky it was getting.
+                //
+                // The share arrives in the lower half of the terrain's own
+                // alpha, which is where the terrain shader put it. Without it
+                // a shadow drawn over the finished frame darkens a cave wall
+                // lit by a torch, which the traced shadow is careful never to
+                // do; with it the two agree.
+                + "    vec2 shade = texture2D(uAo, uv).rg;\n"
+                + "    float sky = c.a > 0.5 ? 1.0 : clamp(c.a / 0.49, 0.0, 1.0);\n"
+                + "    float ao = mix(1.0, shade.r * (1.0 - shade.g * sky), uAo_on);\n"
                 // On its own, as flat grey, when asked for. Vanilla darkens the
                 // corners of its own blocks and darkens a face by which way it
                 // points, so a dark seam in a lit room is not evidence of
                 // anything until those two are out of the picture. This takes
                 // them out: what is left on screen is this effect and nothing
                 // else, and a defect either survives that or was never here.
-                + "    c.rgb = mix(c.rgb * ao, vec3(ao), uAo_only);\n"
+                // The diagnostic shows the occlusion by itself, not the
+                // occlusion times the shadow: it exists to answer one question
+                // and a view that answers two answers neither.
+                + "    c.rgb = mix(c.rgb * ao, vec3(shade.r), uAo_only);\n"
                 // Where this pixel was a frame ago, as a colour.
                 //
                 // Direction is the hue and speed is the brightness, which is
