@@ -18,7 +18,35 @@
 
 - **A fog distance setting.** Vanilla ties the haze to the render distance, so more chunks arrive wrapped in more of it and look no further away than before. It scales the game's own linear fog through `GlStateManager` rather than behind it, so the whole scene moves together; fog that tells you something — blindness, being under water or in lava — is never rescaled.
 
+- **Only the animated textures something on screen is using are uploaded.** The game hands the card a new frame for every animated texture in the atlas every tick — fire, portals, sea lanterns, the animated block of every mod installed — whether or not anything being drawn is wearing one. Nothing in the game knows which is which, so a chunk records what it uses while it is built, and the answer is gathered from the chunks the game decided to draw plus whatever is held in hand. Experimental, off by default, and it needs the chunks in view rebuilt with F3+A before it can save anything, because the record is written while a chunk is built and the ones already standing were built without it.
+
+- **The mod says when a setting is switched on and something else is holding it still.** Three of them can be: exposure needs the grading pass to run at all, cloud shadows read a cloud sheet the video settings may have switched off, and caustics need both the waves that shape them and the refraction that fetches the bed. All three were drawing nothing and saying nothing about why.
+
 ### Fixed
+
+- **The field of dots in the middle of the sun's reflection on water.** A march walked from the water towards the sun and asked at each step whether it had ended up behind what was drawn there — but a depth buffer records a surface and not a solid, so every ray that clears the far bank passes behind the far bank on the way up, and "went into it" reads exactly the same as "went over it". Neighbouring pixels sample different texels and disagree, one keeping all of its glint and the other none. The march is gone rather than softened: five attempts to soften it moved the dots without removing them, because the question has no answer in a depth buffer. The price is named rather than hidden — a glint can now appear on water the sun is behind a hill from.
+
+- **A wet floor was brighter than a dry one.** Measured against the same frame with rain off, wet ground came out up to twenty-one levels of two hundred and fifty-five brighter: the sheen gathering the sky more than undid the darkening, so rain painted the world pale blue instead of wetting it. The sheen is also the one term in the effect that depends on the viewing angle, swinging by a factor of five between a floor looked down at and one looked along, which is why a block a step up looked untouched while the floor at your feet did not.
+
+- **Two numbers in the water were measured in the wrong space.** The refraction shifted a screen coordinate by a world one, so the bed slid the wrong way as the view turned: right on the screen facing one direction and reversed facing the other. The point is moved in the world now and then projected, which is the conversion the old code skipped. And the thickness of the water was the difference of two depths along the view ray rather than down the column it claims to measure — at a grazing angle that is several times the depth, so one shallow pond read as an ocean from across it and as a puddle from above, with the absorption and the foam both riding on it.
+
+- **The three sun-driven shadows share one sunrise and give one answer.** Each had been arriving at its own hour, and two of them then multiplied, so a contact shadow lying under a cloud came out darker than either could make it. They are not two occluders in front of two lights but two ways of finding out about the one sun, so the answer is whichever of them found more of it.
+
+- **The shadow drawn over the finished frame no longer darkens a torchlit cave.** The traced shadow lowers sky light and leaves block light alone — a wall lit by a torch is never darkened by the sun — and a pass over the finished picture could not do that, because by then the two halves of the light have been multiplied into one colour and nothing downstream can tell them apart. The terrain now carries how much sky a surface gets in the half of its alpha nothing was using, and the shadow is weighed by it.
+
+- **Light through a canopy was set to full strength by the preset named for looks, and could not act.** That effect needs something to be traced and nothing was, and the one line whose whole job is to name the effects waiting on rays listed three of the four.
+
+- **The preset named for looks no longer switches on the effect this project's own descriptions call unfinished.** Screen reflections were in it, and every description shipped here says they are not finished.
+
+- **The sky is reflected along the ray rather than by the colour of the horizon**, which gave the same answer looking along the water as looking down into it.
+
+- **Foliage is bent upright from the diagonal it is built on**, rather than from an axis it was never on.
+
+- **The occlusion's sample rotation is keyed to where a point is in the world** rather than to which pixel it landed on, so the pattern stops swimming across the screen as the camera moves.
+
+- **The roof check walks in steps of one block instead of two.** It asks whether anything stands between a point and the sky, and a step of two blocks steps clean over a one-block ledge.
+
+- **The refracted sample is mixed in only as far as it is believed**, by the measure that already decides whether to use it at all rather than by a second one that disagreed with it.
 
 - **Creatures were see-through, and the player's own model with them.** The texture matrix was mirrored as one matrix for the whole of OpenGL, and OpenGL keeps one per texture unit: the game puts a permanent scale and offset on the light map's unit and never takes them off. Read as the skin's, that offset made every creature in every session look like a glint and be drawn as one — added to the picture rather than laid into it, writing no depth, and taking its colour from a single texel. A second latch in the same place kept a batch marked as a glint for the rest of the session once one enchanted thing had been seen. Only the unit a skin is drawn from is followed now, the mark is cleared with the batch, and the diagnostics report how many batches went out as shimmer, so the same fault would be one number rather than a report.
 
@@ -40,7 +68,17 @@
 
 - **Twenty-three places where a comment described something the code no longer does**, three of them real defects rather than stale prose: a sampler carrying another sampler's description and an overwrite that made most of that description untrue, and three claims in the README a player could check and find false.
 
+- **The interop gives back everything it took when its setting up fails.** The teardown left at the door unless the whole of the initialisation had run, which is exactly the case that most needs it: a renderer whose construction throws is never stored anywhere, so an exported image, the texture built on it and two imported semaphores belonged to nobody until the process ended — and the OpenGL half was never given back even on the ordinary path. Waiting for Vulkan does not wait for OpenGL either, and this runs on every window resize.
+
+- **The chunk allocator's limit is worked out from the mark it will be added to, whatever moved it.** It was worked out from the mark, growth was asked for it, and only then was the mark read again — and growth does move it, winding it back to the last byte that exists.
+
+- **A model whose geometry could not be written is handed back to the game** instead of being claimed either way.
+
 ### Changed
+
+- **The cost panel says when a setting gives a resource back instead of taking it.** Every number it could print was a cost, so the Vulkan terrain read as two, three and three — and the question that came back was whether it is not supposed to take work off the processor. It is, past about eighteen chunks of render distance, and the panel had no way of saying so. Savings print in a colour of their own now, with a line under the rows saying what the three bars are measured against.
+
+- **The motion of every pixel is no longer worked out when nothing is going to read it**, and the preset named for the smallest machine leaves the drawing thread a core of its own rather than taking every one for chunk building.
 
 - **The mod says when creature light is switched on and cannot act**, which is every session where the game is still drawing the creatures rather than this renderer.
 
