@@ -203,6 +203,26 @@ public final class UpdateCheck {
                 return a > b;
             }
         }
+        // The numbers agree, so the only thing left to separate them is whether
+        // one of them is a build published before that version rather than as
+        // it: 0.10.0 is above 0.10.0-alpha, and nothing is above 0.10.0 itself.
+        // Without this an alpha is a dead end. It is published to be reported
+        // against, and the release those reports go into never reaches anybody
+        // running it, because their version already has the same three numbers.
+        return leadsTo(current) && !leadsTo(candidate);
+    }
+
+    /**
+     * Whether a version names something on the way to those numbers rather than
+     * those numbers — anything carrying more than digits and dots.
+     */
+    private static boolean leadsTo(String version) {
+        for (int i = 0; i < version.length(); i++) {
+            char c = version.charAt(i);
+            if (c != '.' && (c < '0' || c > '9')) {
+                return true;
+            }
+        }
         return false;
     }
 
