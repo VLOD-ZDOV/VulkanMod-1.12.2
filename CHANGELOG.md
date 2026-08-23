@@ -1,6 +1,13 @@
 # Changelog
 
-## [0.10.0]
+## [0.10.0-alpha]
+
+An alpha, published to be reported against rather than because it is finished.
+It has not been run on Windows or on an AMD card, and the newest of what is
+listed below has been looked at on one machine only. Everything here works on
+the machine it was built on; that is the whole of what is known. Faults go to
+the issue tracker, and the log at `logs/latest.log` is worth more than a
+description of what happened.
 
 ### Added
 

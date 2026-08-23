@@ -28,7 +28,7 @@
 | | |
 |---|---|
 | **[CurseForge](https://www.curseforge.com/minecraft/mc-mods/vulkanmod-legacy)** | the published build |
-| **[Releases](https://github.com/VLOD-ZDOV/VulkanMod-1.12.2/releases)** | the same jars, and the newest one first |
+| **[Releases](https://github.com/VLOD-ZDOV/VulkanMod-1.12.2/releases)** | the same jars, and the alphas that go out ahead of them |
 
 **You also need [MixinBooter](https://www.curseforge.com/minecraft/mc-mods/mixinbooter) 10.7
 or newer in your mods folder.** No launcher installs it for you, and without it the game
