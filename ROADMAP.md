@@ -8,6 +8,32 @@ rather than crashing.
 
 ## Done
 
+### 0.10.0-alpha
+
+- **Creatures shade their own faces against the sun.** Only the sky half of the game's light map
+  is moved, so a creature beside a torch in a cave comes out exactly as the game drew it.
+- **The shimmer of enchanted armour**, which lives entirely in a texture matrix and was therefore
+  lost by a renderer that captures geometry.
+- **Only the animated textures something on screen is using are uploaded**, instead of every one
+  in the atlas every tick. Experimental, and it needs the chunks in view rebuilt before it saves
+  anything.
+- **A fog distance of your own.** Vanilla ties the haze to the render distance, so more chunks
+  arrive wrapped in more of it and look no further away than before.
+- **The class patches are split into eight groups that can be switched off**, and a group whose
+  patch fails is quarantined for the next launch. A failed patch used to poison the class it was
+  aimed at and name neither itself nor the mod it came from.
+- **The mod says what it is unable to do**: when a newer build exists, when a setting is switched
+  on and something else is holding it still, when creature light cannot act, where the frame
+  actually went, and which of its settings give a resource back rather than take one.
+- Fixed: the field of dots in the middle of the sun's reflection on water; a wet floor brighter
+  than a dry one; two numbers in the water measured along the view ray or in the wrong space
+  entirely; three sun-driven shadows arriving at three different sunrises and then multiplying; a
+  shadow drawn over the finished frame darkening a torchlit cave; the preset named for looks
+  switching on one unfinished effect and one that could not act at all; creatures drawn
+  see-through, missing their hurt flash, and black on the far side in daylight; a crash in a pack
+  from a patch that insisted on finding something another mod had already done; and twenty-three
+  comments describing what the code no longer does, three of them real defects.
+
 ### 0.9.0
 
 - **The whole picture is graded**, not only the blocks. It runs on the marker the game raises once
@@ -167,9 +193,9 @@ In the order they are likely to be worth doing.
 
 - **A shadow map for what this renderer draws.** Traced shadows are more accurate than the one a
   shader pack builds, and they reach only what a ray can hit. A map reaches everything drawn into
-  it and costs the same whatever is in front of the camera. Not started, and it waits on one
-  thing: there are already three sun-driven systems here that darken independently, and a fourth
-  laid over three that disagree would be built on sand.
+  it and costs the same whatever is in front of the camera. Not started. It waited on the three
+  sun-driven systems already here darkening independently, since a fourth laid over three that
+  disagree would be built on sand; they share one sunrise and one answer as of this version.
 - **Block entities**, which are still vanilla's — chests, signs and every mod's machine. They are
   drawn by code of their own rather than out of model parts, which is the wall this path reaches
   rather than a matter of effort.
@@ -178,8 +204,6 @@ In the order they are likely to be worth doing.
   the card, out of a worst frame of seven and a half. Optimising this mod's own drawing has very
   little left to give; what the frame is actually waiting on is the game, and that is where the
   next measurement goes.
-- **Smart animated textures** — updating only the animated blocks actually in view, instead of
-  the all-or-nothing switch that exists today.
 - **Connected glass textures.**
 - **Front-to-back drawing** within a terrain layer.
 - **Intel graphics.** Nobody has reported either way. The class of fault that catches an Intel
