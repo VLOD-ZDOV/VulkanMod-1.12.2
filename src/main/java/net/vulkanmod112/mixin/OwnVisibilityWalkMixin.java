@@ -106,6 +106,43 @@ public abstract class OwnVisibilityWalkMixin {
     @Unique
     private final VisibilityWalk vulkanmod112$walk = new VisibilityWalk();
 
+    /**
+     * When the last walk finished, and the block the camera was standing in.
+     *
+     * The walk is armed by two different things wearing the same flag. One is
+     * the camera leaving the neighbourhood it was in, and that has to be
+     * answered at once: the list is about what is on screen, and it is wrong
+     * the moment the screen changes. The other is a chunk finishing its build,
+     * and that one has no such claim — the chunk was not on screen a moment ago
+     * and nobody can tell whether it arrives this frame or three frames later.
+     *
+     * Flying at thirty-two chunks, the second kind arrives by the million:
+     * measured on a fixed route, 1 201 010 arm requests over one interval, all
+     * of them from chunks finishing, and the walk ran on 1762 frames out of
+     * 1762 at about 1.4 ms each. That is a third of the render thread spent
+     * rebuilding an answer that changed by one chunk. Standing still on the
+     * same route the walk runs about ten times in three thousand frames, which
+     * is why this only ever showed up in flight.
+     */
+    @Unique
+    private long vulkanmod112$lastWalkNanos;
+    @Unique
+    private int vulkanmod112$lastWalkX = Integer.MIN_VALUE;
+    @Unique
+    private int vulkanmod112$lastWalkY = Integer.MIN_VALUE;
+    @Unique
+    private int vulkanmod112$lastWalkZ = Integer.MIN_VALUE;
+
+    /**
+     * The longest a chunk may wait to appear, in nanoseconds.
+     *
+     * One client tick. A chunk that has just finished building has already
+     * waited far longer than this to be built at all, and the walk it is asking
+     * for costs more than the chunk did.
+     */
+    @Unique
+    private static final long VULKANMOD112$CHURN_INTERVAL = 50L * 1_000_000L;
+
     @Redirect(method = "setupTerrain",
             at = @At(value = "FIELD",
                     target = "Lnet/minecraft/client/renderer/RenderGlobal;displayListEntitiesDirty:Z",
@@ -118,6 +155,19 @@ public abstract class OwnVisibilityWalkMixin {
         }
 
         long started = System.nanoTime();
+        // Answer the camera at once and the chunks at a tick's pace. The flag
+        // is deliberately left set when a walk is held back, so the next frame
+        // asks again rather than the request being lost.
+        int cameraX = MathHelper.floor(viewEntity.posX);
+        int cameraY = MathHelper.floor(viewEntity.posY);
+        int cameraZ = MathHelper.floor(viewEntity.posZ);
+        boolean cameraMoved = cameraX != vulkanmod112$lastWalkX
+                || cameraY != vulkanmod112$lastWalkY
+                || cameraZ != vulkanmod112$lastWalkZ;
+        if (!cameraMoved && started - vulkanmod112$lastWalkNanos < VULKANMOD112$CHURN_INTERVAL) {
+            VanillaFrame.countOwnWalkHeld();
+            return false;
+        }
         if (!vulkanmod112$run(self, viewEntity, partialTicks, camera, playerSpectator)) {
             VanillaFrame.countOwnWalkFallback();
             return true;
@@ -130,6 +180,10 @@ public abstract class OwnVisibilityWalkMixin {
         // instruction that a walk happened. Neither runs now, so both are done
         // here.
         displayListEntitiesDirty = false;
+        vulkanmod112$lastWalkNanos = System.nanoTime();
+        vulkanmod112$lastWalkX = cameraX;
+        vulkanmod112$lastWalkY = cameraY;
+        vulkanmod112$lastWalkZ = cameraZ;
         ((WalkTimer) self).vulkanmod112$noteWalkRan();
         return false;
     }
