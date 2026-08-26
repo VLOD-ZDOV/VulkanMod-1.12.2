@@ -1970,6 +1970,10 @@ final class VkTerrainRenderer {
         mirrorLookupNanos = 0;
         mirrorLookups = 0;
         worstMirrorLookupNanos = 0;
+        sb.append(String.format(
+                "    settings: read %d times over %d frames\n", settingsReads, settingsFrames));
+        settingsReads = 0;
+        settingsFrames = 0;
         if (throttledFrames > 0) {
             sb.append("    ").append(throttledFrames)
                     .append(" further frames held back by the background cap, not counted here\n");
@@ -7487,7 +7491,45 @@ final class VkTerrainRenderer {
      * rebuilds a pipeline is a slider that stutters, and neither of these
      * changes what the shader costs enough to be worth a second variant of it.
      */
+    /**
+     * The settings, read only when they have moved.
+     *
+     * The two halves of this mod are in different classloaders and share
+     * nothing but system properties, so every effect's setting arrives as one.
+     * Reading them was done once a frame — about forty-five calls, each of
+     * which takes the lock on the global property table, on the one thread that
+     * has to finish the frame. Settings change when somebody moves a slider,
+     * which is several thousand frames apart.
+     *
+     * So the settings side stamps a version whenever it publishes, and this
+     * reads that one property and stops there when the number has not moved.
+     * The first call cannot match, so a session always starts with a full read.
+     *
+     * The dither is advanced whatever happens: it is not a setting but the
+     * frame counter the accumulation pass turns into a soft edge, and freezing
+     * it would average a still pattern into itself.
+     */
     private void refreshShaderSettings() {
+        settingsFrames++;
+        String version = System.getProperty(SETTINGS_VERSION_KEY);
+        if (version == null || !version.equals(lastSettingsVersion)) {
+            lastSettingsVersion = version;
+            settingsReads++;
+            readShaderSettings();
+        }
+        advanceDither();
+    }
+
+    /** Whether the settings have been read at all yet, and which stamp they were. */
+    private String lastSettingsVersion = NEVER_READ;
+    private long settingsFrames;
+    private long settingsReads;
+
+    /** A value the settings side will never publish, so the first read always happens. */
+    private static final String NEVER_READ = "never read";
+    private static final String SETTINGS_VERSION_KEY = "vulkanmod112.settingsVersion";
+
+    private void readShaderSettings() {
         directionalDynamicLight =
                 clampPercent(intProperty("vulkanmod112.directionalLight", 100));
         heightFogStrength = clampPercent(intProperty("vulkanmod112.heightFog", 0));
@@ -7553,7 +7595,6 @@ final class VkTerrainRenderer {
             // in a frame that did not ask for it.
             reflectionBindingsDirty = true;
         }
-        advanceDither();
     }
 
     /**

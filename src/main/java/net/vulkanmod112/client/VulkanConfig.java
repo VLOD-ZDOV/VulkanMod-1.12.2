@@ -2471,6 +2471,28 @@ public final class VulkanConfig {
     private static final java.util.Set<String> published = new java.util.HashSet<String>();
 
     /**
+     * A number that moves whenever any of the published settings might have.
+     *
+     * The renderer is in another classloader and reads every setting as a
+     * system property. Reading forty-five of them once a frame put the lock on
+     * the global property table on the render thread forty-five times for an
+     * answer that changes when somebody moves a slider. It now reads this one
+     * and stops when the number has not moved.
+     *
+     * Anything that writes one of those properties without going through
+     * {@link #applySystemProperties()} has to call {@link #settingsMoved()} —
+     * there are two, the background throttle and the high dynamic range frame.
+     */
+    private static final java.util.concurrent.atomic.AtomicLong SETTINGS_VERSION =
+            new java.util.concurrent.atomic.AtomicLong();
+
+    /** Say that a published setting has changed, so the renderer reads them again. */
+    static void settingsMoved() {
+        System.setProperty("vulkanmod112.settingsVersion",
+                Long.toString(SETTINGS_VERSION.incrementAndGet()));
+    }
+
+    /**
      * The renderer lives behind the bridge in its own classloader and reads
      * these as system properties, which both sides share.
      */
@@ -2549,6 +2571,8 @@ public final class VulkanConfig {
         publish("vulkanmod112.sunSize", Integer.toString(sunSize));
         publish("vulkanmod112.sunWarmth", Integer.toString(sunWarmth));
         publish("vulkanmod112.skinPack", skinPack.isEmpty() ? "none" : skinPack);
+        // Last, so the stamp never says "settled" over a half-written set.
+        settingsMoved();
     }
 
     /**

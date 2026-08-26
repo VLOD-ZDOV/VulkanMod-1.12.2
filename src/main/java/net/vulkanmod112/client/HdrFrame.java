@@ -154,6 +154,8 @@ public final class HdrFrame {
         }
         remember(frame, active);
         System.setProperty("vulkanmod112.hdrFrameActive", Boolean.toString(active));
+        // The other one. See VulkanConfig.settingsMoved.
+        VulkanConfig.settingsMoved();
     }
 
     /**

@@ -38,6 +38,9 @@ public final class BackgroundThrottle {
         if (throttling != published) {
             published = throttling;
             System.setProperty("vulkanmod112.frameThrottled", Boolean.toString(throttling));
+            // One of the two settings the renderer reads that does not come
+            // from applySystemProperties, so the stamp has to be moved by hand.
+            VulkanConfig.settingsMoved();
         }
         if (!throttling) {
             return;
