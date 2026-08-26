@@ -28,7 +28,9 @@ public final class GuiVulkanSettings extends GuiScreen {
 
     private static final int DONE = 200;
     private static final int UPDATE = 201;
-    private static final int RESET = 201;
+    // Not 201. It was, and the test for the update button runs first, so every
+    // press of Reset opened the download page and nothing was ever reset.
+    private static final int RESET = 202;
     private static final int PAGE_BUTTON_BASE = 300;
 
     private static final int MARGIN = 10;
