@@ -3,7 +3,9 @@ package net.vulkanmod112.mixin;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.EntityRenderer;
 import net.minecraft.client.shader.Framebuffer;
+import net.minecraft.client.renderer.GlStateManager;
 import net.vulkanmod112.client.FramePhases;
+import net.vulkanmod112.client.GlFrameTimer;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
@@ -41,6 +43,21 @@ public abstract class LoopPhaseMixin {
     @Inject(method = "runGameLoop", at = @At("HEAD"))
     private void vulkanmod112$frame(CallbackInfo ci) {
         FramePhases.loopFrame();
+        GlFrameTimer.mark(GlFrameTimer.START);
+    }
+
+    /**
+     * The game clears its own framebuffer here, at whatever size the window is.
+     * Timed on the card rather than on the thread, because a clear costs the
+     * thread nothing and the card a screenful of writes.
+     */
+    @Redirect(method = "runGameLoop",
+            at = @At(value = "INVOKE",
+                    target = "Lnet/minecraft/client/renderer/GlStateManager;clear(I)V",
+                    ordinal = 0))
+    private void vulkanmod112$clear(int mask) {
+        GlStateManager.clear(mask);
+        GlFrameTimer.mark(GlFrameTimer.AFTER_CLEAR);
     }
 
     @Redirect(method = "runGameLoop",
@@ -59,6 +76,7 @@ public abstract class LoopPhaseMixin {
         long started = System.nanoTime();
         renderer.updateCameraAndRender(partialTicks, nanoTime);
         FramePhases.addLoop("world and interface", System.nanoTime() - started);
+        GlFrameTimer.mark(GlFrameTimer.AFTER_WORLD);
     }
 
     @Redirect(method = "runGameLoop",
@@ -68,6 +86,7 @@ public abstract class LoopPhaseMixin {
         long started = System.nanoTime();
         framebuffer.framebufferRender(width, height);
         FramePhases.addLoop("framebuffer to window", System.nanoTime() - started);
+        GlFrameTimer.mark(GlFrameTimer.AFTER_BLIT);
     }
 
     /**
@@ -125,5 +144,6 @@ public abstract class LoopPhaseMixin {
         long started = System.nanoTime();
         self.updateDisplay();
         FramePhases.addLoop("handing the window over", System.nanoTime() - started);
+        GlFrameTimer.mark(GlFrameTimer.AFTER_PRESENT);
     }
 }

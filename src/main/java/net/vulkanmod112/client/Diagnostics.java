@@ -531,6 +531,7 @@ public final class Diagnostics {
         out.println("  " + TerrainHooks.packStats());
         out.println("  " + VanillaFrame.stats());
         out.println("  " + FramePhases.loopStats());
+        out.println("  " + GlFrameTimer.stats());
         out.println("  " + FramePhases.stats());
         out.println("  " + VanillaFrame.walkStats());
         out.println("  " + VanillaFrame.ownWalkStats());
