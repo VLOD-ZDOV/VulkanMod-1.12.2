@@ -414,6 +414,15 @@ public final class Flight {
             VulkanMod112.LOGGER.warn("Flight {} could not read a window size from '{}'", TAG, WINDOW);
             return;
         }
+        // Only ever a window. The same call against a full-screen display sets
+        // the mode of the monitor itself, which blanks the screen while it
+        // re-syncs and leaves the desktop at whatever the route asked for —
+        // a measurement flag has no business doing that to somebody's monitor.
+        if (org.lwjgl.opengl.Display.isFullscreen()) {
+            VulkanMod112.LOGGER.warn("Flight {} will not resize a full-screen display; "
+                    + "run windowed to pin the window", TAG);
+            return;
+        }
         try {
             int width = Integer.parseInt(WINDOW.substring(0, cross).trim());
             int height = Integer.parseInt(WINDOW.substring(cross + 1).trim());
