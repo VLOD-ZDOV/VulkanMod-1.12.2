@@ -108,15 +108,24 @@ vanilla buffers empty, those draws issue no vertices; the cost that remains is b
 that no longer produces a pixel.
 
 That cost is measured, not assumed. `VanillaFrame.stats()` in
-`src/main/java/net/vulkanmod112/client/VanillaFrame.java` times `renderEntities` and
-`renderBlockLayer` directly and prints a line beginning `vanilla frame:` in diagnostics. On
-an automated flight at 24 chunks of render distance with the effects switched off, that line
-recorded `renderBlockLayer` across all four layers at 0.45 ms per frame over 1325 frames,
-alongside `renderEntities` at 0.55 ms. Flying the same route on the game's own renderer, the
-same line reads 0.83 ms — so about half of what vanilla spends deciding what to draw is
-already gone, and the 0.45 ms that remains is work no longer producing a pixel. It is stated
-here because it is a real remaining cost and a known, open place to cut further, not
-something this design has already solved.
+`src/main/java/net/vulkanmod112/client/VanillaFrame.java` times the three methods that matter
+and prints them on a line beginning `vanilla frame:`.
+
+It is worth being exact about what that line contains, because the obvious reading of it is
+wrong. `renderBlockLayer` measures about 0.7 ms a frame at thirty-two chunks — but this
+renderer's own work happens *inside* that method. The loop it runs over the visible chunks is
+what produces the list this mod then packs and submits, and the hook that does the packing and
+the submitting sits under `VboRenderList.renderChunkLayer`, one call further in. So that
+number is not idle waste to be reclaimed; most of it is the hand-off itself. Cancelling the
+method outright removes this renderer along with the loop, and the world goes with it.
+
+The method that is worth naming separately is `setupTerrain`, which decides which chunks are
+on screen. Standing still it costs **0.07 ms** a frame; flying at thirty-two chunks it costs
+**1.6 to 1.9 ms**, because it is re-run whenever the answer might have changed and, in flight,
+a chunk finishes building almost every frame. That is why a measurement taken from a standstill
+says nothing about a moving frame, and it is the single largest thing in the frame at a long
+render distance. The visible set is now rebuilt at once when the view moves and at a tick's
+pace when only a chunk has arrived, which brings the same measurement to 0.3 to 0.5 ms.
 
 Measured against the game's usual choice of renderer at the same settings, this mod's
 per-frame cost is higher and its per-chunk cost is much lower, so the two balance out at
