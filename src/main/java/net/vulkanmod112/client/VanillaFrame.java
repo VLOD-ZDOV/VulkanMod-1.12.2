@@ -389,11 +389,12 @@ public final class VanillaFrame {
         String line = String.format(
                 "vanilla frame: renderEntities %.2f ms (block entities %.2f of it), "
                         + "setupTerrain %.2f ms, "
-                        + "renderBlockLayer (all 4) %.2f ms per frame "
+                        + "renderBlockLayer (all 4) %.2f ms per frame (of it, this mod %.2f) "
                         + "over %d frames, %d frustum tests per frame (%s)",
                 entityNanos / 1_000_000.0 / frames, blockEntityNanos / 1_000_000.0 / frames,
                 setupNanos / 1_000_000.0 / frames,
-                layerNanos / 1_000_000.0 / frames, frames,
+                layerNanos / 1_000_000.0 / frames,
+                net.vulkanmod112.client.TerrainHooks.ourLayerMillis() / frames, frames,
                 frustumTests / frames,
                 VulkanConfig.isFastFrustumTest() ? "far corner" : "vanilla eight corners");
         blockEntityNanos = 0L;

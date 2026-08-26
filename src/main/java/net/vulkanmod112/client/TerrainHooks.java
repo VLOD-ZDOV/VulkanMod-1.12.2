@@ -77,6 +77,30 @@ public final class TerrainHooks {
     private static final float[] FOG = new float[7];
     private static final FloatBuffer FOG_COLOR = BufferUtils.createFloatBuffer(16);
 
+    /**
+     * What building the packed list costs, before deciding whether to cache it.
+     *
+     * The whole of {@code renderBlockLayer} measures about 0.7 ms a frame at
+     * thirty-two chunks, and this method and the Vulkan side's per-chunk writes
+     * are the two candidates inside it. Caching the wrong one is a week spent
+     * on a number that was already small.
+     */
+    private static long packNanos;
+    private static long packCalls;
+
+    /** Reads and resets, so each snapshot covers only the interval since the last. */
+    public static String packStats() {
+        if (packCalls == 0) {
+            return "chunk list packing: not called";
+        }
+        String line = String.format("chunk list packing: %.3f ms per call over %d layer calls, "
+                        + "%.2f ms in total", packNanos / 1e6 / packCalls, packCalls,
+                packNanos / 1e6);
+        packNanos = 0;
+        packCalls = 0;
+        return line;
+    }
+
     /** Packed per chunk: mirror slot, blockX, blockY, blockZ. */
     private static int[] chunkData = new int[1024];
 
@@ -318,6 +342,34 @@ public final class TerrainHooks {
 
     /** Returns true when the Vulkan side took the layer and GL must skip it. */
     public static boolean renderChunkLayer(BlockRenderLayer layer, List<RenderChunk> chunks) {
+        long ourStart = System.nanoTime();
+        try {
+            return renderChunkLayerInner(layer, chunks);
+        } finally {
+            ourNanos += System.nanoTime() - ourStart;
+        }
+    }
+
+    /**
+     * How much of the game's layer method is this mod.
+     *
+     * The whole method measures about 0.9 ms a frame at thirty-two chunks and
+     * the hook below runs inside it, so the two have to be told apart before
+     * either can be worked on. What is left when this is subtracted is the
+     * game's own loop over every visible chunk, four times a frame, asking each
+     * whether it has anything in this layer — and that is the part no amount of
+     * work on this side can reach.
+     */
+    private static long ourNanos;
+
+    /** Reads and resets. */
+    public static double ourLayerMillis() {
+        double millis = ourNanos / 1e6;
+        ourNanos = 0;
+        return millis;
+    }
+
+    private static boolean renderChunkLayerInner(BlockRenderLayer layer, List<RenderChunk> chunks) {
         if (layer == BlockRenderLayer.SOLID) {
             // Recorded before every guard below, because the case worth
             // diagnosing is the one where we hand the layer straight back and
@@ -355,7 +407,10 @@ public final class TerrainHooks {
                 return false;
             }
             Minecraft mc = Minecraft.getMinecraft();
+            long packedAt = System.nanoTime();
             int count = packChunks(layer, chunks);
+            packNanos += System.nanoTime() - packedAt;
+            packCalls++;
             if (layer == BlockRenderLayer.SOLID) {
                 captureMatrices();
                 captureFog();
