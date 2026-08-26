@@ -283,6 +283,51 @@ public final class VanillaFrame {
     private static long tileExpected;
     private static long tileMissing;
 
+    private static long layerSectionRuns;
+    private static long layerSectionShort;
+    private static long layerSectionFull;
+    private static long layerChecks;
+    private static long layerExpected;
+    private static long layerMissing;
+
+    public static void countLayerSections(int shortened, int full) {
+        layerSectionRuns++;
+        layerSectionShort += shortened;
+        layerSectionFull += full;
+    }
+
+    public static void countLayerSectionCheck(int expected, int missing) {
+        layerChecks++;
+        layerExpected += expected;
+        layerMissing += missing;
+    }
+
+    /**
+     * The list the game's own layer filter walks, against the visible list it
+     * would have walked. Reported apart from the entity pass because the two
+     * fail differently: a short entity list loses a creature, a short layer
+     * list loses a chunk.
+     */
+    public static String layerSectionStats() {
+        if (layerSectionRuns == 0) {
+            return "layer filter list: full — nothing shortened";
+        }
+        String line = String.format("layer filter list: %d of %d sections over %d passes",
+                layerSectionShort / layerSectionRuns, layerSectionFull / layerSectionRuns,
+                layerSectionRuns);
+        if (layerChecks > 0) {
+            line += String.format(" | checked against the full scan: %d expected, %d missing",
+                    layerExpected / layerChecks, layerMissing);
+        }
+        layerSectionRuns = 0L;
+        layerSectionShort = 0L;
+        layerSectionFull = 0L;
+        layerChecks = 0L;
+        layerExpected = 0L;
+        layerMissing = 0L;
+        return line;
+    }
+
     public static void countEntitySections(int shortened, int full) {
         entitySectionRuns++;
         entitySectionShort += shortened;

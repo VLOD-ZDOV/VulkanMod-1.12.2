@@ -700,6 +700,39 @@ final class VulkanOptions {
                                         VulkanConfig.setShortEntitySections(value);
                                     }
                                 }),
+                        new VSwitchOption("Short Layer Filter List",
+                                "Give the step that picks which chunks contribute to a render "
+                                        + "layer only the sections that hold blocks. It runs four "
+                                        + "times a frame, once per layer, and walks every section "
+                                        + "on screen to do it — around 17 700 at render distance "
+                                        + "32, of which under 2 700 hold anything. Whether a "
+                                        + "section is empty is one bit on the same object the "
+                                        + "visibility search already reads for it, so the list is "
+                                        + "kept while that search walks and costs nothing extra to "
+                                        + "have. It takes that step from 0.72 ms a frame to 0.45. "
+                                        + "On the machine it was measured on that bought no frames "
+                                        + "at all, and saying so is the point: once the entity "
+                                        + "passes were shortened the frame stopped waiting on this "
+                                        + "thread, so the work removed here is real and hides in "
+                                        + "time that was already spare. Worth turning on if your "
+                                        + "frames are held back by the processor rather than the "
+                                        + "graphics card. Off by default because what it could get "
+                                        + "wrong is a chunk that stops being drawn, and that looks "
+                                        + "exactly like terrain that has not finished building.",
+                                Cost.of(Level.NONE, Level.NONE, Level.NONE),
+                                "Needs Own Visibility Search on; the game's own search keeps no "
+                                        + "index of where a section sits.",
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return VulkanConfig.isShortLayerSections();
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        VulkanConfig.setShortLayerSections(value);
+                                    }
+                                }),
                         new VSwitchOption("Fast Rebuild Scan",
                                 "Hand the last step of the terrain setup only the chunks it can do "
                                         + "anything with. That step walks every chunk on screen "

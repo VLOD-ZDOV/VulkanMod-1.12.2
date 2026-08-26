@@ -91,8 +91,9 @@ public final class VulkanPatchGroups {
         group(CULLING, "Chunk Visibility",
                 "The game goes back to deciding which chunks are on screen the way it always "
                         + "did. Nothing looks different; the frame costs more.",
-                "EntitySectionsMixin", "FrustumTestMixin", "OwnVisibilityWalkMixin",
-                "RenderInfoMixin", "TileEntityArrivalMixin",
+                "EntitySectionsMixin", "FrustumTestMixin", "LayerSectionsMixin",
+                "OwnVisibilityWalkMixin",
+                "RenderInfoMixin", "CompiledArrivalMixin",
                 "VisibilityWalkCostMixin", "VisibilityWalkMixin");
         group(ENTITIES, "Creatures",
                 "Creatures are drawn by the game in OpenGL. The Draw Creatures in Vulkan "

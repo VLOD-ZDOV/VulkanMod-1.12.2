@@ -6,21 +6,21 @@ import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
 /**
- * Chunks that finished building with block entities in them since the last
- * visibility search.
+ * Chunks that finished building since the last visibility search.
  *
- * The search gathers which visible sections hold block entities while it walks,
- * which is right for every section it sees — but a section already on the list
- * can finish building afterwards, and then it holds a chest the list has never
- * heard of. That window was measured rather than argued about: with the
- * shortened list checked against the full scan it replaces, the creature half
- * missed nothing at all and this half missed 186 sections over one interval
- * while a world was filling in.
+ * The search gathers what each visible section contains while it walks — blocks
+ * for the layer passes, block entities for the pass that draws chests — and
+ * that is right for every section as it sees it. But a section already on the
+ * list can finish building a hundred frames later, and then it holds geometry
+ * the shortened lists have never heard of. That window was measured rather than
+ * argued about: with the shortened list checked against the full scan it
+ * replaces, the creature half missed nothing at all and the block-entity half
+ * missed 186 sections over one interval while a world was filling in.
  *
- * So the sections that arrive late are named here and folded in before the list
- * is handed over. Only chunks that actually carry block entities are queued,
- * which is a small minority of builds, and the search empties the queue when it
- * starts because everything before that point is in the answer it just built.
+ * So the sections that arrive late are named here and folded in before either
+ * list is handed over. Only chunks that ended up with something in them are
+ * queued, and the search empties the queue when it starts, because everything
+ * before that point is in the answer it just built.
  *
  * <h2>Threading</h2>
  *
@@ -31,7 +31,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
  * because the cost of being wrong about that would be a block entity that is
  * not drawn, and the cost of the queue is nothing.
  */
-public final class TileEntityArrivals {
+public final class CompiledArrivals {
 
     private static final Queue<RenderChunk> ARRIVED = new ConcurrentLinkedQueue<RenderChunk>();
 
@@ -43,7 +43,7 @@ public final class TileEntityArrivals {
      */
     private static final int LIMIT = 4096;
 
-    private TileEntityArrivals() {
+    private CompiledArrivals() {
     }
 
     /** Called when a chunk's compiled form is installed. */

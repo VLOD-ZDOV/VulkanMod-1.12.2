@@ -174,6 +174,21 @@ public final class VisibilityWalk {
      */
     private final List<RenderInfo> tileSections = new ArrayList<RenderInfo>();
 
+    /**
+     * The visible sections that hold any blocks at all, in the order they were
+     * appended to the visible list.
+     *
+     * The game filters the visible list down to this four times a frame, once
+     * per render layer, by asking every section whether that layer is empty. At
+     * thirty-two chunks it asks seventeen thousand sections and keeps under
+     * three thousand, and the pointer it follows to ask is the same one this
+     * walk has already followed. So the answer is kept here instead, and the
+     * game's own filter then runs over the short list — it still decides which
+     * layers a section contributes to, which is the part that differs between
+     * the four passes.
+     */
+    private final List<RenderInfo> geometrySections = new ArrayList<RenderInfo>();
+
     private int[] queue = new int[4096 * STRIDE];
     private RenderInfo[] queued = new RenderInfo[4096];
     private int head;
@@ -220,9 +235,10 @@ public final class VisibilityWalk {
         }
         indexed = false;
         tileSections.clear();
+        geometrySections.clear();
         // Everything reported before this moment is about to be answered again
         // from the chunks themselves, so the backlog is not worth carrying.
-        TileEntityArrivals.clear();
+        CompiledArrivals.clear();
         head = 0;
         tail = 0;
         tested = 0;
@@ -317,6 +333,9 @@ public final class VisibilityWalk {
             // carries whether this section holds block entities — an answer the
             // game's own pass currently pays for once per section per frame.
             CompiledChunk compiled = info.vulkanmod112$chunk().getCompiledChunk();
+            if (!compiled.isEmpty()) {
+                geometrySections.add(info);
+            }
             if (!compiled.getTileEntities().isEmpty()) {
                 tileSections.add(info);
             }
@@ -472,6 +491,18 @@ public final class VisibilityWalk {
     }
 
     /**
+     * The visible sections holding blocks, in visible-list order.
+     *
+     * Kept exact the same way the block-entity list is: gathered by the walk and
+     * topped up by {@link #applyArrivals()}. A section missing from here is a
+     * chunk missing from the world, which is why the check that compares it
+     * against the full scan exists at all.
+     */
+    public List<RenderInfo> geometrySections() {
+        return geometrySections;
+    }
+
+    /**
      * Folds in the sections that finished building since the walk.
      *
      * Each one is checked against the index rather than trusted: a chunk that
@@ -482,12 +513,15 @@ public final class VisibilityWalk {
      */
     public void applyArrivals() {
         if (!indexed) {
-            TileEntityArrivals.clear();
+            CompiledArrivals.clear();
             return;
         }
         RenderChunk chunk;
-        while ((chunk = TileEntityArrivals.poll()) != null) {
-            if (chunk.getCompiledChunk().getTileEntities().isEmpty()) {
+        while ((chunk = CompiledArrivals.poll()) != null) {
+            CompiledChunk compiled = chunk.getCompiledChunk();
+            boolean blocks = !compiled.isEmpty();
+            boolean blockEntities = !compiled.getTileEntities().isEmpty();
+            if (!blocks && !blockEntities) {
                 continue;
             }
             BlockPos position = chunk.getPosition();
@@ -496,23 +530,42 @@ public final class VisibilityWalk {
             if (info == null || info.vulkanmod112$chunk() != chunk) {
                 continue;
             }
-            insertInVisibleOrder(info);
+            if (blocks) {
+                insertInVisibleOrder(geometrySections, info);
+            }
+            if (blockEntities) {
+                insertInVisibleOrder(tileSections, info);
+            }
         }
     }
 
-    private void insertInVisibleOrder(RenderInfo info) {
+    /**
+     * Puts a late arrival where the walk would have put it, and does nothing if
+     * it is already there.
+     *
+     * Binary rather than linear because the list of sections holding blocks is
+     * some three thousand long, and a world filling in delivers arrivals in
+     * bursts: a linear insert would put the scan back that this removes, one
+     * arrival at a time. The list is sorted by position in the visible list and
+     * no two sections share one, so the search that finds where to insert is
+     * also the search that finds a duplicate.
+     */
+    private void insertInVisibleOrder(List<RenderInfo> list, RenderInfo info) {
         int order = visibleOrder(info);
-        int at = tileSections.size();
-        for (int i = 0; i < tileSections.size(); i++) {
-            RenderInfo other = tileSections.get(i);
-            if (other == info) {
+        int low = 0;
+        int high = list.size() - 1;
+        while (low <= high) {
+            int middle = (low + high) >>> 1;
+            int at = visibleOrder(list.get(middle));
+            if (at < order) {
+                low = middle + 1;
+            } else if (at > order) {
+                high = middle - 1;
+            } else {
                 return;
             }
-            if (at == tileSections.size() && visibleOrder(other) > order) {
-                at = i;
-            }
         }
-        tileSections.add(at, info);
+        list.add(low, info);
     }
 
     /** Neighbours examined by the last walk. */

@@ -96,6 +96,18 @@ public final class VulkanConfig {
      */
     static final boolean DEF_SHORT_ENTITY_SECTIONS = true;
     /**
+     * Give the game's own layer filter the sections that hold blocks, rather
+     * than every section on screen.
+     *
+     * Off by default while it is new, and the reason is the failure it would
+     * have: a section missing from that list is a chunk that stops being drawn,
+     * which looks exactly like terrain that has not finished building. The list
+     * is exact by construction and checked against the full scan under a build
+     * flag, but "off first, on once it has been flown" is the rule this project
+     * already follows for anything that decides what gets drawn.
+     */
+    static final boolean DEF_SHORT_LAYER_SECTIONS = false;
+    /**
      * Shortlist the chunks the rebuild pass at the end of {@code setupTerrain}
      * can act on, instead of letting it scan every visible chunk.
      *
@@ -583,6 +595,7 @@ public final class VulkanConfig {
     private static boolean visibilitySeedCache = DEF_VISIBILITY_SEED_CACHE;
     private static volatile boolean ownVisibilityWalk = DEF_OWN_VISIBILITY_WALK;
     private static volatile boolean shortEntitySections = DEF_SHORT_ENTITY_SECTIONS;
+    private static volatile boolean shortLayerSections = DEF_SHORT_LAYER_SECTIONS;
     private static volatile boolean fastRebuildNear = DEF_FAST_REBUILD_NEAR;
     private static volatile boolean materialTags = DEF_MATERIAL_TAGS;
     private static volatile boolean smartAnimations = DEF_SMART_ANIMATIONS;
@@ -777,6 +790,21 @@ public final class VulkanConfig {
                         + "the visibility search says in one array read whether it is on screen. "
                         + "Needs Own Visibility Search on, and turn it off first if a creature or "
                         + "a chest is not drawn where it should be.");
+        shortLayerSections = config.getBoolean("shortLayerSections", CATEGORY_OPTIMIZATION,
+                DEF_SHORT_LAYER_SECTIONS,
+                "Give the game's own layer filter the sections that hold blocks instead of every "
+                        + "section on screen. That filter runs four times a frame, once per render "
+                        + "layer, and asks each section whether that layer is empty; at render "
+                        + "distance 32 it asks around 17 700 and keeps under 2 700. Whether a "
+                        + "section holds anything at all is one bit on the same object the "
+                        + "visibility search already reads, so the list is kept while that search "
+                        + "walks. It takes that step from 0.72 ms a frame to 0.45, and on the "
+                        + "machine it was measured on that bought no frames at all: once the "
+                        + "entity passes were shortened the frame stopped waiting on this thread. "
+                        + "Worth turning on if the processor rather than the card is what holds "
+                        + "your frames back. Off by default: what it could get wrong is a chunk "
+                        + "that stops being drawn, and that looks exactly like terrain still "
+                        + "building.");
         // The command line wins, so the two arms of a comparison differ by one
         // word on it rather than by an edit to the config between runs.
         String shortSectionsPin = System.getProperty("vulkanmod112.shortEntitySections");
@@ -785,6 +813,13 @@ public final class VulkanConfig {
             net.vulkanmod112.VulkanMod112.LOGGER.info(
                     "Short entity section lists {} by the command line, over the config",
                     shortEntitySections ? "on" : "off");
+        }
+        String layerSectionsPin = System.getProperty("vulkanmod112.shortLayerSections");
+        if (layerSectionsPin != null) {
+            shortLayerSections = Boolean.parseBoolean(layerSectionsPin);
+            net.vulkanmod112.VulkanMod112.LOGGER.info(
+                    "Short layer filter list {} by the command line, over the config",
+                    shortLayerSections ? "on" : "off");
         }
         fastRebuildNear = config.getBoolean("fastRebuildNear", CATEGORY_OPTIMIZATION,
                 DEF_FAST_REBUILD_NEAR,
@@ -1394,6 +1429,7 @@ public final class VulkanConfig {
         setVisibilitySeedCacheEnabled(DEF_VISIBILITY_SEED_CACHE);
         setOwnVisibilityWalk(DEF_OWN_VISIBILITY_WALK);
         setShortEntitySections(DEF_SHORT_ENTITY_SECTIONS);
+        setShortLayerSections(DEF_SHORT_LAYER_SECTIONS);
         setFastRebuildNear(DEF_FAST_REBUILD_NEAR);
         setMaterialTags(DEF_MATERIAL_TAGS);
         setSmartAnimations(DEF_SMART_ANIMATIONS);
@@ -1506,6 +1542,15 @@ public final class VulkanConfig {
     public static void setShortEntitySections(boolean value) {
         shortEntitySections = value;
         store(CATEGORY_OPTIMIZATION, "shortEntitySections", value);
+    }
+
+    public static boolean isShortLayerSections() {
+        return shortLayerSections;
+    }
+
+    public static void setShortLayerSections(boolean value) {
+        shortLayerSections = value;
+        store(CATEGORY_OPTIMIZATION, "shortLayerSections", value);
     }
 
     public static boolean isFastRebuildNear() {

@@ -541,6 +541,15 @@ tasks.matching { it.name in ['runClient', 'runObfClient'] }.configureEach {
     if (project.hasProperty('shortEntitySections')) {
         jvmArgs '-Dvulkanmod112.shortEntitySections=' + project.property('shortEntitySections')
     }
+    if (project.hasProperty('shortLayerSections')) {
+        jvmArgs '-Dvulkanmod112.shortLayerSections=' + project.property('shortLayerSections')
+    }
+    // -PverifyLayerSections checks the shortened layer filter list against the
+    // full scan it replaces. Same shape as the one above, reported apart from
+    // it, because losing a chunk and losing a creature are different faults.
+    if (project.hasProperty('verifyLayerSections')) {
+        jvmArgs '-Dvulkanmod112.verifyLayerSections=true'
+    }
     // -PdumpLang writes logs/vulkanmod112-en_us.lang from the settings screen
     // as it is actually built, which is where the English language file comes
     // from. Open the screen once, then copy the file into resources.
