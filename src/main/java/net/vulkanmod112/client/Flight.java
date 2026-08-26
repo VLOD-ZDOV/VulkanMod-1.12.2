@@ -86,6 +86,18 @@ public final class Flight {
     private static final int SHOTS = Integer.getInteger("vulkanmod112.flightShots", 8);
 
     /**
+     * How many threads to build chunks with, or -1 to leave the preset's choice.
+     *
+     * Pinned for the same reason the hour is: it is not a property of the
+     * renderer being measured, and two runs that disagree about it are two
+     * different experiments. It matters more than it looks — a preset that asks
+     * for one thread per core is asking for every core the world generator and
+     * the render thread also want, and at a long render distance in a new world
+     * those are the two things actually holding the frame up.
+     */
+    private static final int THREADS = Integer.getInteger("vulkanmod112.flightThreads", -1);
+
+    /**
      * Where to fly from, as {@code x,y,z}, when the world's own spawn is not
      * the ground the route wants. Empty means twelve blocks over the spawn.
      */
@@ -282,7 +294,22 @@ public final class Flight {
                 SEED, GameType.SPECTATOR, true, false, WorldType.DEFAULT);
         settings.enableCommands();
         String folder = "flight-" + SEED;
-        VulkanMod112.LOGGER.info("Flight {} making world {} from seed {}", TAG, folder, SEED);
+        // Whether this route has been flown here before, which decides whether
+        // the numbers from it can be compared with anybody else's.
+        //
+        // The world is kept rather than made fresh each time, on purpose: a
+        // world made from the same seed is the same world, and keeping it means
+        // the terrain along the route is already on disk. What that costs is
+        // that the very first run of a route is flown while the server is still
+        // generating it, and generation is not the renderer — it lands in the
+        // frame anyway, and it made two runs of the identical build differ by
+        // forty per cent here before this line existed. So: the first run of a
+        // seed at a given distance is a warm-up and its numbers are thrown away.
+        boolean firstTime = !new java.io.File(
+                net.minecraft.client.Minecraft.getMinecraft().gameDir,
+                "saves/" + folder).isDirectory();
+        VulkanMod112.LOGGER.info("Flight {} making world {} from seed {} ({})", TAG, folder, SEED,
+                firstTime ? "COLD - generating, discard these numbers" : "warm, already on disk");
         mc.launchIntegratedServer(folder, "VulkanMod112 flight", settings);
         stage = Stage.LOADING;
         ticks = 0;
@@ -312,7 +339,12 @@ public final class Flight {
         if (WEATHER >= 0) {
             VulkanConfig.setWeatherControl(WEATHER);
         }
-        if (mc.gameSettings.renderDistanceChunks != DISTANCE) {
+        // Before the distance, because the reload below is what builds the
+        // chunk dispatcher and so the only moment this number can be read.
+        if (THREADS >= 0) {
+            VulkanConfig.setChunkBuildThreads(THREADS);
+        }
+        if (mc.gameSettings.renderDistanceChunks != DISTANCE || THREADS >= 0) {
             mc.gameSettings.renderDistanceChunks = DISTANCE;
             mc.renderGlobal.loadRenderers();
         }

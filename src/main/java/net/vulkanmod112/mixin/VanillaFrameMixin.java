@@ -21,6 +21,18 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 @Mixin(RenderGlobal.class)
 public abstract class VanillaFrameMixin {
 
+    @Inject(method = "setupTerrain", at = @At("HEAD"))
+    private void vulkanmod112$beginSetupTerrain(Entity viewEntity, double partialTicks, ICamera camera,
+                                                int frameCount, boolean playerSpectator, CallbackInfo ci) {
+        VanillaFrame.beginSetupTerrain();
+    }
+
+    @Inject(method = "setupTerrain", at = @At("RETURN"))
+    private void vulkanmod112$endSetupTerrain(Entity viewEntity, double partialTicks, ICamera camera,
+                                              int frameCount, boolean playerSpectator, CallbackInfo ci) {
+        VanillaFrame.endSetupTerrain();
+    }
+
     @Inject(method = "renderEntities", at = @At("HEAD"))
     private void vulkanmod112$beginEntities(Entity renderViewEntity, ICamera camera, float partialTicks,
                                             CallbackInfo ci) {

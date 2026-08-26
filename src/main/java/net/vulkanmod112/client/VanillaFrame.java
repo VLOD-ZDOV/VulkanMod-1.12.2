@@ -104,6 +104,8 @@ public final class VanillaFrame {
      * above then describe a mixture of the two.
      */
     private static long ownWalkFellBack;
+    /** Walks a chunk asked for and did not get this frame. */
+    private static long ownWalkHeld;
 
     public static void countOwnWalk(int visited, int visible, long nanos) {
         ownWalks++;
@@ -138,6 +140,10 @@ public final class VanillaFrame {
 
     public static void countOwnWalkFallback() {
         ownWalkFellBack++;
+    }
+
+    public static void countOwnWalkHeld() {
+        ownWalkHeld++;
     }
 
     /**
@@ -299,6 +305,18 @@ public final class VanillaFrame {
     private static long entityNanos;
     private static long layerStart;
     private static long layerNanos;
+    /**
+     * The one method in the frame that costs nothing standing still and a great
+     * deal moving, and which nothing here had ever timed.
+     *
+     * It decides which chunks are on screen, and it does that work again every
+     * time the camera moves far enough. Standing still this renderer is within
+     * a tenth of the fastest thing on this version; flying at a long render
+     * distance it is not, and the difference had to be somewhere nobody was
+     * looking. This is the only candidate left that behaves the same way.
+     */
+    private static long setupStart;
+    private static long setupNanos;
     private static long frames;
 
     private VanillaFrame() {
@@ -345,6 +363,17 @@ public final class VanillaFrame {
         layerStart = System.nanoTime();
     }
 
+    public static void beginSetupTerrain() {
+        setupStart = System.nanoTime();
+    }
+
+    public static void endSetupTerrain() {
+        if (setupStart != 0L) {
+            setupNanos += System.nanoTime() - setupStart;
+            setupStart = 0L;
+        }
+    }
+
     public static void endLayer() {
         if (layerStart != 0L) {
             layerNanos += System.nanoTime() - layerStart;
@@ -359,15 +388,18 @@ public final class VanillaFrame {
         }
         String line = String.format(
                 "vanilla frame: renderEntities %.2f ms (block entities %.2f of it), "
+                        + "setupTerrain %.2f ms, "
                         + "renderBlockLayer (all 4) %.2f ms per frame "
                         + "over %d frames, %d frustum tests per frame (%s)",
                 entityNanos / 1_000_000.0 / frames, blockEntityNanos / 1_000_000.0 / frames,
+                setupNanos / 1_000_000.0 / frames,
                 layerNanos / 1_000_000.0 / frames, frames,
                 frustumTests / frames,
                 VulkanConfig.isFastFrustumTest() ? "far corner" : "vanilla eight corners");
         blockEntityNanos = 0L;
         entityNanos = 0L;
         layerNanos = 0L;
+        setupNanos = 0L;
         frames = 0L;
         frustumTests = 0L;
         return line;
