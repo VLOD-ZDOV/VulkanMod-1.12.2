@@ -119,6 +119,17 @@ the submitting sits under `VboRenderList.renderChunkLayer`, one call further in.
 number is not idle waste to be reclaimed; most of it is the hand-off itself. Cancelling the
 method outright removes this renderer along with the loop, and the world goes with it.
 
+The other method that reads as vanilla's own cost is `renderEntities`, and it is not a loop
+over creatures. It walks the same visible list — every section on screen, some 17 700 of them
+at thirty-two chunks against about 2 700 that hold any blocks — and asks the world which chunk
+each section belongs to before finding out whether anything is standing in it. Held to a fixed
+scene of five drawn creatures it costs 0.07 ms at eight chunks and 1.10 at thirty-two, and the
+part of it that draws block entities grows the same way with none drawn at all. Both halves are
+now given a short list instead: the creature list is turned inside out, because there are sixty
+entities and each of them already records the section it is filed under, and this renderer's
+visibility search answers in one array read whether that section is on screen. The same
+creatures are found, in the same order.
+
 The method that is worth naming separately is `setupTerrain`, which decides which chunks are
 on screen. Standing still it costs **0.07 ms** a frame; flying at thirty-two chunks it costs
 **1.6 to 1.9 ms**, because it is re-run whenever the answer might have changed and, in flight,

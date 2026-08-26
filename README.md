@@ -58,9 +58,10 @@ rather than copied from theirs.
 
 ## What you get
 
-**More frames**, most of all at high render distances — the biggest single saving is in how
-the game decides which chunks are on screen, and that cost grows with the distance.
-→ [what shipped when](ROADMAP.md#done)
+**More frames**, most of all at high render distances. The two biggest savings are both in
+work the game does per chunk on screen rather than per pixel — deciding which chunks are
+visible, and walking that same list again to look for creatures — and both grow with the
+distance. → [the numbers](BENCHMARKS.md) · [what shipped when](ROADMAP.md#done)
 
 **Effects with a slider each.** Waves, reflections, refraction, bloom, occlusion, swaying
 grass, god rays, ray-traced shadows, a round sun and moon. Every one off by default, and

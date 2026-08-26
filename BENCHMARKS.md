@@ -42,17 +42,22 @@ Frames per second along the route, at three render distances. Higher is better.
 
 | Render distance | Vanilla | **This mod** | Nothirium | Relictium |
 |---|---|---|---|---|
-| 8 chunks | **970** | 722 | 950 | 931 |
-| 24 chunks | 303 | **596** | 751 | 795 |
-| 32 chunks | 150 | **380** | 610 | 700 |
+| 8 chunks | **970** | 715 | 950 | 931 |
+| 24 chunks | 303 | **595** | 751 | 795 |
+| 32 chunks | 150 | **512** | 610 | 700 |
 
 Relative to the game's own renderer:
 
 | Render distance | **This mod** | Nothirium | Relictium |
 |---|---|---|---|
 | 8 chunks | 0.74x | 0.98x | 0.96x |
-| 24 chunks | **1.97x** | 2.48x | 2.62x |
-| 32 chunks | **2.53x** | 4.07x | 4.67x |
+| 24 chunks | **1.96x** | 2.48x | 2.62x |
+| 32 chunks | **3.41x** | 4.07x | 4.67x |
+
+This mod's column was measured again after the change described in *The pass that
+was not about creatures* below; the other three are unchanged. The two distances
+that change did not move — 715 against 722, 595 against 596 — which is what says
+the two sessions are comparable at all.
 
 ---
 
@@ -68,7 +73,7 @@ is waiting on chunks.
 twice the game's frame rate at 24 chunks and two and a half times at 32. That is the case this
 mod exists for.
 
-**The two specialists are faster than this mod at every distance where any of them help.**
+**The two specialists are still faster than this mod, and the gap narrows with distance.**
 Nothirium rewrites the chunk rendering engine; Relictium is a fork of Vintagium, which is a
 port of Sodium. They do one thing and they do it well, and neither of them draws water with
 waves or a sun that glints off it. If frames are the only thing you want, they are the honest
@@ -99,6 +104,57 @@ The view is now answered at once and a finished chunk at a tick's pace. Same rou
 
 The frames taken at the same points before and after are the same picture. Standing still is
 unchanged, which is the point: the cost was never there.
+
+---
+
+## The pass that was not about creatures
+
+The second thing measuring produced, and the larger one.
+
+`renderEntities` sounds like a loop over creatures. It is a loop over **every section on
+screen**: for each one it asks the world which chunk that section belongs to, and only then
+whether anything is standing in it. At thirty-two chunks that is some 17 700 sections, of
+which about 2 700 contain any blocks at all — the rest is open air, walked twice a frame.
+
+The proof is a render-distance sweep with the scene held still. Five creatures drawn at every
+distance, nothing else changed:
+
+| Render distance | `renderEntities` | of it, block entities | creatures drawn |
+|---|---|---|---|
+| 8 chunks | 0.07 ms | 0.01 | 5 |
+| 16 chunks | 0.38 ms | 0.08 | 5 |
+| 32 chunks | **1.10 ms** | **0.36** | 5 |
+
+The creature count never moves and the cost grows sixteenfold. The block-entity column is the
+cleanest part of it: 0.01 ms to 0.36 with **zero block entities drawn anywhere**. Nothing is
+being rendered there. That is the walk, and only the walk.
+
+So the loop is turned inside out. There are sixty entities in that world and seventeen
+thousand sections; each entity already records the section it is filed under, and this mod's
+visibility search already knows in one array read whether a section is on screen. The sections
+that can hold something are handed to the game, in the order it would have visited them, and
+the game finds exactly the same creatures in them. The block-entity list is gathered while the
+search walks, and topped up when a chunk finishes building with a chest in it.
+
+Same route, same world, one session, the change switched on and off:
+
+| At 32 chunks, flying | Before | After |
+|---|---|---|
+| `renderEntities` | 1.12 ms/frame | **0.01 ms/frame** |
+| of it, block entities | 0.37 ms | 0.00 ms |
+| Frame rate along the route | 305–354 | **512–513** |
+| Worst frame on the route | 225 | **353** |
+
+At 24 chunks it gains one per cent and at 8 chunks nothing at all, which is the same statement
+from the other side: below thirty-two the frame is not waiting on the thread this saves.
+
+**How it was checked.** A shortcut that quietly drops a creature looks exactly like a creature
+that walked off, so the shortened lists are compared against the full scan they replace, entry
+by entry, under a switch. It found a real fault the first time it ran — 186 block-entity
+sections missing while a world filled in, because a section already on the list can finish
+building afterwards — and reports nothing missing at all now, on either list. The frames taken
+at the same points on the route differ from each other exactly as much as two runs of the
+identical build do, which is animals having wandered.
 
 ---
 

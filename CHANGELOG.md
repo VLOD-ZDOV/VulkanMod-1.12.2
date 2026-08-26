@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **The two passes that draw creatures and chests are given a short list instead of every section on screen.** `renderEntities` reads as a loop over creatures and is not one: it walks the visible list — around 17 700 sections at render distance 32, of which some 2 700 hold any blocks — and asks the world which chunk each section belongs to before finding out whether anything stands in it. Measured with the scene held still at five drawn creatures it costs 0.07 ms a frame at eight chunks and 1.10 at thirty-two, and the block-entity half grows the same way with none drawn at all, which is the proof that the cost is the walk. The creature loop is turned inside out — every entity already records the section it is filed under, and the visibility search answers in one array read whether that section is on screen — and the block-entity list is gathered while that search walks and topped up when a chunk finishes building with a chest in it. The same creatures are drawn, in the same order. At thirty-two chunks the pass falls from 1.12 ms a frame to 0.01 and the fixed route from 305–354 fps to 512, with the worst frame on it going from 225 to 353; at twenty-four chunks it gains one per cent and at eight nothing, because below thirty-two the frame is not waiting on that thread. Switchable under Settings → Optimisation → Short Entity Section Lists, and there is a build flag that checks the short lists against the full scan they replace rather than trusting them.
+
 ## [0.10.0-alpha]
 
 An alpha, published to be reported against rather than because it is finished.
