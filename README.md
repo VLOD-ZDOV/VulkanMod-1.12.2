@@ -46,6 +46,14 @@ up, and everything this mod does not draw is drawn exactly as it always was.
 If Vulkan is missing, the driver is old, or the two graphics cards in a laptop disagree, the
 game renders the way it always did and the log says why.
 
+**Named after VulkanMod, and not a port of it.**
+[VulkanMod](https://github.com/xCollateral/VulkanMod) is a Fabric mod for 1.17 and later that
+replaces the game's renderer outright. This one is written for Forge 1.12.2, leaves the game
+holding its window and its OpenGL context, and draws the terrain in Vulkan beside it. **No code
+is shared between the two.** What was taken is the idea, and a reading of that project's public
+release notes: where a fault it had fixed could exist here too, this code was checked for it
+rather than copied from theirs.
+
 ---
 
 ## What you get
