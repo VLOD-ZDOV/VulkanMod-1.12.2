@@ -279,6 +279,11 @@ public final class VisibilityWalk {
         int reach = renderDistanceChunks << 4;
         int worldHeight = countY << 4;
         int order = 0;
+        // Every record queued here had its slot written before it was queued.
+        // If one ever does not, the index cannot describe the list, and saying
+        // so leaves the frame on the long lists rather than losing a creature
+        // out of a short one.
+        boolean everySlotKnown = true;
 
         while (head < tail) {
             int entry = head++;
@@ -295,9 +300,14 @@ public final class VisibilityWalk {
             out.add(info);
 
             int emitSlot = info.vulkanmod112$gridSlot();
-            emitted[emitSlot] = epoch;
-            emittedInfo[emitSlot] = info;
-            emittedOrder[emitSlot] = order++;
+            if (emitSlot < 0) {
+                everySlotKnown = false;
+            } else {
+                emitted[emitSlot] = epoch;
+                emittedInfo[emitSlot] = info;
+                emittedOrder[emitSlot] = order;
+            }
+            order++;
 
             // The only two pointers a node follows, and only once each.
             EnumFacing entered = info.vulkanmod112$facing();
@@ -380,7 +390,7 @@ public final class VisibilityWalk {
                 push(child, nx, ny, nz, nSlotX, nSlotY, nSlotZ, counter + 1);
             }
         }
-        indexed = true;
+        indexed = everySlotKnown;
         return true;
     }
 
