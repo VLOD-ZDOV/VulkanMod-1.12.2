@@ -18,6 +18,8 @@
     "ChunkBuildThreadsMixin",
     "ChunkUploadMixin",
     "VanillaFrameMixin",
+    "FramePhaseMixin",
+    "LoopPhaseMixin",
     "VisibilityWalkMixin",
     "NearPlaneMixin",
     "VisibilityWalkCostMixin",

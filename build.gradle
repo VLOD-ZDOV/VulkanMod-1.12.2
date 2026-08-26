@@ -550,6 +550,9 @@ tasks.matching { it.name in ['runClient', 'runObfClient'] }.configureEach {
     if (project.hasProperty('verifyLayerSections')) {
         jvmArgs '-Dvulkanmod112.verifyLayerSections=true'
     }
+    if (project.hasProperty('skipGlErrorCheck')) {
+        jvmArgs '-Dvulkanmod112.skipGlErrorCheck=true'
+    }
     // -PdumpLang writes logs/vulkanmod112-en_us.lang from the settings screen
     // as it is actually built, which is where the English language file comes
     // from. Open the screen once, then copy the file into resources.
@@ -570,7 +573,7 @@ tasks.matching { it.name in ['runClient', 'runObfClient'] }.configureEach {
         ['flightTag', 'flightSeed', 'flightDistance', 'flightSeconds',
          'flightSettle', 'flightShots', 'flightPatience', 'flightPos',
          'flightProfiler', 'flightPreset', 'flightHour', 'flightWeather',
-         'flightPairs', 'flightClouds', 'flightPitch',
+         'flightPairs', 'flightClouds', 'flightPitch', 'flightWindow',
          'flightYaw', 'flightThreads'].each { name ->
             if (project.hasProperty(name)) {
                 jvmArgs '-Dvulkanmod112.' + name + '=' + project.property(name)

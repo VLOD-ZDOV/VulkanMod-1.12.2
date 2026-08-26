@@ -123,6 +123,7 @@ public final class VulkanPatchGroups {
                         + "thread count, the near plane, the entity distance caps and the "
                         + "diagnostics timers. Everything still draws.",
                 "ChunkBuildThreadsMixin", "ChunkPreloadMixin", "EntityRenderDistanceMixin",
+                "FramePhaseMixin", "LoopPhaseMixin",
                 "NearPlaneMixin", "RebuildNearMixin", "ResourcePackIconMixin",
                 "TileEntityRenderDistanceMixin", "VanillaFrameMixin", "WorldDisplayMixin");
     }

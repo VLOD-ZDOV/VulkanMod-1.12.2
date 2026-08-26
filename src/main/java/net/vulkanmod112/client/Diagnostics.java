@@ -530,6 +530,8 @@ public final class Diagnostics {
         out.println("  " + TerrainHooks.vanillaLayerStats());
         out.println("  " + TerrainHooks.packStats());
         out.println("  " + VanillaFrame.stats());
+        out.println("  " + FramePhases.loopStats());
+        out.println("  " + FramePhases.stats());
         out.println("  " + VanillaFrame.walkStats());
         out.println("  " + VanillaFrame.ownWalkStats());
         out.println("  " + VanillaFrame.entitySectionStats());

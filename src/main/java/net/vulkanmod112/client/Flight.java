@@ -152,6 +152,17 @@ public final class Flight {
     private static final int PATIENCE = Integer.getInteger("vulkanmod112.flightPatience", 180);
 
     /**
+     * The window to fly in, as {@code 1280x720}, or empty to leave it alone.
+     *
+     * Pinning the window pins the one thing every full-screen pass is priced
+     * in: pixels. A frame that turns out to be limited by how fast the card can
+     * fill the screen rather than by anything on the processor says so here and
+     * nowhere else — the same route in a window half the size either doubles or
+     * it does not, and that is the whole question.
+     */
+    private static final String WINDOW = System.getProperty("vulkanmod112.flightWindow", "").trim();
+
+    /**
      * Clouds: 0 off, 1 fast, 2 fancy, or -1 to leave the option alone.
      *
      * Off by default. A cloud drifts whatever else is held still, and between
@@ -325,6 +336,7 @@ public final class Flight {
         // also printed over the top third of every frame, so it is asked for
         // rather than assumed.
         mc.gameSettings.showDebugInfo = PROFILER;
+        applyWindow(mc);
         applyPreset(mc);
         if (CLOUDS >= 0) {
             mc.gameSettings.clouds = CLOUDS;
@@ -386,6 +398,34 @@ public final class Flight {
      * build chunks with, how much memory the card admits to — and one of them
      * moves the game's own video settings.
      */
+    /**
+     * Resizes the window, if one was asked for, before anything is measured.
+     *
+     * The game is told about the change the same way it would be told about a
+     * person dragging the window edge, so every framebuffer that is sized to
+     * the window follows.
+     */
+    private static void applyWindow(Minecraft mc) {
+        if (WINDOW.isEmpty()) {
+            return;
+        }
+        int cross = WINDOW.indexOf('x');
+        if (cross <= 0) {
+            VulkanMod112.LOGGER.warn("Flight {} could not read a window size from '{}'", TAG, WINDOW);
+            return;
+        }
+        try {
+            int width = Integer.parseInt(WINDOW.substring(0, cross).trim());
+            int height = Integer.parseInt(WINDOW.substring(cross + 1).trim());
+            org.lwjgl.opengl.Display.setDisplayMode(
+                    new org.lwjgl.opengl.DisplayMode(width, height));
+            mc.resize(width, height);
+            VulkanMod112.LOGGER.info("Flight {} window pinned to {}x{}", TAG, width, height);
+        } catch (NumberFormatException | org.lwjgl.LWJGLException e) {
+            VulkanMod112.LOGGER.warn("Flight {} could not set the window to '{}'", TAG, WINDOW, e);
+        }
+    }
+
     private static void applyPreset(Minecraft mc) {
         if (PRESET.isEmpty()) {
             return;
