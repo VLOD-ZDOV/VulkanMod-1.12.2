@@ -180,6 +180,7 @@ Going further is optional: turn on **Ultra Logging** and send
 
 | | |
 |---|---|
+| [howItWork.md](howItWork.md) | how the renderer is built: what a chunk goes through, how a frame is put together, what happens when it fails |
 | [ROADMAP.md](ROADMAP.md) | what is [done](ROADMAP.md#done), [planned](ROADMAP.md#planned) and [not planned](ROADMAP.md#not-planned) |
 | [CHANGELOG.md](CHANGELOG.md) | every release, in detail |
 | [ADVANCED.md](ADVANCED.md) | the full feature list, the JVM switches, building, diagnostics |
