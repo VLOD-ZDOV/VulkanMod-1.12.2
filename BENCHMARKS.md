@@ -18,7 +18,8 @@ points along it, and quit. Nobody sits and flies it, so two runs differ by what 
 measured rather than by how the mouse was moved.
 
 Pinned for every run in the table: the world seed, the route, the render distance, the time
-of day, the weather, the settings preset, and the length of the flight. Verified rather than
+of day, the weather, the settings preset, the length of the flight, and — since it turned out
+to matter more than any of the others — the size of the window. Verified rather than
 assumed:
 
 - **The render distance really changes.** At 8 chunks the frame holds 180–218 chunk sections;
@@ -155,6 +156,44 @@ sections missing while a world filled in, because a section already on the list 
 building afterwards — and reports nothing missing at all now, on either list. The frames taken
 at the same points on the route differ from each other exactly as much as two runs of the
 identical build do, which is animals having wandered.
+
+---
+
+## What the frame is actually limited by
+
+Everything above is one window on one machine, and it turns out the window is
+half the answer.
+
+The frame was broken into the phases the game names for its own profiler, and
+then into what the loop around them does. At thirty-two chunks, drawing the
+whole world costs **0.83 ms of a 2.0 ms frame**. Most of the rest is a single
+thing: the game asks the driver twice a frame whether anything has gone wrong,
+and the answer cannot come back until the card has caught up with the work
+already handed to it. That wait is not the question's fault — skipping the
+question does not gain a frame, it only moves the wait to the next call that
+needs the driver — but it is a clean measure of how far behind the card is.
+
+It tracks the pixel count and almost nothing else:
+
+| Window | Megapixels | **This mod** | Waiting for the card | The game's renderer |
+|---|---|---|---|---|
+| 1280 × 720 | 0.9 | **1041** | 0.33 ms | 155 |
+| 1920 × 1080 | 2.1 | **904** | 0.45 ms | — |
+| 3673 × 2066 | 7.6 | **512** | 1.05 ms | 149 |
+
+Same route, same world, same render distance of 32; only the window changed.
+
+**This renderer's frame is about 0.7 ms of processor work plus a tenth of a
+millisecond for every megapixel.** The game's own renderer, measured the same
+way, barely notices the window at all — 155 frames a second at 0.9 megapixels
+and 149 at 7.6 — because what holds it back is the number of separate draws it
+makes, not the number of pixels it fills.
+
+That is the whole trade this mod makes, stated as a measurement rather than as a
+design note: **it turns a cost per chunk into a cost per pixel.** Which is the
+better bargain depends on your screen, and the table further up was measured on
+a very large one. On an ordinary 1080p monitor the same route at the same
+distance runs at six times the game's own renderer rather than three and a half.
 
 ---
 
