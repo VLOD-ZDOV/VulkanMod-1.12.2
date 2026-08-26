@@ -394,6 +394,12 @@ public final class VulkanPresets {
      * of those four actually moved.
      */
     private static void apply(Minecraft mc, Look look) {
+        // A preset is a whole answer to "how should this look", so it has to
+        // own the settings that can make the picture unrecognisable — the
+        // diagnostic views most of all. Somebody who left one on and then
+        // reached for a preset to put things right was, until this line, given
+        // the same broken picture with different lighting.
+        VulkanConfig.clearDiagnosticViews();
         VulkanConfig.setTerrainEnabled(true);
         VulkanConfig.setEntityDistance(look.entityDistance);
         VulkanConfig.setTileEntityDistance(look.tileEntityDistance);

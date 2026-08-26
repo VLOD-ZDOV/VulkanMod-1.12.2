@@ -1303,10 +1303,32 @@ public final class VulkanConfig {
      * settings are left alone: they are not ours to reset, and the screen only
      * borrows them.
      */
+    /**
+     * Puts every diagnostic view back, wherever the settings came from.
+     *
+     * These are the views that paint the world as something other than itself —
+     * a mirror, a field of vectors, a flat colour per material. Any one of them
+     * left on makes the picture look broken in a way no other setting explains,
+     * and the two things a player reaches for when the picture looks broken are
+     * Reset and a preset. Both go through here so that neither can leave one on.
+     *
+     * One list, called from both, rather than the same names written out beside
+     * each caller: a seventh view added to one copy and not the other is a bug
+     * that only appears months later, on somebody else's machine.
+     */
+    public static void clearDiagnosticViews() {
+        setShowCreatureLight(DEF_SHOW_CREATURE_LIGHT);
+        setShowMaterials(DEF_SHOW_MATERIALS);
+        setShowAccumulation(DEF_SHOW_ACCUMULATION);
+        setShowOcclusion(DEF_SHOW_OCCLUSION);
+        setShowMotion(DEF_SHOW_MOTION);
+        setShowReflections(DEF_SHOW_REFLECTIONS);
+    }
+
     public static void resetToDefaults() {
+        clearDiagnosticViews();
         setContactShadows(DEF_CONTACT_SHADOWS);
         setCreatureLight(DEF_CREATURE_LIGHT);
-        setShowCreatureLight(DEF_SHOW_CREATURE_LIGHT);
         setUpdateCheck(DEF_UPDATE_CHECK);
         setCloudShadows(DEF_CLOUD_SHADOWS);
         setGodRays(DEF_GOD_RAYS);
@@ -1338,7 +1360,6 @@ public final class VulkanConfig {
         setFastRebuildNear(DEF_FAST_REBUILD_NEAR);
         setMaterialTags(DEF_MATERIAL_TAGS);
         setSmartAnimations(DEF_SMART_ANIMATIONS);
-        setShowMaterials(DEF_SHOW_MATERIALS);
         setBuildNearOffThread(DEF_BUILD_NEAR_OFF_THREAD);
         setFastFrustumTest(DEF_FAST_FRUSTUM_TEST);
         setVulkanTranslucent(DEF_VULKAN_TRANSLUCENT);
@@ -1360,14 +1381,10 @@ public final class VulkanConfig {
         setBlockLightRadius(DEF_BLOCK_LIGHT_RADIUS);
         setLightSoftness(DEF_LIGHT_SOFTNESS);
         setTemporalAccumulation(DEF_TEMPORAL_ACCUMULATION);
-        setShowAccumulation(DEF_SHOW_ACCUMULATION);
         // These four sat out of the reset while their neighbours in the same
         // group were in it, so Reset could leave the world painted in a
         // diagnostic colour with nothing in the screen admitting why.
-        setShowOcclusion(DEF_SHOW_OCCLUSION);
-        setShowMotion(DEF_SHOW_MOTION);
         setMotionOverWorld(DEF_MOTION_OVER_WORLD);
-        setShowReflections(DEF_SHOW_REFLECTIONS);
         setVulkanEntities(DEF_VULKAN_ENTITIES);
         setRoundSun(DEF_ROUND_SUN);
         setRoundMoon(DEF_ROUND_MOON);
