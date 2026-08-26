@@ -22,6 +22,8 @@
     "NearPlaneMixin",
     "VisibilityWalkCostMixin",
     "OwnVisibilityWalkMixin",
+    "EntitySectionsMixin",
+    "TileEntityArrivalMixin",
     "RenderInfoMixin",
     "ViewFrustumSlotMixin",
     "RenderChunkDirtyMixin",

@@ -13,6 +13,7 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.MathHelper;
 import org.lwjgl.util.vector.Vector3f;
 import net.vulkanmod112.client.RenderInfo;
+import net.vulkanmod112.client.SectionIndex;
 import net.vulkanmod112.client.SeedFacings;
 import net.vulkanmod112.client.VanillaFrame;
 import net.vulkanmod112.client.VisibilityWalk;
@@ -76,7 +77,7 @@ import java.util.Set;
  * </ul>
  */
 @Mixin(RenderGlobal.class)
-public abstract class OwnVisibilityWalkMixin {
+public abstract class OwnVisibilityWalkMixin implements SectionIndex {
 
     @Shadow
     private ViewFrustum viewFrustum;
@@ -105,6 +106,23 @@ public abstract class OwnVisibilityWalkMixin {
 
     @Unique
     private final VisibilityWalk vulkanmod112$walk = new VisibilityWalk();
+
+    /**
+     * Handed out only while the list the game holds is the one this produced.
+     * The search hands whole frames back to vanilla — a camera outside the
+     * world's height, a debug frustum, a record type it could not reach — and
+     * on those frames the index describes a list nobody is reading.
+     */
+    @Override
+    public VisibilityWalk vulkanmod112$sectionWalk() {
+        return vulkanmod112$walk;
+    }
+
+    @Override
+    @SuppressWarnings("rawtypes")
+    public List vulkanmod112$visibleList() {
+        return vulkanmod112$visible;
+    }
 
     /**
      * When the last walk finished, and the block the camera was standing in.

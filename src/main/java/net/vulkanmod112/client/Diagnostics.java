@@ -532,6 +532,7 @@ public final class Diagnostics {
         out.println("  " + VanillaFrame.stats());
         out.println("  " + VanillaFrame.walkStats());
         out.println("  " + VanillaFrame.ownWalkStats());
+        out.println("  " + VanillaFrame.entitySectionStats());
         out.println("  " + VanillaFrame.rebuildNearStats());
         // The two settings currently under A/B. Without them in the snapshot a
         // run has to be matched to a configuration by memory, and the last two

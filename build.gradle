@@ -529,6 +529,18 @@ tasks.matching { it.name in ['runClient', 'runObfClient'] }.configureEach {
     if (project.hasProperty('verifyWalk')) {
         jvmArgs '-Dvulkanmod112.verifyWalk=true'
     }
+    // -PverifyEntitySections makes the shortened entity and block-entity lists
+    // be checked against the full scan they replace, and reports what the short
+    // one is missing. It costs that full scan, so it answers correctness only.
+    if (project.hasProperty('verifyEntitySections')) {
+        jvmArgs '-Dvulkanmod112.verifyEntitySections=true'
+    }
+    // -PshortEntitySections=true|false pins the shortened entity lists over
+    // whatever the config says, which is how the two arms of the comparison are
+    // told apart without editing a file between runs.
+    if (project.hasProperty('shortEntitySections')) {
+        jvmArgs '-Dvulkanmod112.shortEntitySections=' + project.property('shortEntitySections')
+    }
     // -PdumpLang writes logs/vulkanmod112-en_us.lang from the settings screen
     // as it is actually built, which is where the English language file comes
     // from. Open the screen once, then copy the file into resources.

@@ -4,7 +4,9 @@ import net.minecraft.client.renderer.chunk.CompiledChunk;
 import net.minecraft.client.renderer.chunk.RenderChunk;
 import net.minecraft.client.renderer.culling.Frustum;
 import net.minecraft.util.EnumFacing;
+import net.minecraft.util.math.BlockPos;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -130,6 +132,48 @@ public final class VisibilityWalk {
     private int[] stamp = new int[0];
     private int epoch;
 
+    /**
+     * The index the visible list is missing.
+     *
+     * The list itself answers "which sections are on screen", walked from the
+     * front. Two passes of the game's own frame ask the opposite question —
+     * "is this one section on screen, and where in the list does it sit" — and
+     * answer it today by walking all of the list. These three arrays, written
+     * as a section is appended, answer it in one read: {@link #emitted} says
+     * whether the slot went into <em>this</em> walk's list, {@link #emittedInfo}
+     * is the record that went in, and {@link #emittedOrder} is its index, which
+     * is what lets a subset be handed back in the order vanilla would have
+     * visited it.
+     *
+     * They are stamped with {@link #epoch} exactly as {@link #stamp} is, so a
+     * walk costs nothing to start and a stale slot reads as absent.
+     */
+    private int[] emitted = new int[0];
+    private RenderInfo[] emittedInfo = new RenderInfo[0];
+    private int[] emittedOrder = new int[0];
+
+    /**
+     * Marks for one caller picking sections out of the index, on its own epoch
+     * so that picking twice in a frame — the game renders entities once per
+     * render pass — does not need the array cleared.
+     */
+    private int[] picked = new int[0];
+    private int pickEpoch;
+
+    /** True once a walk has finished and its index describes the visible list. */
+    private boolean indexed;
+
+    /**
+     * The visible sections whose compiled chunk holds block entities, in the
+     * order they were appended to the visible list.
+     *
+     * The game's block-entity pass reaches this answer by asking all seventeen
+     * thousand visible sections every frame; the answer changes only when a
+     * chunk is rebuilt, and a rebuild arms the next walk, so it is gathered
+     * here instead — the compiled chunk is already in a register at that point.
+     */
+    private final List<RenderInfo> tileSections = new ArrayList<RenderInfo>();
+
     private int[] queue = new int[4096 * STRIDE];
     private RenderInfo[] queued = new RenderInfo[4096];
     private int head;
@@ -160,14 +204,25 @@ public final class VisibilityWalk {
         countZ = countZIn;
         if (stamp.length != slots) {
             stamp = new int[slots];
+            emitted = new int[slots];
+            emittedInfo = new RenderInfo[slots];
+            emittedOrder = new int[slots];
+            picked = new int[slots];
             epoch = 0;
+            pickEpoch = 0;
         }
         // Bumping past the end of the range would make stale stamps look
         // current, so the one walk that wraps pays for a clear.
         if (++epoch == Integer.MAX_VALUE) {
             java.util.Arrays.fill(stamp, 0);
+            java.util.Arrays.fill(emitted, 0);
             epoch = 1;
         }
+        indexed = false;
+        tileSections.clear();
+        // Everything reported before this moment is about to be answered again
+        // from the chunks themselves, so the backlog is not worth carrying.
+        TileEntityArrivals.clear();
         head = 0;
         tail = 0;
         tested = 0;
@@ -223,6 +278,7 @@ public final class VisibilityWalk {
                            boolean renderChunksMany) {
         int reach = renderDistanceChunks << 4;
         int worldHeight = countY << 4;
+        int order = 0;
 
         while (head < tail) {
             int entry = head++;
@@ -238,12 +294,23 @@ public final class VisibilityWalk {
             RenderInfo info = queued[entry];
             out.add(info);
 
+            int emitSlot = info.vulkanmod112$gridSlot();
+            emitted[emitSlot] = epoch;
+            emittedInfo[emitSlot] = info;
+            emittedOrder[emitSlot] = order++;
+
             // The only two pointers a node follows, and only once each.
             EnumFacing entered = info.vulkanmod112$facing();
             byte mask = info.vulkanmod112$facingMask();
-            CompiledChunk compiled = renderChunksMany && entered != null
-                    ? info.vulkanmod112$chunk().getCompiledChunk()
-                    : null;
+            // Read for every section now rather than only when direction
+            // culling wants it. It is the same pointer either way, and it also
+            // carries whether this section holds block entities — an answer the
+            // game's own pass currently pays for once per section per frame.
+            CompiledChunk compiled = info.vulkanmod112$chunk().getCompiledChunk();
+            if (!compiled.getTileEntities().isEmpty()) {
+                tileSections.add(info);
+            }
+            boolean cullByVisibility = renderChunksMany && entered != null;
             int enteredBack = entered == null ? -1 : OPPOSITE[entered.ordinal()];
 
             for (int face = 0; face < 6; face++) {
@@ -252,7 +319,7 @@ public final class VisibilityWalk {
                     if ((mask & 1 << OPPOSITE[face]) != 0) {
                         continue;
                     }
-                    if (compiled != null
+                    if (cullByVisibility
                             && !compiled.isVisible(FACES[enteredBack], FACES[face])) {
                         continue;
                     }
@@ -313,7 +380,129 @@ public final class VisibilityWalk {
                 push(child, nx, ny, nz, nSlotX, nSlotY, nSlotZ, counter + 1);
             }
         }
+        indexed = true;
         return true;
+    }
+
+    /**
+     * Whether the index describes the list the game is holding.
+     *
+     * False until a walk has run to the end. Every path that hands the frame
+     * back to vanilla leaves it false, because vanilla then builds a list this
+     * has never seen and answering questions about it would be answering about
+     * the wrong list.
+     */
+    public boolean indexed() {
+        return indexed;
+    }
+
+    /**
+     * The visible-list record for one section, or null if that section is not
+     * on screen.
+     *
+     * Takes chunk coordinates — {@code blockX >> 4}, the section index within
+     * the column, {@code blockZ >> 4} — because every caller has them in that
+     * form already.
+     *
+     * The grid is a torus, so the slot a far-away chunk maps to belongs to a
+     * different chunk that shares its residue. The record's own position is
+     * therefore checked rather than assumed: outside the render window the
+     * mapping is not one-to-one, and the honest answer there is "not visible".
+     */
+    public RenderInfo visibleSection(int chunkX, int sectionY, int chunkZ) {
+        if (!indexed || sectionY < 0 || sectionY >= countY) {
+            return null;
+        }
+        int slot = (floorMod(chunkZ, countZ) * countY + sectionY) * countX
+                + floorMod(chunkX, countX);
+        if (emitted[slot] != epoch) {
+            return null;
+        }
+        RenderInfo info = emittedInfo[slot];
+        BlockPos position = info.vulkanmod112$chunk().getPosition();
+        if (position.getX() >> 4 != chunkX || position.getY() >> 4 != sectionY
+                || position.getZ() >> 4 != chunkZ) {
+            return null;
+        }
+        return info;
+    }
+
+    /** Where a record sits in the visible list, so a subset can keep that order. */
+    public int visibleOrder(RenderInfo info) {
+        int slot = info.vulkanmod112$gridSlot();
+        return slot < 0 || emitted[slot] != epoch ? Integer.MAX_VALUE : emittedOrder[slot];
+    }
+
+    /** Starts a round of {@link #pick}, which is how a caller drops duplicates. */
+    public void beginPick() {
+        if (++pickEpoch == Integer.MAX_VALUE) {
+            java.util.Arrays.fill(picked, 0);
+            pickEpoch = 1;
+        }
+    }
+
+    /** True the first time this slot is picked in the current round. */
+    public boolean pick(int slot) {
+        if (slot < 0 || slot >= picked.length || picked[slot] == pickEpoch) {
+            return false;
+        }
+        picked[slot] = pickEpoch;
+        return true;
+    }
+
+    /**
+     * The visible sections holding block entities, in visible-list order.
+     *
+     * Gathered while the walk runs and topped up by {@link #applyArrivals()},
+     * which is what keeps it exact rather than nearly so: a section already on
+     * the list can finish building long after the walk that put it there.
+     */
+    public List<RenderInfo> tileEntitySections() {
+        return tileSections;
+    }
+
+    /**
+     * Folds in the sections that finished building since the walk.
+     *
+     * Each one is checked against the index rather than trusted: a chunk that
+     * arrived may not be on screen, and a slot may have been given to a
+     * different chunk since. What survives both checks is inserted where the
+     * walk would have put it, so the game still visits block entities in the
+     * order it would have.
+     */
+    public void applyArrivals() {
+        if (!indexed) {
+            TileEntityArrivals.clear();
+            return;
+        }
+        RenderChunk chunk;
+        while ((chunk = TileEntityArrivals.poll()) != null) {
+            if (chunk.getCompiledChunk().getTileEntities().isEmpty()) {
+                continue;
+            }
+            BlockPos position = chunk.getPosition();
+            RenderInfo info = visibleSection(position.getX() >> 4, position.getY() >> 4,
+                    position.getZ() >> 4);
+            if (info == null || info.vulkanmod112$chunk() != chunk) {
+                continue;
+            }
+            insertInVisibleOrder(info);
+        }
+    }
+
+    private void insertInVisibleOrder(RenderInfo info) {
+        int order = visibleOrder(info);
+        int at = tileSections.size();
+        for (int i = 0; i < tileSections.size(); i++) {
+            RenderInfo other = tileSections.get(i);
+            if (other == info) {
+                return;
+            }
+            if (at == tileSections.size() && visibleOrder(other) > order) {
+                at = i;
+            }
+        }
+        tileSections.add(at, info);
     }
 
     /** Neighbours examined by the last walk. */

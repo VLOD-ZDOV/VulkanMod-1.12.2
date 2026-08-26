@@ -669,6 +669,37 @@ final class VulkanOptions {
                                         VulkanConfig.setVisibilitySeedCacheEnabled(value);
                                     }
                                 }),
+                        new VSwitchOption("Short Entity Section Lists",
+                                "Hand the two passes that draw creatures and chests only the "
+                                        + "sections that can hold one, rather than every section "
+                                        + "on screen. Those passes read as loops over creatures "
+                                        + "and are not: they walk the visible list — around "
+                                        + "17 700 sections at render distance 32, of which some "
+                                        + "2 700 contain any blocks — and ask the world about each "
+                                        + "one before knowing whether anything stands in it. With "
+                                        + "the scene held still at five drawn creatures that walk "
+                                        + "costs 0.07 ms a frame at eight chunks and 1.10 at "
+                                        + "thirty-two, which is roughly half the frame. The "
+                                        + "creature list is turned inside out instead: every "
+                                        + "entity in the world names the section it is filed in, "
+                                        + "and the visibility search answers in one array read "
+                                        + "whether that section is on screen. The same creatures "
+                                        + "are drawn, in the same order, at a cost that stops "
+                                        + "growing with render distance.",
+                                Cost.of(Level.NONE, Level.NONE, Level.NONE),
+                                "Needs Own Visibility Search on; the game's own search keeps no "
+                                        + "index of where a section sits.",
+                                new VSwitchOption.Access() {
+                                    @Override
+                                    public boolean get() {
+                                        return VulkanConfig.isShortEntitySections();
+                                    }
+
+                                    @Override
+                                    public void set(boolean value) {
+                                        VulkanConfig.setShortEntitySections(value);
+                                    }
+                                }),
                         new VSwitchOption("Fast Rebuild Scan",
                                 "Hand the last step of the terrain setup only the chunks it can do "
                                         + "anything with. That step walks every chunk on screen "

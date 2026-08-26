@@ -261,6 +261,94 @@ public final class VanillaFrame {
         return line.toString();
     }
 
+    /**
+     * How long the lists handed to the two passes inside {@code renderEntities}
+     * were, against how long the visible list they replace is.
+     *
+     * The pair is the whole point of the change and belongs next to it: the
+     * frame time alone cannot say whether the short list is short because the
+     * work went away or because the answer did.
+     */
+    private static long entitySectionRuns;
+    private static long entitySectionShort;
+    private static long entitySectionFull;
+    private static long tileSectionRuns;
+    private static long tileSectionShort;
+    private static long tileSectionFull;
+
+    private static long sectionChecks;
+    private static long sectionsExpected;
+    private static long sectionsMissing;
+    private static long tileChecks;
+    private static long tileExpected;
+    private static long tileMissing;
+
+    public static void countEntitySections(int shortened, int full) {
+        entitySectionRuns++;
+        entitySectionShort += shortened;
+        entitySectionFull += full;
+    }
+
+    public static void countTileEntitySections(int shortened, int full) {
+        tileSectionRuns++;
+        tileSectionShort += shortened;
+        tileSectionFull += full;
+    }
+
+    public static void countEntitySectionCheck(int expected, int handed, int missing) {
+        sectionChecks++;
+        sectionsExpected += expected;
+        sectionsMissing += missing;
+    }
+
+    public static void countTileEntitySectionCheck(int expected, int handed, int missing) {
+        tileChecks++;
+        tileExpected += expected;
+        tileMissing += missing;
+    }
+
+    /**
+     * Reads and resets. Both passes run once per render pass, so the divisor is
+     * the number of times the shortening ran, not the number of frames.
+     */
+    public static String entitySectionStats() {
+        if (entitySectionRuns == 0 && tileSectionRuns == 0) {
+            return "entity pass lists: full — nothing shortened";
+        }
+        StringBuilder line = new StringBuilder("entity pass lists: ");
+        if (entitySectionRuns == 0) {
+            line.append("creatures full");
+        } else {
+            line.append(String.format("creatures %d of %d sections",
+                    entitySectionShort / entitySectionRuns, entitySectionFull / entitySectionRuns));
+        }
+        if (tileSectionRuns == 0) {
+            line.append(", block entities full");
+        } else {
+            line.append(String.format(", block entities %d of %d sections",
+                    tileSectionShort / tileSectionRuns, tileSectionFull / tileSectionRuns));
+        }
+        if (sectionChecks > 0 || tileChecks > 0) {
+            line.append(String.format(" | checked against the full scan: creatures %d expected, "
+                            + "%d missing; block entities %d expected, %d missing",
+                    sectionChecks == 0 ? 0 : sectionsExpected / sectionChecks, sectionsMissing,
+                    tileChecks == 0 ? 0 : tileExpected / tileChecks, tileMissing));
+        }
+        entitySectionRuns = 0L;
+        entitySectionShort = 0L;
+        entitySectionFull = 0L;
+        tileSectionRuns = 0L;
+        tileSectionShort = 0L;
+        tileSectionFull = 0L;
+        sectionChecks = 0L;
+        sectionsExpected = 0L;
+        sectionsMissing = 0L;
+        tileChecks = 0L;
+        tileExpected = 0L;
+        tileMissing = 0L;
+        return line.toString();
+    }
+
     /** Reads and resets, like the others, so a snapshot covers one interval. */
     public static String ownWalkStats() {
         if (ownWalks == 0 && ownWalkFellBack == 0) {
