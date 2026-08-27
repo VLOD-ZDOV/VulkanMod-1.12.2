@@ -126,6 +126,22 @@ public final class AnimatedSprites {
     /** Sprites updated and skipped in the last tick, for the diagnostics line. */
     private static volatile int lastUpdated;
 
+    /**
+     * How many item models were looked at — a sentinel, not a statistic.
+     *
+     * The hook that feeds this is the one injection in the mod that is allowed
+     * to apply to nothing (the signature it targets is one Forge has changed
+     * before). If it ever stops applying, every animated texture in the hand
+     * and in the inventory freezes and nothing anywhere says why: the setting
+     * is on, the terrain half still works, and the only visible symptom is a
+     * lava bucket that has stopped moving. That has already cost a release
+     * once, in a different hook.
+     *
+     * So the count goes in the report. Zero here with the setting on and a
+     * world open is not "nothing to draw" — it is the hook missing.
+     */
+    private static volatile long itemModelCalls;
+
     private AnimatedSprites() {
     }
 
@@ -286,7 +302,12 @@ public final class AnimatedSprites {
         boolean fresh = System.currentTimeMillis() - gatheredAt < 1000L;
         return "  smart animations: " + lastUpdated + " of " + sprites.length
                 + " animated sprites updated per tick"
-                + (fresh ? "" : " (no visible set gathered, everything updated)");
+                + (fresh ? "" : " (no visible set gathered, everything updated)")
+                + ", item models seen " + itemModelCalls
+                + (itemModelCalls == 0
+                        ? " — WARNING: the item hook never ran, held and inventory textures "
+                                + "will be frozen"
+                        : "");
     }
 
     /**
@@ -301,6 +322,7 @@ public final class AnimatedSprites {
         if (!ready) {
             return;
         }
+        itemModelCalls++;
         long[] mask;
         synchronized (BY_ITEM_MODEL) {
             mask = BY_ITEM_MODEL.get(model);
