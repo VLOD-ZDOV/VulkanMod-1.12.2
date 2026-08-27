@@ -39,6 +39,10 @@ import org.lwjgl.system.MemoryUtil;
  * section has room in either direction. The scale is a power of two and the
  * sections sit on a sixteen-block grid, so a face shared by two chunks lands on
  * exactly the same lattice point from both sides: no cracks, no z-fighting.
+ * The exact span is −8 to +24 blocks with the top end open — a signed short
+ * reaches one further down than up — and a vanilla model may hang one block out
+ * of its cube, not eight, so nothing goes near either end. Both statements are
+ * asserted in {@code VertexPackingTest} rather than left here to be believed.
  *
  * <b>Light</b> is exact. The game writes the two lightmap coordinates as shorts
  * but never above 240 — they are a light level times sixteen, and smooth
@@ -209,7 +213,7 @@ public final class VertexLayout {
         packedVertices += count;
     }
 
-    private static short position(float value) {
+    static short position(float value) {
         int units = Math.round((value - POSITION_ORIGIN) * POSITION_SCALE);
         if (units > Short.MAX_VALUE) {
             clampedPositions++;
@@ -222,7 +226,7 @@ public final class VertexLayout {
         return (short) units;
     }
 
-    private static int light(int value) {
+    static int light(int value) {
         if (value > 0xFF) {
             clampedLight++;
             return 0xFF;
@@ -230,7 +234,7 @@ public final class VertexLayout {
         return value;
     }
 
-    private static short texture(float value) {
+    static short texture(float value) {
         int units = Math.round(value * 65535.0f);
         if (units < 0) {
             clampedTexture++;
