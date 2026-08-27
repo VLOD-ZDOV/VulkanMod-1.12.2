@@ -1077,6 +1077,26 @@ final class VkTerrainRenderer {
      * write the same image inside one frame, and the hand-over that used to be
      * implicit in the copy has to be stated. See {@link #beginFrameDepthHandover()}.
      *
+     * <h2>Measured, and the answer is nothing</h2>
+     *
+     * Three pairs of runs, 1280x720-ish and 4K, twenty seconds of the same
+     * route each: the frame rate is the same to within the noise of the frame
+     * counter. The copies really are gone — the report goes from 0.05 ms of
+     * hardware copy to zero — and the card's total time on a frame does not
+     * move, because the composite now spends 0.6 to 0.7 ms waiting on the
+     * Vulkan semaphore where it used to wait for nothing at all.
+     *
+     * That wait is not slack that was already there. It is the ordering this
+     * buys: Vulkan's terrain for the next frame may not start until OpenGL has
+     * finished writing depth for this one, where before the two overlapped
+     * freely because they wrote different images. Removed work that costs a
+     * synchronisation is not removed work.
+     *
+     * Kept, off, and correct, because the way out is known and is not a
+     * rewrite: two depth images taken in turn, one per frame in flight, would
+     * let the overlap back. Nobody has built that, and nothing above should be
+     * read as saying it would pay.
+     *
      * Requested with -Dvulkanmod112.sharedDepth=true, and only ever true once
      * OpenGL has accepted the image as its own attachment and said the
      * framebuffer is still complete.
@@ -1163,7 +1183,16 @@ final class VkTerrainRenderer {
         return SHARED_DEPTH_WANTED ? VK_IMAGE_LAYOUT_GENERAL : sharedLayout();
     }
 
-    /** The same layout under the name OpenGL knows it by. */
+    /**
+     * The same layout under the name OpenGL knows it by.
+     *
+     * GENERAL is also the layout with no depth compression, which looked like
+     * the reason sharing gained nothing. It is not: handing the image over as a
+     * depth attachment instead — measured, with the effects off so that nothing
+     * samples it and the claim was true — left the card's time on the world
+     * unchanged to three decimal places. The cost is the hand-over, not the
+     * compression.
+     */
     private static int glSharedDepthLayout() {
         return SHARED_DEPTH_WANTED || !SHARED_SEMAPHORES
                 ? EXTSemaphore.GL_LAYOUT_GENERAL_EXT
