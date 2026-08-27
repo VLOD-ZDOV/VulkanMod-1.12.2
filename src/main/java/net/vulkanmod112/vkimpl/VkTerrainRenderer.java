@@ -6730,7 +6730,6 @@ final class VkTerrainRenderer {
         if (baseReady) {
             return;
         }
-        VertexLayout.checkAgainstRayTracing(ctx.isRayTracingEnabled() && ctx.isRayQuerySupported());
         LOGGER.info("{}", VertexLayout.describe());
         try (MemoryStack stack = stackPush()) {
             VkCommandPoolCreateInfo poolInfo = VkCommandPoolCreateInfo.calloc(stack)

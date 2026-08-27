@@ -97,14 +97,9 @@ public final class VertexLayout {
      * before the first line of the mod runs.
      */
     private static final boolean COMPACT =
-            Boolean.getBoolean("vulkanmod112.compactVertices")
-                    && !Boolean.getBoolean("vulkanmod112.rayTracing");
+            Boolean.getBoolean("vulkanmod112.compactVertices");
 
-    private static String reason = COMPACT ? "packed to 16 bytes"
-            : Boolean.getBoolean("vulkanmod112.compactVertices")
-                    ? "kept at 28 bytes: the acceleration structures read the same buffer as"
-                            + " float positions"
-                    : "kept at 28 bytes";
+    private static String reason = COMPACT ? "packed to 16 bytes" : "kept at 28 bytes";
     private static int atlasPixels;
     private static boolean atlasWarned;
 
@@ -137,21 +132,7 @@ public final class VertexLayout {
         return COMPACT;
     }
 
-    /**
-     * Says so if ray tracing came on through the settings file rather than the
-     * command line, which is the one way the two can still meet: the layout was
-     * settled before anything could ask the renderer what it supports, and by
-     * then chunks are already in the buffer in that layout.
-     */
-    static void checkAgainstRayTracing(boolean tracing) {
-        if (COMPACT && tracing) {
-            org.apache.logging.log4j.LogManager.getLogger("VulkanMod112/Terrain").error(
-                    "Ray tracing is on and chunk vertices are packed to 16 bytes. The"
-                            + " acceleration structures read that buffer as float positions and"
-                            + " will trace against nonsense. Start with -Dvulkanmod112.rayTracing"
-                            + "=true to have the packing stand aside, or turn the packing off.");
-        }
-    }
+
 
     /** One line for the log, at the moment the choice is made. */
     static String describe() {

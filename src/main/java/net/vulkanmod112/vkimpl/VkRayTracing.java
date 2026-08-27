@@ -78,7 +78,27 @@ final class VkRayTracing {
     private static final Logger LOGGER = LogManager.getLogger("VulkanMod112/RayTracing");
 
     /** Vertex stride of the mirrored chunk geometry, positions first. */
+    /**
+     * Creature geometry, which is captured whole and never packed.
+     *
+     * Chunk geometry may be either this or {@link VertexLayout#COMPACT_STRIDE},
+     * and the two live in different buffers, so each structure is told which
+     * of the two it is reading.
+     */
     private static final int VERTEX_STRIDE = 28;
+
+    /**
+     * What one unit of a packed position is worth once the card has normalised
+     * it.
+     *
+     * Acceleration structures take a short list of vertex formats and a signed
+     * integer is not on it; the nearest that is, {@code R16G16B16A16_SNORM},
+     * divides by 32 767 on the way in. The packed position counts 2048 units to
+     * a block, so multiplying by this undoes both at once and lands on exactly
+     * the number the vertex shader works out for itself — the structures and
+     * the drawn world stay one calculation apart rather than two.
+     */
+    private static final float PACKED_TO_BLOCKS = 32767.0f / VertexLayout.POSITION_SCALE;
 
     private final VulkanContextImpl ctx;
 
@@ -167,6 +187,12 @@ final class VkRayTracing {
         float y;
         float z;
         long touchedFrame;
+        /**
+         * Whether the geometry this was built from is the packed sixteen-byte
+         * vertex. Chunks follow whatever the layout settled on; creatures are
+         * captured as the game draws them and are always the wide one.
+         */
+        boolean packed;
         /** See {@link #KIND_SOLID}: what a ray is allowed to see through. */
         int kind;
     }
@@ -271,7 +297,8 @@ final class VkRayTracing {
 
         for (int c = 0; c < chunkCount && live.size() < maxStructures; c++) {
             VkChunkMirror.Entry entry = entries[c];
-            if (entry == null || entry.size < VERTEX_STRIDE || entry.size % VERTEX_STRIDE != 0) {
+            int chunkStride = VertexLayout.stride();
+            if (entry == null || entry.size < chunkStride || entry.size % chunkStride != 0) {
                 continue;
             }
             double dx = chunks[c * 4 + 1] - viewX;
@@ -290,6 +317,7 @@ final class VkRayTracing {
             blas.y = (float) dy;
             blas.z = (float) dz;
             blas.touchedFrame = frameIndex;
+            blas.packed = VertexLayout.isCompact();
             blas.kind = c < solidCount ? KIND_SOLID
                     : (c < foliageEnd ? KIND_FOLIAGE : KIND_CUTOUT);
             live.add(blas);
@@ -340,6 +368,7 @@ final class VkRayTracing {
             creatureBlas.kind = KIND_CREATURE;
             creatureBlas.sourceOffset = creatureOffset;
             creatureBlas.sourceSize = creatureVertices * VERTEX_STRIDE;
+            creatureBlas.packed = false;
             live.add(creatureBlas);
         }
 
@@ -400,7 +429,8 @@ final class VkRayTracing {
     private static final int KEEP_FRAMES = 300;
 
     private void buildOne(MemoryStack stack, Blas blas, long geometryAddress) {
-        int vertexCount = blas.sourceSize / VERTEX_STRIDE;
+        int stride = blas.packed ? VertexLayout.COMPACT_STRIDE : VERTEX_STRIDE;
+        int vertexCount = blas.sourceSize / stride;
         int triangles = vertexCount / 4 * 2;
         if (triangles <= 0) {
             return;
@@ -420,12 +450,16 @@ final class VkRayTracing {
         geometry.get(0).geometry().triangles()
                 .sType(KHRAccelerationStructure
                         .VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR)
-                .vertexFormat(VK_FORMAT_R32G32B32_SFLOAT)
+                // Packed positions come in as normalised shorts, which is a
+                // format acceleration structures accept; the scale that undoes
+                // the normalising rides in the instance transform.
+                .vertexFormat(blas.packed
+                        ? VK_FORMAT_R16G16B16A16_SNORM : VK_FORMAT_R32G32B32_SFLOAT)
                 // Offset into the shared buffer rather than a firstVertex on
                 // the build range: the address can carry it, and then the
                 // indices are read exactly as the draw path reads them.
                 .vertexData(it -> it.deviceAddress(geometryAddress + blas.sourceOffset))
-                .vertexStride(VERTEX_STRIDE)
+                .vertexStride(stride)
                 .maxVertex(vertexCount - 1)
                 .indexType(VK_INDEX_TYPE_UINT32)
                 .indexData(it -> it.deviceAddress(indexAddress()));
@@ -511,19 +545,26 @@ final class VkRayTracing {
             if (blas.structure == 0 || blas.address == 0) {
                 continue;
             }
-            // A row-major 3x4: identity rotation, chunk origin in the last column.
-            MemoryUtil.memPutFloat(at, 1.0f);
+            // A row-major 3x4: a scale down the diagonal and the chunk origin
+            // in the last column. For wide geometry the scale is one and the
+            // column is the origin, which is what it always was. For packed
+            // geometry the same matrix does the unpacking: the diagonal turns a
+            // normalised short back into blocks, and the column carries the
+            // half-section the packing counts from as well as the origin.
+            float scale = blas.packed ? PACKED_TO_BLOCKS : 1.0f;
+            float shift = blas.packed ? VertexLayout.POSITION_ORIGIN : 0.0f;
+            MemoryUtil.memPutFloat(at, scale);
             MemoryUtil.memPutFloat(at + 4, 0.0f);
             MemoryUtil.memPutFloat(at + 8, 0.0f);
-            MemoryUtil.memPutFloat(at + 12, blas.x);
+            MemoryUtil.memPutFloat(at + 12, blas.x + shift);
             MemoryUtil.memPutFloat(at + 16, 0.0f);
-            MemoryUtil.memPutFloat(at + 20, 1.0f);
+            MemoryUtil.memPutFloat(at + 20, scale);
             MemoryUtil.memPutFloat(at + 24, 0.0f);
-            MemoryUtil.memPutFloat(at + 28, blas.y);
+            MemoryUtil.memPutFloat(at + 28, blas.y + shift);
             MemoryUtil.memPutFloat(at + 32, 0.0f);
             MemoryUtil.memPutFloat(at + 36, 0.0f);
-            MemoryUtil.memPutFloat(at + 40, 1.0f);
-            MemoryUtil.memPutFloat(at + 44, blas.z);
+            MemoryUtil.memPutFloat(at + 40, scale);
+            MemoryUtil.memPutFloat(at + 44, blas.z + shift);
             // instanceCustomIndex 24 bits, mask 8 bits: visible to every ray.
             // The low bits carry what this structure is made of, which is how
             // the shader knows whether it may see through what it just hit.

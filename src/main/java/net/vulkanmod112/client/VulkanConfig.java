@@ -827,8 +827,9 @@ public final class VulkanConfig {
                         + "to 0.42 and the route from 521 frames a second to 547, and the geometry "
                         + "buffer from 428 MiB of video memory to 240. The memory is the larger "
                         + "half of that and it is what decides whether a long render distance fits "
-                        + "at all. Takes effect on the next start, and stands aside while ray "
-                        + "tracing is on because the acceleration structures read the same buffer.");
+                        + "at all. Takes effect on the next start. Ray tracing works with it: "
+                        + "the acceleration structures read the packed positions through the "
+                        + "matrix that unpacks them.");
         // The command line wins, so the two arms of a comparison differ by one
         // word on it rather than by an edit to the config between runs.
         String shortSectionsPin = System.getProperty("vulkanmod112.shortEntitySections");

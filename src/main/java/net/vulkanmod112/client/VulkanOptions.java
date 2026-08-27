@@ -715,10 +715,7 @@ final class VulkanOptions {
                                         + "world's geometry, and how much of it fits is what "
                                         + "decides whether a long render distance is possible at "
                                         + "all. Takes effect the next time the game starts.",
-                                Cost.of(Level.NONE, Level.NONE, Level.NONE),
-                                "Stands aside while ray tracing is on: the acceleration "
-                                        + "structures read the same buffer and expect the wide "
-                                        + "layout.",
+                                Cost.of(Level.NONE, Level.NONE, Level.NONE), null,
                                 new VSwitchOption.Access() {
                                     @Override
                                     public boolean get() {
