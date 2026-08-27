@@ -538,14 +538,15 @@ public final class Diagnostics {
         out.println("  " + VanillaFrame.entitySectionStats());
         out.println("  " + VanillaFrame.layerSectionStats());
         out.println("  " + VanillaFrame.rebuildNearStats());
-        // The two settings currently under A/B. Without them in the snapshot a
-        // run has to be matched to a configuration by memory, and the last two
-        // comparisons both turned on which of the two arms a number came from.
-        out.println(String.format(
-                "  under test: frames in flight %d, own visibility walk %s, rebuild filter %s",
-                VulkanConfig.getFramesInFlight(),
-                VulkanConfig.isOwnVisibilityWalk() ? "on" : "off",
-                VulkanConfig.isFastRebuildNear() ? "on" : "off"));
+        // What this run was actually configured as. Without it a number has to
+        // be matched to a configuration from memory, and the last two
+        // comparisons both turned on which arm a number came from.
+        //
+        // Asked of the settings rather than listed here. The list that used to
+        // stand in this place named three settings that had stopped being under
+        // test, and named neither of the two that were.
+        out.println("  " + VulkanConfig.nonDefaultSettings());
+        out.println("  " + VulkanConfig.launchFlags());
         out.println("  " + DynamicLights.stats());
         out.println("  " + WeatherHooks.stats());
         out.println("  " + ExplosionParticles.stats());

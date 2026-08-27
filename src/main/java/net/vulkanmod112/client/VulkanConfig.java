@@ -221,9 +221,10 @@ public final class VulkanConfig {
     /**
      * Stop filling the game's own chunk buffers once Vulkan holds the geometry.
      *
-     * The world is currently stored twice in video memory — once in the game's
-     * OpenGL buffers and once in the mirror this renderer draws from — and this
-     * is what removes the first copy. It also takes the second of the two
+     * Without this the world is stored twice in video memory — once in the
+     * game's OpenGL buffers and once in the mirror this renderer draws from —
+     * and this is what removes the first copy. It is on by default, so the
+     * second copy is what a session normally has. It also takes the second of the two
      * uploads out of the per-frame budget vanilla reserves for them, which is
      * the one place chunk loading is actually gated.
      *
@@ -2867,5 +2868,75 @@ public final class VulkanConfig {
         if (config != null && config.hasChanged()) {
             config.save();
         }
+    }
+
+    /**
+     * Every setting that is not where it was left by default, for the snapshot.
+     *
+     * A hand-written list of "the settings currently under test" used to stand
+     * here instead, and it named three things that had stopped being under test
+     * some time ago while the two arms actually being compared were absent. A
+     * run then cannot be matched to a configuration at all, which is the one
+     * job the line has — and the failure is silent, because a missing line and
+     * a setting at its default look the same in the report.
+     *
+     * Asked of the settings themselves, so it cannot go out of date: whatever
+     * anybody puts under test next is in here the moment they change it, and
+     * nothing has to be remembered.
+     */
+    public static String nonDefaultSettings() {
+        if (config == null) {
+            return "settings: not loaded";
+        }
+        StringBuilder sb = new StringBuilder();
+        try {
+            for (String category : config.getCategoryNames()) {
+                for (net.minecraftforge.common.config.Property property
+                        : config.getCategory(category).getOrderedValues()) {
+                    if (property.isDefault()) {
+                        continue;
+                    }
+                    if (sb.length() > 0) {
+                        sb.append(", ");
+                    }
+                    sb.append(property.getName()).append('=').append(property.getString())
+                            .append(" (default ").append(property.getDefault()).append(')');
+                }
+            }
+        } catch (Throwable t) {
+            return "settings: could not be read (" + t + ")";
+        }
+        return sb.length() == 0 ? "settings: all at default" : "settings not at default: " + sb;
+    }
+
+    /**
+     * The launch flags this session was given, which the settings file does not
+     * know about.
+     *
+     * The other half of the same question. An A/B arm that lives only in a
+     * {@code -D} flag — and the newest ones always do, because that is how an
+     * experiment starts here — leaves no trace anywhere else in the report.
+     */
+    public static String launchFlags() {
+        StringBuilder sb = new StringBuilder();
+        try {
+            java.util.List<String> names = new java.util.ArrayList<String>();
+            for (String name : System.getProperties().stringPropertyNames()) {
+                if (name.startsWith("vulkanmod112.")) {
+                    names.add(name);
+                }
+            }
+            java.util.Collections.sort(names);
+            for (String name : names) {
+                if (sb.length() > 0) {
+                    sb.append(", ");
+                }
+                sb.append(name.substring("vulkanmod112.".length()))
+                        .append('=').append(System.getProperty(name));
+            }
+        } catch (Throwable t) {
+            return "launch flags: could not be read (" + t + ")";
+        }
+        return sb.length() == 0 ? "launch flags: none" : "launch flags: " + sb;
     }
 }
