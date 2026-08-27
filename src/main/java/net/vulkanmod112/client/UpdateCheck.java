@@ -56,6 +56,20 @@ public final class UpdateCheck {
             "https://api.cfwidget.com/minecraft/mc-mods/vulkanmod-legacy";
     private static final String GITHUB =
             "https://api.github.com/repos/VLOD-ZDOV/VulkanMod-1.12.2/releases/latest";
+    /**
+     * Every release, pre-releases included, and asked only by somebody already
+     * running one.
+     *
+     * {@code /releases/latest} leaves pre-releases out, which is exactly what
+     * it is for: nobody on a finished version should be pulled onto an alpha by
+     * a check they did not ask for. But it means an alpha is a dead end in the
+     * other direction too — the people running the build that exists to be
+     * reported against are the only ones who never hear that a newer one is out
+     * to report against instead. So a pre-release asks the full list as well,
+     * and a finished version does not.
+     */
+    private static final String GITHUB_ALL =
+            "https://api.github.com/repos/VLOD-ZDOV/VulkanMod-1.12.2/releases";
 
     /**
      * The file this mod ships as, which is also how a version is recognised in
@@ -66,9 +80,11 @@ public final class UpdateCheck {
      * ever changed what the file is called, so this survives a redesign at the
      * other end that a field name would not.
      */
-    private static final Pattern FILE = Pattern.compile("vulkanmod112-(\\d+(?:\\.\\d+)*)");
+    private static final Pattern FILE = Pattern.compile(
+            "vulkanmod112-(\\d+(?:\\.\\d+)*(?:-[0-9A-Za-z]+(?:\\.\\d+)*)?)");
     /** GitHub names the release rather than the file, so it is asked its way. */
-    private static final Pattern TAG = Pattern.compile("\"tag_name\"\\s*:\\s*\"v?(\\d+(?:\\.\\d+)*)");
+    private static final Pattern TAG = Pattern.compile(
+            "\"tag_name\"\\s*:\\s*\"v?(\\d+(?:\\.\\d+)*(?:-[0-9A-Za-z]+(?:\\.\\d+)*)?)");
 
     private static final int TIMEOUT_MILLIS = 4000;
     /** Enough for either answer; a service that sends more is not sending this. */
@@ -114,7 +130,7 @@ public final class UpdateCheck {
 
     private static void look() {
         String published = ask(CURSEFORGE, FILE);
-        String tagged = ask(GITHUB, TAG);
+        String tagged = ask(leadsTo(Tags.VERSION) ? GITHUB_ALL : GITHUB, TAG);
         String found = published;
         if (found == null || (tagged != null && isNewer(tagged, found))) {
             found = tagged;
@@ -194,22 +210,105 @@ public final class UpdateCheck {
      * telling everybody they were up to date exactly when they stopped being.
      */
     static boolean isNewer(String candidate, String current) {
+        // The three numbers first, and only the three numbers: a suffix has to
+        // be cut off before the split, or the dot inside "alpha.2" becomes a
+        // fourth number and 0.10.0 stops being above 0.10.0-alpha.2. That is
+        // the exact shape of a trap this comparison has already fallen into
+        // once, from the other side.
+        int order = compareNumbers(numbersOf(candidate), numbersOf(current));
+        if (order != 0) {
+            return order > 0;
+        }
+        String leftSuffix = suffixOf(candidate);
+        String rightSuffix = suffixOf(current);
+        if (leftSuffix.isEmpty() || rightSuffix.isEmpty()) {
+            // The numbers agree, so what separates them is whether one is a
+            // build published on the way to that version rather than as it:
+            // 0.10.0 is above 0.10.0-alpha, and nothing is above 0.10.0 itself.
+            // Without this an alpha is a dead end — it exists to be reported
+            // against, and the release those reports go into never reaches
+            // anybody running it.
+            return !leftSuffix.isEmpty() ? false : !rightSuffix.isEmpty();
+        }
+        // Both are on the way to the same version, so they are ordered against
+        // each other the way the suffixes read: alpha before alpha.2 before
+        // beta. Numbers as numbers, words as words, and a longer suffix above
+        // the prefix it extends.
+        return compareSuffixes(leftSuffix, rightSuffix) > 0;
+    }
+
+    /** The leading digits-and-dots, which is the version the suffix leads to. */
+    private static String numbersOf(String version) {
+        int cut = 0;
+        while (cut < version.length()
+                && (version.charAt(cut) == '.' || Character.isDigit(version.charAt(cut)))) {
+            cut++;
+        }
+        return version.substring(0, cut);
+    }
+
+    /** Everything after those numbers, with any separator dropped. */
+    private static String suffixOf(String version) {
+        String numbers = numbersOf(version);
+        String rest = version.substring(numbers.length());
+        return rest.startsWith("-") || rest.startsWith("+") ? rest.substring(1) : rest;
+    }
+
+    private static int compareNumbers(String candidate, String current) {
         String[] left = candidate.split("\\.");
         String[] right = current.split("\\.");
         for (int i = 0; i < Math.max(left.length, right.length); i++) {
             int a = part(left, i);
             int b = part(right, i);
             if (a != b) {
-                return a > b;
+                return a > b ? 1 : -1;
             }
         }
-        // The numbers agree, so the only thing left to separate them is whether
-        // one of them is a build published before that version rather than as
-        // it: 0.10.0 is above 0.10.0-alpha, and nothing is above 0.10.0 itself.
-        // Without this an alpha is a dead end. It is published to be reported
-        // against, and the release those reports go into never reaches anybody
-        // running it, because their version already has the same three numbers.
-        return leadsTo(current) && !leadsTo(candidate);
+        return 0;
+    }
+
+    private static int compareSuffixes(String candidate, String current) {
+        String[] left = candidate.split("\\.");
+        String[] right = current.split("\\.");
+        for (int i = 0; i < Math.max(left.length, right.length); i++) {
+            if (i >= left.length) {
+                return -1;
+            }
+            if (i >= right.length) {
+                return 1;
+            }
+            boolean leftNumber = isNumber(left[i]);
+            boolean rightNumber = isNumber(right[i]);
+            if (leftNumber && rightNumber) {
+                int a = Integer.parseInt(left[i]);
+                int b = Integer.parseInt(right[i]);
+                if (a != b) {
+                    return a > b ? 1 : -1;
+                }
+            } else if (leftNumber != rightNumber) {
+                // A word outranks a number, the way every scheme that has
+                // thought about it orders them: alpha.2 is on the way to beta.
+                return leftNumber ? -1 : 1;
+            } else {
+                int order = left[i].compareTo(right[i]);
+                if (order != 0) {
+                    return order > 0 ? 1 : -1;
+                }
+            }
+        }
+        return 0;
+    }
+
+    private static boolean isNumber(String part) {
+        if (part.isEmpty()) {
+            return false;
+        }
+        for (int i = 0; i < part.length(); i++) {
+            if (!Character.isDigit(part.charAt(i))) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**

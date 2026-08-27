@@ -49,4 +49,38 @@ class UpdateCheckTest {
         assertFalse(UpdateCheck.isNewer("0.9.0", "0.10.0-alpha"));
         assertTrue(UpdateCheck.isNewer("0.10.1-rc1", "0.10.0"));
     }
+
+    /**
+     * The second alpha is above the first, and the release is above both.
+     *
+     * The middle of those three is what the comparison got wrong before this
+     * test existed: splitting the whole string on dots turned the "2" of
+     * "alpha.2" into a fourth number, and a fourth number beat the absence of
+     * one — so 0.10.0 stopped being above the alpha that was leading to it, and
+     * every alpha after the first became the dead end the first one had been.
+     */
+    @Test
+    void alphasAreOrderedAmongThemselves() {
+        assertTrue(UpdateCheck.isNewer("0.10.0-alpha.2", "0.10.0-alpha"));
+        assertFalse(UpdateCheck.isNewer("0.10.0-alpha", "0.10.0-alpha.2"));
+        assertTrue(UpdateCheck.isNewer("0.10.0", "0.10.0-alpha.2"));
+        assertFalse(UpdateCheck.isNewer("0.10.0-alpha.2", "0.10.0"));
+        assertFalse(UpdateCheck.isNewer("0.10.0-alpha.2", "0.10.0-alpha.2"));
+    }
+
+    /** A word is on the way to the version later than a number is. */
+    @Test
+    void betaIsAboveAlpha() {
+        assertTrue(UpdateCheck.isNewer("0.10.0-beta", "0.10.0-alpha.9"));
+        assertFalse(UpdateCheck.isNewer("0.10.0-alpha.9", "0.10.0-beta"));
+        assertTrue(UpdateCheck.isNewer("0.10.0-beta.2", "0.10.0-beta"));
+    }
+
+    /** A suffix on one version never outranks a higher set of numbers. */
+    @Test
+    void theNumbersStillDecideFirst() {
+        assertTrue(UpdateCheck.isNewer("0.11.0-alpha", "0.10.0"));
+        assertFalse(UpdateCheck.isNewer("0.10.0", "0.11.0-alpha"));
+        assertTrue(UpdateCheck.isNewer("0.10.0-alpha", "0.9.9"));
+    }
 }
