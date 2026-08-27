@@ -47,8 +47,6 @@ import static org.lwjgl.vulkan.VK10.*;
 final class VkChunkMirror {
 
     private static final Logger LOGGER = LogManager.getLogger("VulkanMod112/ChunkMirror");
-    /** Vanilla's VboRenderList uses pos3f|color4ub|uv2f|light2s. */
-    private static final int BLOCK_VERTEX_STRIDE = 28;
 
     /**
      * A chunk's slice of the shared geometry buffer. Nothing else: uploads go
@@ -542,10 +540,14 @@ final class VkChunkMirror {
      * one missed optimisation and never correctness.
      */
     boolean stageFromWorker(int slot, ByteBuffer data) {
-        int size = data.remaining();
-        if (size <= 0 || slot < 0) {
+        int sourceSize = data.remaining();
+        if (sourceSize <= 0 || slot < 0) {
             return false;
         }
+        // What it will occupy once packed, which is what everything downstream
+        // measures: the range reserved here, the staged record, and the copy
+        // the render thread queues out of it.
+        int size = VertexLayout.packedSize(sourceSize);
         long aligned = (size + 15L) & ~15L;
         long offset;
         int epoch;
@@ -564,7 +566,7 @@ final class VkChunkMirror {
         boolean copied = false;
         boolean published = false;
         try {
-            MemoryUtil.memCopy(MemoryUtil.memAddress(data), mapped + offset, size);
+            VertexLayout.copy(MemoryUtil.memAddress(data), mapped + offset, sourceSize);
             copied = true;
         } finally {
             // No return from here: the in-flight count has to be given back
@@ -715,7 +717,8 @@ final class VkChunkMirror {
 
     synchronized void upload(int slot, ByteBuffer data) {
         checkStampingThread("A chunk upload");
-        int size = data.remaining();
+        int sourceSize = data.remaining();
+        int size = VertexLayout.packedSize(sourceSize);
         Entry entry = entries.get(slot);
         if (entry != null && entry.capacity < size) {
             retired.add(new Retired(entry, frameStamp));
@@ -739,7 +742,7 @@ final class VkChunkMirror {
             ensureMaterialBuffer();
         }
         if (size > 0) {
-            int vertexCount = size / BLOCK_VERTEX_STRIDE;
+            int vertexCount = size / VertexLayout.stride();
             // Nothing said about this slot means leave the materials alone: the
             // upload is the game re-sorting a translucent layer it did not
             // rebuild, and what is in the buffer already describes these very
@@ -760,7 +763,8 @@ final class VkChunkMirror {
                 long range = allocateStagingRange(size + (materials ? vertexCount : 0));
                 src = range;
                 materialSrc = range + size;
-                MemoryUtil.memCopy(MemoryUtil.memAddress(data), stagingMappedAddress + src, size);
+                VertexLayout.copy(MemoryUtil.memAddress(data), stagingMappedAddress + src,
+                        sourceSize);
             } else if (materials) {
                 // The geometry is already in the ring's builder region, which
                 // this cannot disturb: it only ever rewinds the render thread's
@@ -770,7 +774,7 @@ final class VkChunkMirror {
             queueCopy(src, entry.offset, size);
             if (materials) {
                 writeMaterials(slot, vertexCount, stagingMappedAddress + materialSrc);
-                queueMaterialCopy(materialSrc, entry.offset / BLOCK_VERTEX_STRIDE, vertexCount);
+                queueMaterialCopy(materialSrc, entry.offset / VertexLayout.stride(), vertexCount);
             } else if (materialBuffer != 0) {
                 materialsKept++;
             }
@@ -1384,8 +1388,8 @@ final class VkChunkMirror {
     }
 
     private static int alignVertexCapacity(int capacity) {
-        int remainder = capacity % BLOCK_VERTEX_STRIDE;
-        return remainder == 0 ? capacity : capacity + BLOCK_VERTEX_STRIDE - remainder;
+        int remainder = capacity % VertexLayout.stride();
+        return remainder == 0 ? capacity : capacity + VertexLayout.stride() - remainder;
     }
 
     /**
@@ -1564,7 +1568,7 @@ final class VkChunkMirror {
      * name it.
      */
     private void ensureMaterialBuffer() {
-        long required = geometryCapacity / BLOCK_VERTEX_STRIDE;
+        long required = geometryCapacity / VertexLayout.stride();
         // vkCmdFillBuffer works in whole words, and a buffer sized to a
         // multiple of four is the simplest way to be allowed to fill all of it.
         required = (required + 3L) & ~3L;
@@ -1584,7 +1588,7 @@ final class VkChunkMirror {
         // an older geometry capacity — so after the geometry has grown and the
         // materials have not yet, the first number is past the end of the
         // second. Copying that much reads off the end of a buffer on the card.
-        long keep = oldBuffer == 0 ? 0L : (nextGeometryOffset / BLOCK_VERTEX_STRIDE) & ~3L;
+        long keep = oldBuffer == 0 ? 0L : (nextGeometryOffset / VertexLayout.stride()) & ~3L;
         keep = Math.min(keep, materialCapacity);
         try (MemoryStack stack = stackPush()) {
             VkBufferCreateInfo info = VkBufferCreateInfo.calloc(stack)

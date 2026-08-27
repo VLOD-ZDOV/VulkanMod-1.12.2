@@ -34,14 +34,33 @@ layout(push_constant) uniform Draw {
     vec4 params; // x = alpha cutoff
 } draw;
 
+#ifdef COMPACT_VERTEX
+// The packed vertex: sixteen bytes where vanilla's is twenty-eight.
+//
+//   xyz  the position, signed sixteen-bit at 1/2048 of a block, measured from
+//        the middle of the section rather than its corner so the sixteen
+//        blocks of headroom fall evenly on both sides of it.
+//   w    both lightmap coordinates, one byte each. The game writes them as
+//        shorts and never above 240, so a byte holds them exactly rather
+//        than rounding them.
+//
+// Taken as integers rather than as a normalised float, because w is two
+// numbers side by side and normalising would fold them into one.
+layout(location = 0) in ivec4 inPacked;
+layout(location = 1) in vec4 inColor;
+// Sixteen-bit and normalised. Vanilla's are already atlas coordinates in
+// zero to one, so this arrives as the same number it always was.
+layout(location = 2) in vec2 inUV;
+#else
 layout(location = 0) in vec3 inPos;
 layout(location = 1) in vec4 inColor;
 layout(location = 2) in vec2 inUV;
 layout(location = 3) in vec2 inLight;
+#endif
 // What this vertex is made of: 0 plain, 1 water, 2 foliage, 3 glass, 4 lava.
-// Its own buffer, one byte a vertex, because the game's vertex is 28 bytes
-// mirrored unchanged and there is nowhere in it to put this. Meaningless
-// unless frame.frameInfo.z says the buffer is really there.
+// Its own buffer, one byte a vertex, because there is nowhere in the vertex
+// itself to put it — vanilla's is mirrored unchanged and the packed one is
+// full. Meaningless unless frame.frameInfo.z says the buffer is really there.
 layout(location = 4) in uint inMaterial;
 
 layout(set = 0, binding = 2, std430) readonly buffer ChunkOffsets { vec4 origins[]; } chunkOffsets;
@@ -143,6 +162,13 @@ float swayVisible(vec3 relative, float reach) {
 }
 
 void main() {
+#ifdef COMPACT_VERTEX
+    // Unpacked once, into names the rest of this shader already uses, so the
+    // two builds differ here and nowhere else.
+    vec3 inPos = vec3(inPacked.xyz) * (1.0 / 2048.0) + 8.0;
+    uint packedLight = uint(inPacked.w) & 0xFFFFu;
+    vec2 inLight = vec2(float(packedLight >> 8u), float(packedLight & 0xFFu));
+#endif
     // Every indirect command has exactly one instance; firstInstance is the
     // index of this chunk's camera-relative origin in the storage buffer.
     // That origin is already relative to the camera, so the sum below is the

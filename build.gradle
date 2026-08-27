@@ -214,19 +214,27 @@ tasks.register('compileShaders') {
         // version line into a copy, so there is no second shader to keep in
         // step with the first.
         def rayQueryVariants = ['terrain.frag']
-        def build = { File source, File spv, boolean rayQuery ->
+        // The same trick for a second axis: a build of the vertex shader that
+        // reads the packed sixteen-byte vertex instead of vanilla's
+        // twenty-eight. One source, two modules, because the two disagree about
+        // what the vertex inputs *are* and a pipeline must be handed the build
+        // that matches the buffer it will read.
+        def compactVariants = ['terrain.vert']
+        def build = { File source, File spv, String define, boolean rayQuery ->
             def input = source
-            if (rayQuery) {
-                // Two edits to a copy: the define that switches the tracing
-                // code on, and the language version. Ray query is specified
-                // against GLSL 4.60 and the compiler will not take it below
-                // that; the ordinary build stays where it was, so nothing
-                // about the shader every card runs changes here.
+            if (define != null) {
+                // Edits to a copy rather than a second file: the define that
+                // switches the code on, and for ray query the language version
+                // too. Ray query is specified against GLSL 4.60 and the
+                // compiler will not take it below that; every other variant
+                // keeps the version its source declares, so nothing about the
+                // shader every card runs changes here.
                 def text = source.text
                 def marker = text.indexOf('\n', text.indexOf('#version'))
-                input = new File(temporaryDir, source.name)
+                def head = rayQuery ? '#version 460\n' : text.substring(0, marker + 1)
+                input = new File(temporaryDir, (rayQuery ? 'rt_' : 'cv_') + source.name)
                 input.parentFile.mkdirs()
-                input.text = '#version 460\n#define RAY_QUERY 1\n' + text.substring(marker + 1)
+                input.text = head + '#define ' + define + ' 1\n' + text.substring(marker + 1)
             }
             // Ray query needs SPIR-V 1.4, and that needs a 1.2 target. The
             // ordinary variants stay on 1.1 so nothing about them changes for
@@ -262,17 +270,21 @@ tasks.register('compileShaders') {
             }
             logger.lifecycle "Compiled shader ${spv.name}"
         }
-        sources.each { source ->
-            def spv = new File(source.parentFile, "${source.name}.spv")
+        def variant = { File source, String suffix, String define, boolean rayQuery ->
+            def name = suffix == null ? source.name
+                    : source.name.replaceFirst(/\.(vert|frag|comp)$/, suffix + '.$1')
+            def spv = new File(source.parentFile, "${name}.spv")
             if (!spv.exists() || spv.lastModified() < source.lastModified()) {
-                build(source, spv, false)
+                build(source, spv, define, rayQuery)
             }
+        }
+        sources.each { source ->
+            variant(source, null, null, false)
             if (rayQueryVariants.contains(source.name)) {
-                def rtName = source.name.replaceFirst(/\.(vert|frag|comp)$/, '_rt.$1')
-                def rtSpv = new File(source.parentFile, "${rtName}.spv")
-                if (!rtSpv.exists() || rtSpv.lastModified() < source.lastModified()) {
-                    build(source, rtSpv, true)
-                }
+                variant(source, '_rt', 'RAY_QUERY', true)
+            }
+            if (compactVariants.contains(source.name)) {
+                variant(source, '_compact', 'COMPACT_VERTEX', false)
             }
         }
     }
@@ -552,6 +564,14 @@ tasks.matching { it.name in ['runClient', 'runObfClient'] }.configureEach {
     }
     if (project.hasProperty('skipGlErrorCheck')) {
         jvmArgs '-Dvulkanmod112.skipGlErrorCheck=true'
+    }
+    // -PcompactVertices packs a chunk vertex into sixteen bytes instead of
+    // vanilla's twenty-eight. The terrain pass was measured at 0.048 ms per
+    // million vertices and flat in pixels, so this is the one thing left that
+    // it is actually waiting for. Off unless asked, and it changes the vertex
+    // shader that is loaded as well as the buffer that is written.
+    if (project.hasProperty('compactVertices')) {
+        jvmArgs '-Dvulkanmod112.compactVertices=true'
     }
     // -PdumpLang writes logs/vulkanmod112-en_us.lang from the settings screen
     // as it is actually built, which is where the English language file comes

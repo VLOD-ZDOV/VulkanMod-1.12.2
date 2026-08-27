@@ -107,7 +107,6 @@ import static org.lwjgl.vulkan.VK11.VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_
 final class VkTerrainRenderer {
 
     private static final Logger LOGGER = LogManager.getLogger("VulkanMod112/Terrain");
-    private static final int BLOCK_VERTEX_STRIDE = 28;
     private static final int LIGHTMAP_SIZE = 16;
     private static final int INITIAL_INDIRECT_DRAWS = 4096;
     /**
@@ -1596,6 +1595,7 @@ final class VkTerrainRenderer {
             }
         }
         updateDescriptors();
+        VertexLayout.noteAtlas(Math.max(atlasWidth, atlasHeight));
         LOGGER.info("Block atlas copied to Vulkan: {}x{}, {} mip level(s)",
                 atlasWidth, atlasHeight, atlasLevels);
     }
@@ -2206,6 +2206,7 @@ final class VkTerrainRenderer {
                 .append(", depth blit ").append(depthBlit ? "on" : "off")
                 .append(", atlas ").append(atlasWidth).append('x').append(atlasHeight)
                 .append(" (").append(atlasLevels).append(" mips)\n");
+        sb.append("  ").append(VertexLayout.stats()).append('\n');
         sb.append("  frame cost: fence wait ")
                 .append(String.format("%.2f", fenceWaitNanos / (double) Math.max(1, timingSamples()) / 1e6))
                 .append(" ms, record ")
@@ -2507,7 +2508,7 @@ final class VkTerrainRenderer {
             // This slot's fence covers frame N-2; everything up to it is done
             mirror.setFrameStamp(frameCounter);
             mirror.flushRetired(frameCounter - framesInFlight);
-            ensureQuadIndexCapacity(mirror.maxEntrySize() / BLOCK_VERTEX_STRIDE / 4);
+            ensureQuadIndexCapacity(mirror.maxEntrySize() / VertexLayout.stride() / 4);
             firstFrameStage("recording draw commands");
             frameChunks = 0;
             frameVertices = 0;
@@ -2678,12 +2679,12 @@ final class VkTerrainRenderer {
             }
             for (int c = 0; c < chunkCount; c++) {
                 VkChunkMirror.Entry entry = lookupScratch[c];
-                if (entry == null || entry.size < BLOCK_VERTEX_STRIDE
-                        || entry.size % BLOCK_VERTEX_STRIDE != 0) {
+                if (entry == null || entry.size < VertexLayout.stride()
+                        || entry.size % VertexLayout.stride() != 0) {
                     frameSkipped++;
                     continue;
                 }
-                int vertexCount = entry.size / BLOCK_VERTEX_STRIDE;
+                int vertexCount = entry.size / VertexLayout.stride();
                 if (vertexCount / 4 > quadIndexCapacityQuads) {
                     frameSkipped++;
                     continue; // grew mid-frame; drawable next frame
@@ -2707,7 +2708,7 @@ final class VkTerrainRenderer {
                 // one, so the offset is not always a multiple of four and the
                 // low two bits cannot simply be masked off. Handing them over
                 // costs a float that was being written as zero anyway.
-                int baseVertex = (int) (entry.offset / BLOCK_VERTEX_STRIDE);
+                int baseVertex = (int) (entry.offset / VertexLayout.stride());
                 MemoryUtil.memPutFloat(origin + 12, baseVertex & 3);
                 if (logInputs) {
                     logInputs = false;
@@ -2721,7 +2722,7 @@ final class VkTerrainRenderer {
                 MemoryUtil.memPutInt(command, vertexCount / 4 * 6);
                 MemoryUtil.memPutInt(command + 4, 1);
                 MemoryUtil.memPutInt(command + 8, 0);
-                MemoryUtil.memPutInt(command + 12, (int) (entry.offset / BLOCK_VERTEX_STRIDE));
+                MemoryUtil.memPutInt(command + 12, (int) (entry.offset / VertexLayout.stride()));
                 MemoryUtil.memPutInt(command + 16, drawCount++);
             }
             if (drawCount != 0) {
@@ -2756,7 +2757,7 @@ final class VkTerrainRenderer {
         // staging copy. Uploads now pass through a shared ring that is
         // overwritten within a few hundred chunks, so there is no copy left to
         // read — and the geometry buffer is device-local.
-        sb.append(" verts=").append(entry.size / BLOCK_VERTEX_STRIDE);
+        sb.append(" verts=").append(entry.size / VertexLayout.stride());
         LOGGER.info(sb.toString());
     }
 
@@ -6729,6 +6730,8 @@ final class VkTerrainRenderer {
         if (baseReady) {
             return;
         }
+        VertexLayout.checkAgainstRayTracing(ctx.isRayTracingEnabled() && ctx.isRayQuerySupported());
+        LOGGER.info("{}", VertexLayout.describe());
         try (MemoryStack stack = stackPush()) {
             VkCommandPoolCreateInfo poolInfo = VkCommandPoolCreateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO)
@@ -8056,28 +8059,45 @@ final class VkTerrainRenderer {
     }
 
     private void createPipelineSet(MemoryStack stack, boolean rayQuery) {
-        long vertModule = createShaderModule(stack, "vulkanmod112/shaders/terrain.vert.spv");
+        long vertModule = createShaderModule(stack, VertexLayout.isCompact()
+                ? "vulkanmod112/shaders/terrain_compact.vert.spv"
+                : "vulkanmod112/shaders/terrain.vert.spv");
         long fragModule = createShaderModule(stack, rayQuery
                 ? "vulkanmod112/shaders/terrain_rt.frag.spv"
                 : "vulkanmod112/shaders/terrain.frag.spv");
 
         ByteBuffer entryPoint = stack.UTF8("main");
 
-        // Vanilla BLOCK vertex format: pos 3f | color 4ub | uv 2f | lightmap 2s = 28 bytes
+        // Either vanilla's twenty-eight bytes mirrored unchanged, or the
+        // sixteen-byte packing described in VertexLayout. The two are different
+        // enough that the vertex shader is built twice, because a shader's
+        // declared inputs have to match the attributes the pipeline supplies.
+        boolean packed = VertexLayout.isCompact();
         VkVertexInputBindingDescription.Buffer binding = VkVertexInputBindingDescription.calloc(2, stack);
-        binding.get(0).binding(0).stride(BLOCK_VERTEX_STRIDE).inputRate(VK_VERTEX_INPUT_RATE_VERTEX);
-        // One byte per vertex, in a buffer of its own. The game's vertex is 28
-        // bytes and is mirrored unchanged, so a fifth attribute cannot live in
-        // it; a second binding costs nothing here because the indirect draw's
-        // vertexOffset applies to every bound buffer, so the same per-chunk
-        // number already lands on the right materials.
+        binding.get(0).binding(0).stride(VertexLayout.stride()).inputRate(VK_VERTEX_INPUT_RATE_VERTEX);
+        // One byte per vertex, in a buffer of its own, because there is nowhere
+        // in the vertex to put it — vanilla's is mirrored unchanged and the
+        // packed one is full. A second binding costs nothing here because the
+        // indirect draw's vertexOffset applies to every bound buffer, so the
+        // same per-chunk number already lands on the right materials.
         binding.get(1).binding(1).stride(1).inputRate(VK_VERTEX_INPUT_RATE_VERTEX);
-        VkVertexInputAttributeDescription.Buffer attrs = VkVertexInputAttributeDescription.calloc(5, stack);
-        attrs.get(0).location(0).binding(0).format(VK_FORMAT_R32G32B32_SFLOAT).offset(0);
-        attrs.get(1).location(1).binding(0).format(VK_FORMAT_R8G8B8A8_UNORM).offset(12);
-        attrs.get(2).location(2).binding(0).format(VK_FORMAT_R32G32_SFLOAT).offset(16);
-        attrs.get(3).location(3).binding(0).format(VK_FORMAT_R16G16_SSCALED).offset(24);
-        attrs.get(4).location(4).binding(1).format(VK_FORMAT_R8_UINT).offset(0);
+        VkVertexInputAttributeDescription.Buffer attrs =
+                VkVertexInputAttributeDescription.calloc(packed ? 4 : 5, stack);
+        if (packed) {
+            // Position and both light values in one fetch. Signed integers
+            // rather than a normalised float: the fourth component is two
+            // numbers side by side, and normalising would fold them into one.
+            attrs.get(0).location(0).binding(0).format(VK_FORMAT_R16G16B16A16_SINT).offset(0);
+            attrs.get(1).location(1).binding(0).format(VK_FORMAT_R8G8B8A8_UNORM).offset(8);
+            attrs.get(2).location(2).binding(0).format(VK_FORMAT_R16G16_UNORM).offset(12);
+            attrs.get(3).location(4).binding(1).format(VK_FORMAT_R8_UINT).offset(0);
+        } else {
+            attrs.get(0).location(0).binding(0).format(VK_FORMAT_R32G32B32_SFLOAT).offset(0);
+            attrs.get(1).location(1).binding(0).format(VK_FORMAT_R8G8B8A8_UNORM).offset(12);
+            attrs.get(2).location(2).binding(0).format(VK_FORMAT_R32G32_SFLOAT).offset(16);
+            attrs.get(3).location(3).binding(0).format(VK_FORMAT_R16G16_SSCALED).offset(24);
+            attrs.get(4).location(4).binding(1).format(VK_FORMAT_R8_UINT).offset(0);
+        }
         VkPipelineVertexInputStateCreateInfo vertexInput = VkPipelineVertexInputStateCreateInfo.calloc(stack)
                 .sType(VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO)
                 .pVertexBindingDescriptions(binding)
