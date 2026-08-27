@@ -711,8 +711,9 @@ final class VkTerrainRenderer {
     private int glColorMemoryObject;
     private int glDepthMemoryObject;
 
-    // Composite GL programs: [0] writes gl_FragDepth, [1] colour only (depth
-    // came from the hardware blit). Index with depthBlit ? 1 : 0.
+    // Composite GL programs: [0] writes gl_FragDepth, [1] colour only — the
+    // depth is already in the game's buffer, either because the hardware copied
+    // it there or because that buffer is our image. Index with compositeVariant().
     private final int[] compositePrograms = new int[2];
     private final int[] compositeAoUniforms = new int[2];
     /**
@@ -1061,6 +1062,28 @@ final class VkTerrainRenderer {
      */
     private boolean depthBlit;
     private int glDepthBlitFbo = -1;
+    /**
+     * Whether the game's own depth attachment <em>is</em> this renderer's depth
+     * image, rather than a buffer the two copy back and forth.
+     *
+     * The frame used to move depth twice: out to the game after the opaque pass
+     * so creatures would be occluded by the world, and back again before the
+     * translucent pass so water would be occluded by the creatures. Both copies
+     * are a full screen of depth, and at eight megapixels they cost more than
+     * the terrain pass spends on a whole render distance of hills.
+     *
+     * Sharing the image removes both, and it removes the depth half of the
+     * composite with them. What it buys is paid for in ordering: two APIs now
+     * write the same image inside one frame, and the hand-over that used to be
+     * implicit in the copy has to be stated. See {@link #beginFrameDepthHandover()}.
+     *
+     * Requested with -Dvulkanmod112.sharedDepth=true, and only ever true once
+     * OpenGL has accepted the image as its own attachment and said the
+     * framebuffer is still complete.
+     */
+    private boolean depthShared;
+    private static final boolean SHARED_DEPTH_WANTED =
+            Boolean.getBoolean("vulkanmod112.sharedDepth");
     /** 0 until the first format query; see depthFormat(MemoryStack). */
     private int depthFormat;
 
@@ -1121,6 +1144,33 @@ final class VkTerrainRenderer {
     }
 
     /**
+     * The layout the shared <em>depth</em> image lives in between frames.
+     *
+     * When the game's framebuffer holds this image as its own depth attachment,
+     * OpenGL both renders into it (clear, creatures, weather) and samples it
+     * (the occlusion and motion passes read it as a texture). There is no
+     * optimal layout that is valid for both, so the one layout that is valid
+     * for everything is the honest answer.
+     *
+     * Keyed off the launch flag and never off {@link #depthShared}. The layout
+     * is an agreement between two APIs, and an agreement that depends on
+     * whether OpenGL later accepted the attachment would be made by one side
+     * before the other knew the answer. A frame in GENERAL that did not need to
+     * be costs a little compression; a frame where the two sides disagree costs
+     * the card. See [[layout-is-a-two-sided-agreement]] in the working notes.
+     */
+    private static int sharedDepthLayout() {
+        return SHARED_DEPTH_WANTED ? VK_IMAGE_LAYOUT_GENERAL : sharedLayout();
+    }
+
+    /** The same layout under the name OpenGL knows it by. */
+    private static int glSharedDepthLayout() {
+        return SHARED_DEPTH_WANTED || !SHARED_SEMAPHORES
+                ? EXTSemaphore.GL_LAYOUT_GENERAL_EXT
+                : EXTSemaphore.GL_LAYOUT_SHADER_READ_ONLY_EXT;
+    }
+
+    /**
      * The layout the shared depth image is in when OpenGL hands it back for the
      * translucent pass — which is not the one it was lent out in.
      *
@@ -1132,6 +1182,9 @@ final class VkTerrainRenderer {
      * disagreement between them would show up as anything but a dead card.
      */
     private static int depthHandoffLayout() {
+        if (SHARED_DEPTH_WANTED) {
+            return VK_IMAGE_LAYOUT_GENERAL;
+        }
         return SHARED_SEMAPHORES
                 ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
                 : VK_IMAGE_LAYOUT_GENERAL;
@@ -1139,6 +1192,9 @@ final class VkTerrainRenderer {
 
     /** The same layout under the name OpenGL knows it by. */
     private static int glDepthHandoffLayout() {
+        if (SHARED_DEPTH_WANTED) {
+            return EXTSemaphore.GL_LAYOUT_GENERAL_EXT;
+        }
         return SHARED_SEMAPHORES
                 ? EXTSemaphore.GL_LAYOUT_DEPTH_STENCIL_ATTACHMENT_EXT
                 : EXTSemaphore.GL_LAYOUT_GENERAL_EXT;
@@ -1192,8 +1248,8 @@ final class VkTerrainRenderer {
                     .sType(VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER)
                     .srcAccessMask(release ? VK_ACCESS_SHADER_READ_BIT : 0)
                     .dstAccessMask(release ? 0 : VK_ACCESS_SHADER_READ_BIT)
-                    .oldLayout(sharedLayout())
-                    .newLayout(sharedLayout())
+                    .oldLayout(i == 0 ? sharedLayout() : sharedDepthLayout())
+                    .newLayout(i == 0 ? sharedLayout() : sharedDepthLayout())
                     .srcQueueFamilyIndex(release ? owner : external)
                     .dstQueueFamilyIndex(release ? external : owner)
                     .image(images[i]);
@@ -2204,6 +2260,9 @@ final class VkTerrainRenderer {
         sb.append("  targets: ").append(width).append('x').append(height)
                 .append(", depth ").append(depthFormat == VK_FORMAT_X8_D24_UNORM_PACK32 ? "D24" : "D32F")
                 .append(", depth blit ").append(depthBlit ? "on" : "off")
+                .append(", depth shared ").append(depthShared
+                        ? "yes (" + sharedDepthFrames + " frames, no copies)"
+                        : SHARED_DEPTH_WANTED ? "asked for, not taken" : "no")
                 .append(", atlas ").append(atlasWidth).append('x').append(atlasHeight)
                 .append(" (").append(atlasLevels).append(" mips)\n");
         sb.append("  ").append(VertexLayout.stats()).append('\n');
@@ -2222,7 +2281,8 @@ final class VkTerrainRenderer {
                 .append(" waiting for Vulkan")
                 .append(" [").append(compositeTimer.health()).append(']')
                 .append(", depth back to Vulkan ")
-                .append(depthBlit ? glTimeText(depthBlitTimer) + " by hardware copy"
+                .append(depthShared ? "0.00 ms — the game's depth is our image"
+                        : depthBlit ? glTimeText(depthBlitTimer) + " by hardware copy"
                         : glTimeText(depthImportTimer))
                 .append('\n');
         String animations = net.vulkanmod112.client.AnimatedSprites.stats();
@@ -3357,8 +3417,144 @@ final class VkTerrainRenderer {
      * itself against and must stay where it is.
      */
     private boolean canReturnDepth() {
-        return depthBlit || (glDepthWriteFbo != -1 && gameDepthTexture != 0);
+        // Shared depth needs returning least of all: it never left.
+        return depthShared || depthBlit || (glDepthWriteFbo != -1 && gameDepthTexture != 0);
     }
+
+    /**
+     * Which composite program the frame wants: 1 paints colour alone.
+     *
+     * Both ways of getting terrain depth into the game's buffer without the
+     * quad exporting it end here — the hardware copy and the shared image —
+     * because from the quad's point of view they are the same fact: the depth
+     * is already right, so keep early-Z and touch nothing.
+     */
+    private int compositeVariant() {
+        return (depthShared || depthBlit) ? 1 : 0;
+    }
+
+    /**
+     * The depth image, for the game to hang on its own framebuffer — or 0.
+     *
+     * Zero until the targets exist, which is several frames into a session, so
+     * the caller is expected to keep asking rather than to ask once.
+     */
+    synchronized int sharedDepthTextureForGame(int wantedWidth, int wantedHeight) {
+        if (!SHARED_DEPTH_WANTED || !baseReady || glDepthTexture == -1) {
+            return 0;
+        }
+        // A target of the wrong size is worse than no offer: a framebuffer whose
+        // attachments disagree renders into the smaller of them and leaves the
+        // rest of the window holding the last frame.
+        return wantedWidth == width && wantedHeight == height ? glDepthTexture : 0;
+    }
+
+    /**
+     * What OpenGL made of the offer. Off again if the attachment ever goes.
+     *
+     * Both directions move a semaphore signal, and getting that wrong is not a
+     * wrong picture — it is a frame waiting for a signal nobody will send.
+     *
+     * Steady state is one release per frame: from the composite while the depth
+     * is ours, from the top of the world pass while it is the game's. The
+     * switch-over frames are the two places that can end up with two of them or
+     * none, so each is handled where the switch happens rather than left to the
+     * general path.
+     */
+    synchronized void depthSharingAccepted(boolean accepted) {
+        if (accepted == depthShared) {
+            return;
+        }
+        if (accepted) {
+            depthShared = true;
+            // The previous frame ended in the composite, which released the
+            // images the old way. Releasing them again at the top of this pass
+            // would leave a signal nobody ever waits for, and from then on this
+            // renderer would be a frame ahead of the agreement.
+            skipOneHandover = true;
+            LOGGER.info("The game's depth buffer is now this renderer's own image: neither copy runs");
+        } else {
+            // The mirror image, and the one that hangs rather than drifts. This
+            // frame's composite will release the images for the *next* frame,
+            // but this frame's own submit is still waiting for the release that
+            // used to come from up here. So it comes from up here one last time.
+            releaseSharedImages();
+            depthShared = false;
+            LOGGER.info("The game's depth buffer is its own again; depth is copied across as before");
+        }
+    }
+
+    /**
+     * Hands the shared images back to Vulkan at the top of the world pass.
+     *
+     * Only used when the depth is shared, and the reason it is here rather than
+     * at the end of the composite is the whole of what sharing changes. The
+     * composite is the last thing <em>this renderer</em> does with the frame; it
+     * is nowhere near the last thing the <em>game</em> does with the depth. Put
+     * the release there and the next Vulkan frame is free to clear the image
+     * while creatures of the previous one are still being drawn into it.
+     *
+     * Here is after every one of those and before anything Vulkan records, and
+     * it is the only point in the loop of which both halves are true.
+     */
+    synchronized void beginFrameDepthHandover() {
+        if (!depthShared || !SHARED_SEMAPHORES) {
+            return;
+        }
+        if (skipOneHandover) {
+            skipOneHandover = false;
+            return;
+        }
+        releaseSharedImages();
+        sharedDepthFrames++;
+    }
+
+    /** Signals OpenGL's side of the pair: Vulkan may write the images again. */
+    private void releaseSharedImages() {
+        if (glColorTexture == -1 || glDepthTexture == -1) {
+            // Unreachable as the frame is ordered today — the offer is checked
+            // against the live targets in the same breath as this is called —
+            // and said out loud rather than returned from quietly, because what
+            // it costs if it ever happens is the next submit waiting for ever.
+            LOGGER.error("The shared images went away between the offer and the release; "
+                    + "the next frame has nothing to wait for");
+            return;
+        }
+        try (MemoryStack stack = stackPush()) {
+            IntBuffer noBuffers = stack.mallocInt(0);
+            IntBuffer textures = stack.ints(glColorTexture, glDepthTexture);
+            IntBuffer layouts = stack.ints(EXTSemaphore.GL_LAYOUT_SHADER_READ_ONLY_EXT,
+                    glSharedDepthLayout());
+            waitFenceValue++;
+            setFenceValue(glSignalSemaphore, waitFenceValue);
+            EXTSemaphore.glSignalSemaphoreEXT(glSignalSemaphore, noBuffers, textures, layouts);
+            GL11C.glFlush();
+        }
+    }
+
+    /** Consumed once, on the frame sharing is taken up. See above. */
+    private boolean skipOneHandover;
+
+    /** Sharing ends without a hand-back, because no frame is being submitted. */
+    synchronized void depthSharingDropped() {
+        if (!depthShared) {
+            return;
+        }
+        depthShared = false;
+        skipOneHandover = false;
+        LOGGER.info("The game's depth buffer is its own again (this renderer is not drawing)");
+    }
+
+    /**
+     * How many frames really went through the shared path.
+     *
+     * Beside the change rather than beside the frame counter, because the
+     * question it answers is not "how fast" but "did this run at all". A
+     * setting that silently never engaged and a setting that engaged and gained
+     * nothing print the same frame rate, and the first has happened here
+     * before.
+     */
+    private long sharedDepthFrames;
 
     private boolean renderTranslucent(int[] chunks, int chunkCount, float[] mvp,
                                       double viewX, double viewY, double viewZ,
@@ -3497,6 +3693,12 @@ final class VkTerrainRenderer {
      */
     private void importGlDepth() {
         GL11C.glGetError();
+        if (depthShared) {
+            // The game drew its creatures into this very image. Nothing to
+            // carry across — only the word that it is Vulkan's turn to read it.
+            signalTranslucentDepth();
+            return;
+        }
         if (depthBlit) {
             int prevDraw = GL11C.glGetInteger(GL30C.GL_DRAW_FRAMEBUFFER_BINDING);
             GL30C.glBindFramebuffer(GL30C.GL_DRAW_FRAMEBUFFER, glDepthBlitFbo);
@@ -3512,6 +3714,11 @@ final class VkTerrainRenderer {
             LOGGER.error("Handing the game's depth back to Vulkan failed with 0x{}",
                     Integer.toHexString(error));
         }
+        signalTranslucentDepth();
+    }
+
+    /** Tells the Vulkan side the game has finished writing depth for this frame. */
+    private void signalTranslucentDepth() {
         try (MemoryStack stack = stackPush()) {
             IntBuffer noBuffers = stack.mallocInt(0);
             IntBuffer textures = stack.ints(glDepthTexture);
@@ -3667,7 +3874,7 @@ final class VkTerrainRenderer {
             IntBuffer noBuffers = stack.mallocInt(0);
             IntBuffer textures = stack.ints(glColorTexture, glDepthTexture);
             IntBuffer layouts = stack.ints(EXTSemaphore.GL_LAYOUT_SHADER_READ_ONLY_EXT,
-                    EXTSemaphore.GL_LAYOUT_SHADER_READ_ONLY_EXT);
+                    glSharedDepthLayout());
             // The imported semaphore is the first thing on this path that the
             // graphics driver has to honour across two APIs, and a driver that
             // never signals it stalls here until the operating system decides
@@ -3702,7 +3909,8 @@ final class VkTerrainRenderer {
             GL11C.glDisable(GL11C.GL_SCISSOR_TEST);
             GL11C.glDepthMask(true);
 
-            if (depthBlit) {
+            // Nothing to send when the game is already looking at our image.
+            if (depthBlit && !depthShared) {
                 depthBlitTimer.begin();
                 try {
                     blitDepth();
@@ -3779,15 +3987,15 @@ final class VkTerrainRenderer {
                 }
             }
 
-            GL20C.glUseProgram(compositePrograms[depthBlit ? 1 : 0]);
-            GL20C.glUniform1f(compositeAoUniforms[depthBlit ? 1 : 0], ao ? 1.0f : 0.0f);
-            GL20C.glUniform1f(compositeAoOnlyUniforms[depthBlit ? 1 : 0],
+            GL20C.glUseProgram(compositePrograms[compositeVariant()]);
+            GL20C.glUniform1f(compositeAoUniforms[compositeVariant()], ao ? 1.0f : 0.0f);
+            GL20C.glUniform1f(compositeAoOnlyUniforms[compositeVariant()],
                     ao && showOcclusion ? 1.0f : 0.0f);
-            GL20C.glUniform1f(compositeMotionUniforms[depthBlit ? 1 : 0],
+            GL20C.glUniform1f(compositeMotionUniforms[compositeVariant()],
                     motion && showMotion ? 1.0f : 0.0f);
-            GL20C.glUniform1f(compositeMotionGhostUniforms[depthBlit ? 1 : 0],
+            GL20C.glUniform1f(compositeMotionGhostUniforms[compositeVariant()],
                     motionOverWorld ? 1.0f : 0.0f);
-            GL20C.glUniform1f(compositeAccumUniforms[depthBlit ? 1 : 0],
+            GL20C.glUniform1f(compositeAccumUniforms[compositeVariant()],
                     accumApplied ? 1.0f : 0.0f);
             if (accumApplied) {
                 GL13C.glActiveTexture(GL13C.GL_TEXTURE4);
@@ -3804,9 +4012,15 @@ final class VkTerrainRenderer {
             GL13C.glActiveTexture(GL13C.GL_TEXTURE0);
             GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, glColorTexture);
             GL13C.glActiveTexture(GL13C.GL_TEXTURE1);
+            // With the depth shared, this texture is the depth attachment of
+            // the framebuffer being drawn into — a rendering feedback loop, and
+            // undefined by default. What makes it defined is the next few
+            // lines: a depth attachment that is sampled while depth writes are
+            // masked off is the one case the specification carves out. So the
+            // mask below is not a tidy-up, it is the whole of why this is legal.
             GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, glDepthTexture);
 
-            if (depthBlit) {
+            if (compositeVariant() == 1) {
                 // Depth already carries the terrain; the quad only paints colour.
                 GL11C.glDisable(GL11C.GL_DEPTH_TEST);
                 GL11C.glDepthMask(false);
@@ -3855,7 +4069,20 @@ final class VkTerrainRenderer {
             GL13C.glActiveTexture(prevActive);
 
             firstFrameStage("terrain drawn into the game's frame");
-            if (SHARED_SEMAPHORES) {
+            if (depthShared) {
+                // Deliberately not here.
+                //
+                // This signal says "OpenGL is done with these images, Vulkan may
+                // write them again". When the depth is a buffer of our own that
+                // is true the moment the quad has read it — but when the depth
+                // is the game's, the game has not even started: creatures, water
+                // and weather all write it after this point, and the next
+                // Vulkan frame would clear the image out from under them. So
+                // the release moves to the top of the next world pass, which is
+                // the one moment that is after everything the game drew and
+                // before anything we draw. See beginFrameDepthHandover().
+                firstFrameStage("depth left with the game until the next world pass");
+            } else if (SHARED_SEMAPHORES) {
                 waitFenceValue++;
                 setFenceValue(glSignalSemaphore, waitFenceValue);
                 EXTSemaphore.glSignalSemaphoreEXT(glSignalSemaphore, noBuffers, textures, layouts);
@@ -7889,7 +8116,7 @@ final class VkTerrainRenderer {
                 .stencilLoadOp(VK_ATTACHMENT_LOAD_OP_DONT_CARE)
                 .stencilStoreOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
                 .initialLayout(VK_IMAGE_LAYOUT_UNDEFINED)
-                .finalLayout(sharedLayout());
+                .finalLayout(sharedDepthLayout());
 
         VkAttachmentReference.Buffer colorRef = VkAttachmentReference.calloc(1, stack);
         colorRef.get(0).attachment(0).layout(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
@@ -7957,7 +8184,7 @@ final class VkTerrainRenderer {
                 // states it left as an attachment is not a mismatch of
                 // paperwork — it is reading one compression scheme as another.
                 .initialLayout(depthHandoffLayout())
-                .finalLayout(sharedLayout());
+                .finalLayout(sharedDepthLayout());
 
         VkAttachmentReference.Buffer colorRef = VkAttachmentReference.calloc(1, stack);
         colorRef.get(0).attachment(0).layout(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);

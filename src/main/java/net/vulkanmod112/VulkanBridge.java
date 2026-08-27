@@ -188,6 +188,52 @@ public interface VulkanBridge {
      */
     boolean isSceneToneAvailable();
 
+    /**
+     * The renderer's depth image as an OpenGL texture, for the game to use as
+     * its own depth attachment — or 0 when that is not on offer.
+     *
+     * The frame used to carry a full screen of depth across twice: out, so the
+     * game's creatures would be hidden behind hills, and back, so the water
+     * would be hidden behind the creatures. If the game's depth buffer simply
+     * <em>is</em> this image, neither copy has anywhere to go.
+     *
+     * Returns 0 until the renderer's targets exist and match the size asked
+     * for, so ask every frame rather than once. The size is checked here rather
+     * than by the caller because a window being resized spends a frame or two
+     * with the two halves disagreeing, and an attachment of the wrong size is
+     * a framebuffer that renders into part of itself.
+     */
+    int sharedDepthTexture(int width, int height);
+
+    /**
+     * Whether OpenGL took the offer above and kept a complete framebuffer.
+     *
+     * Called from the top of the world pass, where a frame is going to be
+     * submitted — which is what lets the "no" case hand the images back one
+     * last time for that submit to wait on.
+     */
+    void depthSharingAccepted(boolean accepted);
+
+    /**
+     * The same "no", from a frame this renderer is not going to draw at all.
+     *
+     * Kept apart from the call above because the difference is the whole of it:
+     * with no submit there is nothing waiting for the images, and handing them
+     * back anyway leaves a signal that the next frame consumes instead of the
+     * one meant for it.
+     */
+    void depthSharingDropped();
+
+    /**
+     * Hands the shared images back to Vulkan, at the top of the world pass.
+     *
+     * Does nothing unless the depth is shared. When it is, this is the one
+     * moment in the loop that is after everything the game drew into the depth
+     * last frame and before anything this renderer records into it this frame,
+     * which makes it the only correct place to say so.
+     */
+    void beginFrameDepthHandover();
+
     /** Tells the Vulkan side which GL texture holds the 16x16 lightmap. */
     void setLightmap(int lightmapGlTextureId);
 

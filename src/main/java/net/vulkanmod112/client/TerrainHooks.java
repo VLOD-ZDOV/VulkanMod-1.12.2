@@ -24,7 +24,8 @@ import java.util.List;
  * (then entities, then TRANSLUCENT). The Vulkan path accumulates the three
  * opaque-ish layers into one shared VRAM frame and composites it (color +
  * depth) into the game's framebuffer at the CUTOUT call — before entities, so
- * they occlude correctly. TRANSLUCENT stays on the vanilla GL path for now.
+ * they occlude correctly. TRANSLUCENT goes through Vulkan as well, in a pass of
+ * its own after entities, unless Vulkan Water and Glass is switched off.
  *
  * Any failure permanently falls back to vanilla rendering: losing the world's
  * visuals is never acceptable.
@@ -123,7 +124,9 @@ public final class TerrainHooks {
 
     /**
      * How long vanilla spends drawing the layers we did not take, and how many
-     * chunks it drew there. TRANSLUCENT is the whole of it today.
+     * chunks it drew there — which is nothing at all with the settings as they
+     * ship, because the translucent layer is taken too. It counts again the
+     * moment somebody switches Vulkan Water and Glass off.
      *
      * This exists to price D2 before building it. Over an ocean at render
      * distance 64 the frame collapses to 71 fps while this renderer draws 554
@@ -393,6 +396,18 @@ public final class TerrainHooks {
             return false;
         }
         if (!terrainEnabled() || broken) {
+            // The world is about to be drawn by vanilla GL, into a frame whose
+            // depth attachment belongs to a renderer that is not going to
+            // submit anything this frame. Dropped rather than released: with no
+            // submit there is nothing waiting, and a hand-back nobody waits for
+            // leaves the two sides a frame apart from each other.
+            if (SharedDepth.isAttached()) {
+                SharedDepth.release();
+                VulkanBridge idle = liveBridge();
+                if (idle != null) {
+                    idle.depthSharingDropped();
+                }
+            }
             return false;
         }
         if (!checkRendererCompatibility()) {
@@ -412,6 +427,13 @@ public final class TerrainHooks {
             packNanos += System.nanoTime() - packedAt;
             packCalls++;
             if (layer == BlockRenderLayer.SOLID) {
+                // Both of these belong at the top of the world pass and nowhere
+                // else. The first decides whether the game's depth attachment
+                // is this renderer's image; the second is the moment that says
+                // the game has finished with it — after everything it drew last
+                // frame, before anything Vulkan records this one.
+                SharedDepth.ensure(bridge, mc);
+                bridge.beginFrameDepthHandover();
                 captureMatrices();
                 captureFog();
                 bridge.updateFogState(FOG);
@@ -453,6 +475,10 @@ public final class TerrainHooks {
             // makes all seven reachable at once, and would have to walk the
             // fences and semaphores back to a known state first.
             broken = true;
+            // First, because the fallback this is announcing is vanilla GL
+            // drawing the world into a frame whose depth attachment belongs to
+            // a renderer that has just stopped existing.
+            SharedDepth.release();
             LOGGER.error("Vulkan terrain rendering failed — falling back to vanilla GL permanently", t);
             Diagnostics.flushNow("terrain failed permanently: " + t);
             RenderNotice.fellBackToOpenGL(t.getClass().getSimpleName()
@@ -851,6 +877,9 @@ public final class TerrainHooks {
      * failure is written down and the game goes on closing.
      */
     public static void shutdown() {
+        // Before anything is torn down: a framebuffer left pointing at a
+        // texture that has been deleted is a black world rather than an error.
+        SharedDepth.release();
         // The last chance the settings file has to receive anything still
         // waiting to be written.
         VulkanConfig.flush();

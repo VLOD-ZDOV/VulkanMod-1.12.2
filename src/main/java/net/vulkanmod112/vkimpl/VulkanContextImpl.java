@@ -1134,6 +1134,39 @@ public final class VulkanContextImpl implements VulkanBridge {
     }
 
     @Override
+    public int sharedDepthTexture(int width, int height) {
+        // Render thread, inside the world pass; see applySceneBloom above.
+        if (!initialized || terrainRenderer == null) {
+            return 0;
+        }
+        return terrainRenderer.sharedDepthTextureForGame(width, height);
+    }
+
+    @Override
+    public void depthSharingAccepted(boolean accepted) {
+        if (terrainRenderer == null) {
+            return;
+        }
+        terrainRenderer.depthSharingAccepted(accepted);
+    }
+
+    @Override
+    public void depthSharingDropped() {
+        if (terrainRenderer == null) {
+            return;
+        }
+        terrainRenderer.depthSharingDropped();
+    }
+
+    @Override
+    public void beginFrameDepthHandover() {
+        if (!initialized || terrainRenderer == null) {
+            return;
+        }
+        terrainRenderer.beginFrameDepthHandover();
+    }
+
+    @Override
     public boolean isSceneToneAvailable() {
         return terrainRenderer == null || terrainRenderer.isSceneToneAvailable();
     }

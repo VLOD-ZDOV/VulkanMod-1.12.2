@@ -573,6 +573,15 @@ tasks.matching { it.name in ['runClient', 'runObfClient'] }.configureEach {
     if (project.hasProperty('compactVertices')) {
         jvmArgs '-Dvulkanmod112.compactVertices=true'
     }
+    // -PsharedDepth hands the renderer's depth image to the game as its own
+    // depth attachment, so the two full-screen depth copies a frame — out for
+    // the creatures, back for the water — stop existing. Measured together with
+    // the colour composite at 0.13 ms of a 1.88 ms frame. Off unless asked:
+    // two APIs then write one image inside one frame, and the ordering that
+    // used to be implicit in the copy is stated instead.
+    if (project.hasProperty('sharedDepth')) {
+        jvmArgs '-Dvulkanmod112.sharedDepth=true'
+    }
     // -PdumpLang writes logs/vulkanmod112-en_us.lang from the settings screen
     // as it is actually built, which is where the English language file comes
     // from. Open the screen once, then copy the file into resources.
