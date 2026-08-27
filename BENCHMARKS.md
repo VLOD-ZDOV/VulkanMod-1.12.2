@@ -179,7 +179,7 @@ It tracks the pixel count and almost nothing else:
 |---|---|---|---|---|
 | 1280 × 720 | 0.9 | **1041** | 0.33 ms | 155 |
 | 1920 × 1080 | 2.1 | **904** | 0.45 ms | — |
-| 3673 × 2066 | 7.6 | **512** | 1.05 ms | 149 |
+| about 4K | 7.6 | **512** | 1.05 ms | 149 |
 
 Same route, same world, same render distance of 32; only the window changed.
 

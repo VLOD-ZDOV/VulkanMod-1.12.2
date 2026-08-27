@@ -1,6 +1,17 @@
 # Changelog
 
-## [Unreleased]
+## [0.10.0-alpha.2]
+
+The second alpha, and like the first one it is published to be reported against
+rather than because it is finished. Everything below has been flown on one
+machine on Linux with an NVIDIA card and nowhere else. The three new settings
+are all off by default except the first, and each says in its own description
+what it costs and what it could get wrong.
+
+If you are on the first alpha, this one will tell you about itself: a build on
+the way to a version now asks for the whole list of releases rather than the
+latest finished one, which is what an alpha needs and a finished version does
+not.
 
 ### Added
 

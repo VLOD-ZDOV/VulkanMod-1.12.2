@@ -8,6 +8,22 @@ rather than crashing.
 
 ## Done
 
+### 0.10.0-alpha.2
+
+- **The two passes that draw creatures and chests walk a short list.** `renderEntities` reads
+  as a loop over creatures and is not one — it walks every section on screen, some 17 700 at
+  thirty-two chunks, before finding out whether anything stands in them. Turned inside out, it
+  falls from 1.12 ms a frame to 0.01 and the fixed route from 330 frames a second to 512.
+- **A chunk vertex can be packed into 16 bytes** instead of the 28 the game uses. The card's
+  terrain time falls from 0.49 ms to 0.42 and this mod's copy of the world from 428 MiB of
+  video memory to 240. Off by default; the memory is the larger half of it.
+- **The layer filter gets a short list too**, which removes real work and buys no frames on the
+  machine it was measured on. Off by default, and the setting says exactly that.
+- **The frame is timed on the card as well as on the thread**, by name, using the phases the
+  game already declares for its own profiler.
+- **A build on the way to a version hears about the next one.** Alphas asked for the latest
+  finished release, which by definition is never another alpha.
+
 ### 0.10.0-alpha
 
 - **Creatures shade their own faces against the sun.** Only the sky half of the game's light map
