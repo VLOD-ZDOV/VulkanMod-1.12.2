@@ -162,6 +162,9 @@ public final class Flight {
      */
     private static final String WINDOW = System.getProperty("vulkanmod112.flightWindow", "").trim();
 
+    /** One reading of the game's own frame counter per second of the route. */
+    private static final java.util.List<Integer> frameRates = new java.util.ArrayList<Integer>();
+
     /**
      * Clouds: 0 off, 1 fast, 2 fancy, or -1 to leave the option alone.
      *
@@ -290,6 +293,7 @@ public final class Flight {
                 }
                 break;
             case FLYING:
+                sampleFrameRate(mc);
                 fly(mc);
                 break;
             default:
@@ -635,11 +639,53 @@ public final class Flight {
         }
     }
 
+    /**
+     * The game's own frame counter, once a second, for the length of the route.
+     *
+     * The diagnostics report has better numbers and cannot be used to compare
+     * renderers: it belongs to this mod, and when another renderer is in the
+     * folder this mod's renderer stands aside and takes the report with it. The
+     * counter in the corner of the debug screen belongs to the game and is
+     * there whoever is drawing, which is the only thing that makes a row of a
+     * comparison table mean the same as the row above it.
+     *
+     * It updates once a second, so sampling any faster records the same value
+     * twenty times and calls it twenty measurements.
+     */
+    private static void sampleFrameRate(Minecraft mc) {
+        if (ticks % TICKS_PER_SECOND != 0) {
+            return;
+        }
+        int fps = Minecraft.getDebugFPS();
+        if (fps > 0) {
+            frameRates.add(Integer.valueOf(fps));
+        }
+    }
+
+    private static void reportFrameRate() {
+        if (frameRates.isEmpty()) {
+            return;
+        }
+        java.util.List<Integer> sorted = new java.util.ArrayList<Integer>(frameRates);
+        java.util.Collections.sort(sorted);
+        int n = sorted.size();
+        StringBuilder series = new StringBuilder();
+        for (Integer value : frameRates) {
+            series.append(series.length() == 0 ? "" : " ").append(value);
+        }
+        VulkanMod112.LOGGER.info(
+                "Flight {} frame rate: median {}, 5% low {}, worst {}, best {}, over {} seconds"
+                        + " — {}",
+                TAG, sorted.get(n / 2), sorted.get(n / 20), sorted.get(0), sorted.get(n - 1), n,
+                series);
+    }
+
     private static void finish(String why) {
         if (stage == Stage.DONE) {
             return;
         }
         stage = Stage.DONE;
+        reportFrameRate();
         VulkanMod112.LOGGER.info("Flight {} {} after {} frames kept", TAG, why, shotsTaken);
         Diagnostics.flushNow("flight " + TAG + " " + why);
         try {
