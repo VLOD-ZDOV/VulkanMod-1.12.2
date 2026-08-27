@@ -220,8 +220,10 @@ public final class TerrainHooks {
      * ninety seconds and reported the setting as broken; the setting was fine
      * and this was the answer nobody had asked for.
      *
-     * A sentence rather than a flag, because the four reasons need four
-     * different things done about them and "false" says none of that.
+     * A sentence rather than a flag, because each reason needs something
+     * different done about it and "false" says none of that. The count is
+     * deliberately not written down here: there were four, there are five, and
+     * a number beside a list is a thing that goes wrong quietly.
      */
     public static String whyNotDrawing() {
         if (!TERRAIN_ALLOWED_BY_PROPERTY) {

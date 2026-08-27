@@ -330,8 +330,9 @@ public final class VisibilityWalk {
             byte mask = info.vulkanmod112$facingMask();
             // Read for every section now rather than only when direction
             // culling wants it. It is the same pointer either way, and it also
-            // carries whether this section holds block entities — an answer the
-            // game's own pass currently pays for once per section per frame.
+            // carries whether this section holds block entities — the answer the
+            // game's own pass used to pay for once per section per frame, and no
+            // longer does, because this list is what it is handed instead.
             CompiledChunk compiled = info.vulkanmod112$chunk().getCompiledChunk();
             if (!compiled.isEmpty()) {
                 geometrySections.add(info);

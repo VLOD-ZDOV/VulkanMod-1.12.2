@@ -79,8 +79,10 @@ import static org.lwjgl.vulkan.VK11.VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_
  * library talks to it. GL object ids produced here are context-global, so the
  * texture id crosses the bridge to the game side as a plain int.
  *
- * This same machinery will present the Vulkan-rendered terrain in stage 3.3;
- * for now it draws the rotating triangle to prove per-frame operation.
+ * This is the machinery the terrain renderer went on to use, and all that is
+ * left here is the rotating triangle it was proved with: the demo overlay,
+ * which is off by default and kept because a machine that draws nothing at all
+ * is worth being able to ask a smaller question of.
  */
 final class VkInteropRenderer {
 

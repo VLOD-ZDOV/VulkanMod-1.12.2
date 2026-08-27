@@ -96,8 +96,8 @@ final class Interop {
      * that, four times, once per semaphore, and the only trace of it was
      * CloseHandle refusing all four.
      *
-     * So the driver picks. {@link #chooseSemaphoreHandleType} asks it before
-     * anything is created, and this holds the answer.
+     * So the driver picks. {@link #logExternalSemaphoreSupport} asks it before
+     * anything is created and writes the answer here.
      */
     private static int semaphoreHandleType = WINDOWS
             ? VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_BIT
@@ -289,7 +289,7 @@ final class Interop {
 
     /**
      * Logs whether this Vulkan driver actually admits an exported semaphore of
-     * {@link #SEMAPHORE_HANDLE_TYPE} can leave the process and come back in
+     * {@link #semaphoreHandleType} can leave the process and come back in
      * ({@code EXPORTABLE}/{@code IMPORTABLE}), instead of assuming it because
      * the device extension is present and every call along the chain returns
      * {@code VK_SUCCESS}.
