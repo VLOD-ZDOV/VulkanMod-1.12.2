@@ -172,6 +172,13 @@ Same route, same world, one session, the change switched on and off:
 At 24 chunks it gains one per cent and at 8 chunks nothing at all, which is the same statement
 from the other side: below thirty-two the frame is not waiting on the thread this saves.
 
+**Neither of the other two replacements pays this cost either**, and it is worth saying so
+plainly: this is not something they had missed. Both of them replace the game's own terrain
+setup wholesale, so the list this loop walks is simply never filled — Relictium then draws
+creatures from its own visible set in the same place, by the same reasoning. The measurement
+above is what this mod had to spend to arrive where they already were, not an advantage over
+them.
+
 **How it was checked.** A shortcut that quietly drops a creature looks exactly like a creature
 that walked off, so the shortened lists are compared against the full scan they replace, entry
 by entry, under a switch. It found a real fault the first time it ran — 186 block-entity
