@@ -197,6 +197,34 @@ distance runs at six times the game's own renderer rather than three and a half.
 
 ---
 
+## What the terrain pass itself is waiting for
+
+The window sweep above answers half the question. The other half is what the
+Vulkan pass costs, and it turns out not to be pixels at all:
+
+| Render distance | vertices | the card's time |
+|---|---|---|
+| 8 chunks | 0.50 M | 0.05 ms |
+| 16 chunks | 1.93 M | 0.15 ms |
+| 24 chunks | 5.05 M | 0.30 ms |
+| 32 chunks | 9.02 M | 0.46 ms |
+
+About 0.048 ms per million vertices, and flat across the window: 0.44 ms at 0.9
+megapixels against 0.50 at 7.6. Nine million vertices at the twenty-eight bytes
+this mod mirrors from the game is **252 MB of vertex reading a frame**, which at
+that time is roughly the card's whole memory bandwidth. The pass is not filling
+pixels and not running out of shader — it is reading vertices.
+
+Packing that vertex into sixteen bytes is a setting (off by default, Advanced →
+Pack Chunk Vertices). It moves the card's terrain time to 0.42 ms and the route
+to 547 frames a second — five per cent, less than the byte count alone would
+suggest, because part of the pass is triangle setup rather than reading. What it
+does do in full is memory: **428 MiB of video memory for this mod's copy of the
+world becomes 240**, and how much of the world fits is what decides whether a
+long render distance is possible at all.
+
+---
+
 ## What is not in the table
 
 - **OptiFine** does not start in a development client at all, so it could not be measured this
