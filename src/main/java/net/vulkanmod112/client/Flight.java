@@ -653,7 +653,12 @@ public final class Flight {
      * twenty times and calls it twenty measurements.
      */
     private static void sampleFrameRate(Minecraft mc) {
-        if (ticks % TICKS_PER_SECOND != 0) {
+        // Not the first reading. The counter is updated once a second by the
+        // game, so at the moment the route begins it still holds whatever was
+        // true a second ago — which is the loading screen, drawing nothing, at
+        // a frame rate that belongs to no measurement. It arrived as a "best"
+        // of 1671 in a run whose every other second was near 650.
+        if (ticks < TICKS_PER_SECOND || ticks % TICKS_PER_SECOND != 0) {
             return;
         }
         int fps = Minecraft.getDebugFPS();
