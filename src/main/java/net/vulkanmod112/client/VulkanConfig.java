@@ -111,14 +111,52 @@ public final class VulkanConfig {
      * Pack a chunk vertex into sixteen bytes instead of mirroring vanilla's
      * twenty-eight unchanged.
      *
-     * Off by default and read only when the game starts: the layout decides the
-     * shader that is loaded and the stride every offset in the geometry buffer
-     * is measured in, and a buffer holding both layouts at once draws the world
-     * as spikes reaching to the horizon. That is not a hypothetical — it is
-     * what the first build of this did, because it settled the question a few
-     * seconds after the sky had already been mirrored.
+     * Read only when the game starts, and that is not a convenience: the layout
+     * decides the shader that is loaded and the stride every offset in the
+     * geometry buffer is measured in, and a buffer holding both layouts at once
+     * draws the world as spikes reaching to the horizon. That is not a
+     * hypothetical — it is what the first build of this did, because it settled
+     * the question a few seconds after the sky had already been mirrored.
+     *
+     * On by default since 28.08.2026, after the picture was checked rather than
+     * argued about: the same eight views of the same world, packed and
+     * unpacked, differ by no more than two runs of one build do — and the large
+     * differences in them are animals having walked. What is left is a scatter
+     * of single pixels a fraction of a texel wide, which is what the arithmetic
+     * predicted. It buys 7% to 18% of the frame rate depending on the window,
+     * and takes this renderer's copy of the world from 428 MiB to 240.
+     *
+     * The one thing that could go wrong with it is a very large modded atlas,
+     * and that no longer needs anybody to notice: see {@link #getAtlasPixelsSeen}.
      */
-    static final boolean DEF_COMPACT_VERTICES = false;
+    static final boolean DEF_COMPACT_VERTICES = true;
+    /**
+     * How many pixels across the block atlas was, last time one was seen.
+     *
+     * Not a setting anybody sets. A packed texture coordinate is one part in
+     * 65 535 of the whole sheet, so how much of a texel that is depends on how
+     * big the sheet is — and the sheet is not loaded when the packing has to be
+     * decided. Remembering the answer is what lets the next session decide it
+     * properly instead of printing a warning nobody reads.
+     */
+    static final int DEF_ATLAS_PIXELS_SEEN = 0;
+    /**
+     * How many times a default has been changed for people who already have a
+     * settings file.
+     *
+     * Changing a default does nothing on its own. Forge writes every setting
+     * into the file the first time the mod runs, so from then on the file
+     * answers the question and the default is never consulted again — a new
+     * default reaches new installations and nobody else. That is usually right
+     * and occasionally wrong, and it is wrong when the old default was "off
+     * while this is new" and the thing has since been measured.
+     *
+     * So: this number is bumped, and the load below moves exactly the settings
+     * the bump is about. Anybody who had changed one of them by hand loses that
+     * choice once, which is the price, and it is said in the log rather than
+     * done quietly.
+     */
+    static final int SETTINGS_REVISION = 1;
     /**
      * Shortlist the chunks the rebuild pass at the end of {@code setupTerrain}
      * can act on, instead of letting it scan every visible chunk.
@@ -610,6 +648,8 @@ public final class VulkanConfig {
     private static volatile boolean shortEntitySections = DEF_SHORT_ENTITY_SECTIONS;
     private static volatile boolean shortLayerSections = DEF_SHORT_LAYER_SECTIONS;
     private static boolean compactVertices = DEF_COMPACT_VERTICES;
+    private static int atlasPixelsSeen = DEF_ATLAS_PIXELS_SEEN;
+    private static int settingsRevision = SETTINGS_REVISION;
     private static volatile boolean fastRebuildNear = DEF_FAST_REBUILD_NEAR;
     private static volatile boolean materialTags = DEF_MATERIAL_TAGS;
     private static volatile boolean smartAnimations = DEF_SMART_ANIMATIONS;
@@ -819,6 +859,12 @@ public final class VulkanConfig {
                         + "your frames back. Off by default: what it could get wrong is a chunk "
                         + "that stops being drawn, and that looks exactly like terrain still "
                         + "building.");
+        atlasPixelsSeen = config.getInt("atlasPixelsSeen", CATEGORY_ADVANCED,
+                DEF_ATLAS_PIXELS_SEEN, 0, 65536,
+                "Remembered, not set: how many pixels across the block atlas was last time. "
+                        + "Packed chunk vertices turn themselves off for a pack whose atlas is "
+                        + "larger than 8192, and this is how they know before the pack has "
+                        + "loaded. Zero means no atlas has been seen yet.");
         compactVertices = config.getBoolean("compactVertices", CATEGORY_ADVANCED,
                 DEF_COMPACT_VERTICES,
                 "Pack each chunk vertex into 16 bytes instead of the 28 the game uses. The "
@@ -831,6 +877,25 @@ public final class VulkanConfig {
                         + "at all. Takes effect on the next start. Ray tracing works with it: "
                         + "the acceleration structures read the packed positions through the "
                         + "matrix that unpacks them.");
+        // Revision 1: packed chunk vertices shipped off while they were new and
+        // are on now that the picture has been checked. Everybody who ran the
+        // alpha has "false" written in their file, and without this they would
+        // go on paying 428 MiB for the world and never know why their frame
+        // rate did not move.
+        settingsRevision = config.getInt("settingsRevision", CATEGORY_ADVANCED, 0, 0, 1000,
+                "Which changed defaults have already been applied to this file. Not a setting.");
+        if (settingsRevision < 1) {
+            if (compactVertices != DEF_COMPACT_VERTICES) {
+                compactVertices = DEF_COMPACT_VERTICES;
+                store(CATEGORY_ADVANCED, "compactVertices", compactVertices);
+                net.vulkanmod112.VulkanMod112.LOGGER.info(
+                        "Pack Chunk Vertices is now on by default and has been switched on in your "
+                                + "settings. It saves 188 MiB of video memory and some frames; "
+                                + "Advanced turns it off again if you want it off.");
+            }
+            settingsRevision = 1;
+            store(CATEGORY_ADVANCED, "settingsRevision", settingsRevision);
+        }
         // The command line wins, so the two arms of a comparison differ by one
         // word on it rather than by an edit to the config between runs.
         String shortSectionsPin = System.getProperty("vulkanmod112.shortEntitySections");
@@ -2635,6 +2700,10 @@ public final class VulkanConfig {
         // Read once, when the renderer's own classes load, and never again —
         // see DEF_COMPACT_VERTICES for why it cannot be moved after that.
         publish("vulkanmod112.compactVertices", Boolean.toString(compactVertices));
+        // The other half of the same decision, and it has to be published
+        // beside it: the layout is settled from the two together, at the moment
+        // the renderer's classes load.
+        publish("vulkanmod112.atlasPixelsSeen", Integer.toString(atlasPixelsSeen));
         publish("vulkanmod112.sunShadows", Integer.toString(sunShadows));
         publish("vulkanmod112.shadowSoftness", Integer.toString(shadowSoftness));
         publish("vulkanmod112.rayTracingRadius", Integer.toString(rayTracingRadius));
@@ -2858,6 +2927,7 @@ public final class VulkanConfig {
             // tick of lag would be visible.
             applySystemProperties();
         }
+        rememberAtlasSize();
         // Before the early return: this is called every client tick, and what
         // moved should be written down whether or not the file needs saving.
         logChanges();
@@ -2868,6 +2938,32 @@ public final class VulkanConfig {
         if (config != null && config.hasChanged()) {
             config.save();
         }
+    }
+
+    /**
+     * Copies the atlas size the renderer saw into the settings file.
+     *
+     * The two halves of this mod share nothing but system properties, and the
+     * half that can measure the atlas is not the half that can write a settings
+     * file. So the measurement is left in a property and picked up here, once,
+     * on whatever tick follows the pack being loaded.
+     */
+    private static void rememberAtlasSize() {
+        int seen = Integer.getInteger("vulkanmod112.atlasPixels", 0);
+        if (seen <= 0 || seen == atlasPixelsSeen) {
+            return;
+        }
+        atlasPixelsSeen = seen;
+        store(CATEGORY_ADVANCED, "atlasPixelsSeen", seen);
+        if (seen > 8192 && compactVertices) {
+            net.vulkanmod112.VulkanMod112.LOGGER.info("The block atlas is {} pixels across; packed chunk vertices "
+                    + "will stay off for this pack from the next start", seen);
+        }
+    }
+
+    /** What the last session's atlas was, for whoever decides the vertex layout. */
+    public static int getAtlasPixelsSeen() {
+        return atlasPixelsSeen;
     }
 
     /**

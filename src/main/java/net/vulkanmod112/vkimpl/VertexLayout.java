@@ -100,10 +100,31 @@ public final class VertexLayout {
      * the horizon. A field read from a JVM flag has no such moment — it is true
      * before the first line of the mod runs.
      */
-    private static final boolean COMPACT =
-            Boolean.getBoolean("vulkanmod112.compactVertices");
+    private static final boolean COMPACT = Boolean.getBoolean("vulkanmod112.compactVertices")
+            && !atlasTooLargeLastTime();
 
-    private static String reason = COMPACT ? "packed to 16 bytes" : "kept at 28 bytes";
+    /**
+     * Whether the atlas the last session saw was too big for sixteen-bit
+     * texture coordinates.
+     *
+     * The size of the sheet is not known when this decision has to be made —
+     * the pack has not loaded — and the decision cannot be moved later, because
+     * the sky and the first chunks are already mirrored by then. So the answer
+     * comes from the session before: whatever atlas was seen last time is
+     * written into the settings, and read back here before anything else runs.
+     *
+     * A pack that has just been installed therefore gets one session on the old
+     * answer. That is the whole cost of it, and it is the right way round: the
+     * first session on a huge atlas may have slightly soft sprite edges, and
+     * every session after it is correct without anybody reading a log.
+     */
+    private static boolean atlasTooLargeLastTime() {
+        return Integer.getInteger("vulkanmod112.atlasPixelsSeen", 0) > LARGEST_SAFE_ATLAS;
+    }
+
+    private static String reason = COMPACT ? "packed to 16 bytes"
+            : atlasTooLargeLastTime() ? "kept at 28 bytes (the atlas is too large to pack)"
+            : "kept at 28 bytes";
     private static int atlasPixels;
     private static boolean atlasWarned;
 
@@ -154,13 +175,17 @@ public final class VertexLayout {
      */
     static void noteAtlas(int pixels) {
         atlasPixels = pixels;
+        // Left where the next session's decision will find it, whatever this
+        // session chose. Written as a plain property; the game side copies it
+        // into the settings file, because this half cannot reach them.
+        System.setProperty("vulkanmod112.atlasPixels", Integer.toString(pixels));
         if (COMPACT && pixels > LARGEST_SAFE_ATLAS && !atlasWarned) {
             atlasWarned = true;
             org.apache.logging.log4j.LogManager.getLogger("VulkanMod112/Terrain").warn(
                     "The block atlas is {} pixels across and chunk vertices are packed to 16"
                             + " bytes. A packed texture coordinate is {} of a texel at that size,"
-                            + " which is enough for sprite edges to bleed — turn the packing off"
-                            + " if textures look wrong at a distance",
+                            + " which is enough for sprite edges to bleed. Nothing needs doing:"
+                            + " the packing turns itself off for this pack from the next start.",
                     pixels, "1/" + Math.max(1, 65535 / pixels));
         }
     }
