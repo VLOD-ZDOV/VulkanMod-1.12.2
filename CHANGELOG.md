@@ -1,5 +1,27 @@
 # Changelog
 
+## [Unreleased]
+
+- **Chunk vertices are packed to sixteen bytes by default.** The setting shipped
+  off in the last alpha because it was new, and the picture has now been checked
+  rather than argued about: the same eight views of the same world, packed and
+  unpacked, differ by no more than two runs of one build do — and every large
+  difference in them is an animal having walked. What is left is a scatter of
+  single pixels a fraction of a texture pixel wide, which is exactly what the
+  arithmetic predicts. It is worth 7% to 18% of the frame rate depending on how
+  many pixels your screen has, and it takes this mod's copy of the world from 428
+  MiB of video memory to 240 — which is what decides whether a long render
+  distance fits at all. Advanced → Pack Chunk Vertices turns it off again.
+  Because a settings file written by an earlier version already answers this
+  question, the answer is moved once, and the log says so when it happens.
+- **A very large texture atlas turns the packing off by itself.** A packed
+  texture coordinate is one part in 65 535 of the whole sheet, so on a sheet
+  above 8192 pixels it stops being finer than a texture pixel and sprite edges
+  could bleed. The sheet is not loaded at the moment the layout has to be
+  decided — so the size is remembered from the session before, and a pack that
+  needs the wide layout gets it from its second start onwards without anybody
+  reading a log. Previously this was a warning and nothing else.
+
 ## [0.10.0-alpha.2]
 
 The second alpha, and like the first one it is published to be reported against

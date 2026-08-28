@@ -56,8 +56,9 @@ better.
 | Nothirium | 865 | 855 | **822** | 565 |
 | Relictium | 659 | 656 | 659 | **646** |
 
-"Everything on" means the two settings this build ships with off — packed chunk vertices and
-the short layer filter list. They are off because they are new, not because they cost anything.
+"Everything on" means packed chunk vertices and the short layer filter list. The packing has
+since become the default; the layer filter is still off, and it is off because it is new rather
+than because it costs anything.
 
 Against the game's own renderer:
 
@@ -235,8 +236,9 @@ this mod mirrors from the game is **252 MB of vertex reading a frame**, which at
 that time is roughly the card's whole memory bandwidth. The pass is not filling
 pixels and not running out of shader — it is reading vertices.
 
-Packing that vertex into sixteen bytes is a setting (off by default, Advanced →
-Pack Chunk Vertices). It moves the card's terrain time to 0.42 ms, and what that
+Packing that vertex into sixteen bytes is a setting (**on by default** since the
+picture was checked, Advanced → Pack Chunk Vertices). It moves the card's terrain
+time to 0.42 ms, and what that
 is worth in frames depends on the window in exactly the way everything else here
 does — because reading vertices costs the same whatever the screen, so removing
 some of it is a bigger share of a shorter frame:
