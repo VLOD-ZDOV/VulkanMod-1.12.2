@@ -31,6 +31,39 @@ public final class VulkanLoader {
     private VulkanLoader() {
     }
 
+    /**
+     * The processor this build has no Vulkan half for, or null when it does.
+     *
+     * Said before anything is loaded rather than discovered inside LWJGL,
+     * because of what the discovery looks like: a library that will not open,
+     * an UnsatisfiedLinkError from somewhere deep, and a fallback message that
+     * names none of it. Somebody running the game on a phone through a
+     * translation layer reported "launched, crashed in under a second", and the
+     * first thing anybody needs there is a sentence saying which of the many
+     * possible things it was.
+     *
+     * Only the shipped architecture is named, not the reason it is the only
+     * one: LWJGL has ARM builds, and the reason this does not carry them is
+     * that nothing about the rest of the design would work there anyway — the
+     * frame is handed back to the game through memory shared between Vulkan and
+     * OpenGL, and the extensions that does needs (EXT_memory_object_fd,
+     * EXT_semaphore_fd) do not exist on a GLES translation layer.
+     */
+    private static String unsupportedArchitecture() {
+        String arch = System.getProperty("os.arch", "");
+        String lower = arch.toLowerCase(java.util.Locale.ROOT);
+        if (lower.contains("amd64") || lower.contains("x86_64") || lower.contains("x64")) {
+            return null;
+        }
+        // Left permissive on purpose: an unfamiliar name is more likely to be a
+        // 64-bit x86 spelled unusually than a machine this cannot run on, and
+        // refusing it would be a regression for somebody the code never met.
+        if (lower.startsWith("aarch64") || lower.startsWith("arm") || lower.contains("riscv")) {
+            return arch;
+        }
+        return null;
+    }
+
     /** Non-constructing accessor for very early callers (mixins). */
     public static synchronized VulkanBridge bridgeIfReady() {
         return bridge;
@@ -159,6 +192,15 @@ public final class VulkanLoader {
                         + " If you want to try it anyway, start the game with"
                         + " -Dvulkanmod112.javaCeiling=" + java + " — what decides this is the JNI version"
                         + " rather than the Java one, and it moves far more rarely.");
+            }
+            String arch = unsupportedArchitecture();
+            if (arch != null) {
+                throw new VulkanUnavailableException("This mod ships its Vulkan half with native"
+                        + " libraries for 64-bit x86 only, and this machine is " + arch + ". Nothing"
+                        + " here can load, so the game renders on OpenGL as it always did."
+                        + " Phones and tablets running Minecraft Java through a translation layer"
+                        + " land here: the world is drawn by that layer, and everything this mod"
+                        + " does besides the renderer still works.");
             }
             reserveStackSpace();
             try {
