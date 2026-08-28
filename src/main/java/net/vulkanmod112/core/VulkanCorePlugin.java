@@ -95,6 +95,21 @@ public class VulkanCorePlugin implements IFMLLoadingPlugin, IEarlyMixinLoader {
         Mixins.registerErrorHandlerClass(VulkanMixinErrorHandler.class.getName());
         List<String> configs = new ArrayList<String>();
         configs.add("mixins.vulkanmod112.json");
+        // Before asking about other renderers, because this one is not a
+        // conflict but an absence: on a machine with no Vulkan half to load,
+        // the terrain patches would be installed, take over the world's
+        // drawing, find no renderer behind them and hand every frame back to
+        // vanilla. That works, and it is a great deal of transformed bytecode
+        // to arrive at the picture the game would have drawn anyway — on the
+        // one class of device where the game can least afford it.
+        String architecture = Platform.unsupportedArchitecture();
+        if (architecture != null) {
+            System.out.println("[VulkanMod112] This mod carries its Vulkan renderer for 64-bit x86"
+                    + " only and this machine is " + architecture + ", so the renderer is not"
+                    + " loaded and the world is drawn the way it always was. The settings and the"
+                    + " game-side optimisations stay available.");
+            return configs;
+        }
         String replacement = rendererReplacement();
         if (replacement != null) {
             System.out.println("[VulkanMod112] Another renderer (" + replacement + ") is installed; "
