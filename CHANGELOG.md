@@ -8,12 +8,13 @@
   when the visible set is walked afresh or a slot is handed out or given back,
   which in flight is one frame in ten. Nothing about the picture changes, and
   that was checked by comparing frames rather than by looking: the difference
-  from the previous build is a handful of cows that had walked. Be told what it
-  is worth on a fast machine: nothing. Standing in one place, where the
-  measurement is good to half a per cent, the frame rate is the same to within
-  one frame — because at this render distance the card is what the frame waits
-  for, and this is work taken off the processor. It is there for the machines
-  where that is the other way round.
+  from the previous build is a handful of cows that had walked. What it is worth depends
+  entirely on what your frame is waiting for. Where the card is the ceiling —
+  which on a fast machine at this render distance it is — the frame rate does
+  not move by a single frame. Where the processor is the ceiling, twelve
+  interleaved runs put it at five to seven per cent, with the two sets of
+  measurements not overlapping at all. So: nothing on a fast machine, something
+  on a slow one or under a heavy pack.
 
 - **Rain no longer falls through twenty blocks of rock.** How wet a floor got
   was taken from its sky light, which is not the same question as whether the
