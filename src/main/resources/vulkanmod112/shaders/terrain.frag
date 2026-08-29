@@ -299,7 +299,7 @@ const float ICE_MIRROR_MAX = 0.55;
  * smallest value at which standing on the lake does not look like the effect
  * switching itself off.
  */
-const float ICE_SHEEN_FLOOR = 0.06;
+const float ICE_SHEEN_FLOOR = 0.22;
 
 /**
  * How steep the surface has to be before a caustic band is fully dark, and how
@@ -1922,7 +1922,15 @@ void main() {
                 && frame.fogColor.a > 0.5) {
             float sheen = mix(ICE_SHEEN_FLOOR, 1.0, fresnel(normal))
                     * frame.surface.x * ICE_MIRROR_MAX * vLight.y;
-            shaded = mix(shaded, fogRgb, sheen);
+            // The sky along the reflected ray, the way the water below does
+            // it, rather than the one horizon colour for every direction.
+            // Standing on a frozen lake reflects the zenith, and the zenith is
+            // a third darker than the horizon it used to be given — which is
+            // why looking down at ice used to change nothing that could be
+            // measured, let alone seen.
+            vec3 toIceEye = normalize(-vRelative);
+            vec3 iceSky = skyAlong(reflect(-toIceEye, normal), fogRgb);
+            shaded = mix(shaded, iceSky, sheen);
             // Where it turns into sky it stops being see-through, exactly as
             // the water above does — a mirror that lets the riverbed through
             // is a colour laid over the surface rather than the surface.
