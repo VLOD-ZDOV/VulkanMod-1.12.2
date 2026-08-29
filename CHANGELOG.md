@@ -8,11 +8,23 @@
   light halfway in, and that floor came out half wet. It is now the step
   between the last two sky levels, so one block of overhang is enough to stay
   dry — and so is a tree, which is right.
-- **Ice keeps a little of the sky when you stand on it.** The sheen was a bare
-  Fresnel term, and Fresnel is zero when you look straight down, so a frozen
-  lake went flat the moment you were on it and held the sky again the moment
-  you stepped off. It now keeps a floor, the same way the wet-surface sheen
-  beside it already did.
+- **Ice reflects the sky it is actually under.** The sheen was a bare Fresnel
+  term, which is zero when you look straight down, so a frozen lake went flat
+  the moment you stood on it and held the sky again the moment you stepped off.
+  It now keeps a floor, the way the wet-surface sheen beside it already did —
+  and it mixes in the sky along the reflected ray rather than one horizon
+  colour for every direction, which is what the water beside it has always
+  done. Be told plainly what this buys: standing on ice, almost nothing you can
+  see. By day the ice texture, the horizon and the zenith are the same pale
+  blue, so there was never a colour there to reveal. What is gone is the step
+  where the effect switched itself off entirely.
+- **The Performance preset no longer asks for a third frame in flight.** It was
+  there on the reasoning that a third frame gives the processor room when the
+  processor is what holds the frame up. Measured at render distance 32, where
+  that is most nearly true, it buys nothing: two settings a percent apart while
+  two runs of one build differ by four. The third frame's costs are not in
+  doubt — a frame of input latency and a third more of every per-frame buffer —
+  so it goes.
 
 - **Chunk vertices are packed to sixteen bytes by default.** The setting shipped
   off in the last alpha because it was new, and the picture has now been checked
