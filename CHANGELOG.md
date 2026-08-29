@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+- **Rain no longer falls through twenty blocks of rock.** How wet a floor got
+  was taken from its sky light, which is not the same question as whether the
+  sky can reach it: a cave with a mouth some distance away still carries sky
+  light halfway in, and that floor came out half wet. It is now the step
+  between the last two sky levels, so one block of overhang is enough to stay
+  dry — and so is a tree, which is right.
+- **Ice keeps a little of the sky when you stand on it.** The sheen was a bare
+  Fresnel term, and Fresnel is zero when you look straight down, so a frozen
+  lake went flat the moment you were on it and held the sky again the moment
+  you stepped off. It now keeps a floor, the same way the wet-surface sheen
+  beside it already did.
+
 - **Chunk vertices are packed to sixteen bytes by default.** The setting shipped
   off in the last alpha because it was new, and the picture has now been checked
   rather than argued about: the same eight views of the same world, packed and
