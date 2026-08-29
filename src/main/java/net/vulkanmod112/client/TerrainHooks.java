@@ -89,6 +89,22 @@ public final class TerrainHooks {
     private static long packNanos;
     private static long packCalls;
 
+    /**
+     * The fixed-function state read back from OpenGL once a frame, timed.
+     *
+     * Eight blocking-looking queries sit in these two methods, and the note
+     * beside the matrix mirror puts one at about two and a half microseconds.
+     * That number was measured on a texture binding, which the driver has to
+     * ask the server for; the fog parameters and both matrices are state the
+     * client library set itself and can hand back without leaving the process.
+     * So the cost here is either twenty microseconds a frame or nothing, the
+     * difference decides whether mirroring the fog is worth the risk of a
+     * mirror that misses a path, and guessing which was how four earlier
+     * afternoons were spent.
+     */
+    private static long glQueryNanos;
+    private static long glQueryFrames;
+
     /** Reads and resets, so each snapshot covers only the interval since the last. */
     public static String packStats() {
         if (packCalls == 0) {
@@ -97,13 +113,61 @@ public final class TerrainHooks {
         String line = String.format("chunk list packing: %.3f ms per call over %d layer calls, "
                         + "%.2f ms in total", packNanos / 1e6 / packCalls, packCalls,
                 packNanos / 1e6);
+        if (packHits + packMisses != 0) {
+            line += String.format("; list reused %d of %d times (%.0f%%)",
+                    packHits, packHits + packMisses,
+                    100.0 * packHits / (packHits + packMisses));
+            packHits = 0;
+            packMisses = 0;
+        }
+        if (glQueryFrames != 0) {
+            line += String.format("; gl state read back %.1f us per frame over %d frames",
+                    glQueryNanos / 1e3 / glQueryFrames, glQueryFrames);
+        }
         packNanos = 0;
         packCalls = 0;
+        glQueryNanos = 0;
+        glQueryFrames = 0;
         return line;
     }
 
     /** Packed per chunk: mirror slot, blockX, blockY, blockZ. */
     private static int[] chunkData = new int[1024];
+
+    /**
+     * The packed list, kept between frames, one per layer.
+     *
+     * Every number in it is camera-independent — a mirror slot and a block
+     * position — so the frame the camera moved is not a reason to build it
+     * again. Only three things are: the visible set was walked afresh, a slot
+     * was handed out, or a slot was given back. Each of those calls
+     * {@link #noteChunkListChanged()} and nothing else does.
+     *
+     * A miss costs exactly what this always cost, so getting the generation
+     * wrong in the safe direction costs nothing. Getting it wrong the other way
+     * would draw last walk's chunks, which is why the three callers are named
+     * here and the counter below says how often the cache is trusted.
+     */
+    private static final int[][] layerData = new int[4][];
+    private static final int[] layerCount = new int[4];
+    private static final int[] layerGeneration = {-1, -1, -1, -1};
+    private static final int[] layerListSize = new int[4];
+    private static int chunkListGeneration;
+    private static long packHits;
+    private static long packMisses;
+
+    /**
+     * Called when the packed chunk list may no longer describe the world.
+     *
+     * Three callers, and they are the whole set: the visibility walk when it
+     * refills the list or hands the frame back to vanilla, and the vertex
+     * buffer when a mirror slot is assigned or released. An upload into a slot
+     * that already exists is deliberately not one of them — the packed record
+     * holds the slot number, not what is in it.
+     */
+    public static void noteChunkListChanged() {
+        chunkListGeneration++;
+    }
 
     private static long framesDrawn;
     /**
@@ -436,8 +500,11 @@ public final class TerrainHooks {
                 // frame, before anything Vulkan records this one.
                 SharedDepth.ensure(bridge, mc);
                 bridge.beginFrameDepthHandover();
+                long queriedAt = System.nanoTime();
                 captureMatrices();
                 captureFog();
+                glQueryNanos += System.nanoTime() - queriedAt;
+                glQueryFrames++;
                 bridge.updateFogState(FOG);
                 DynamicLights.gather(viewX, viewY, viewZ);
                 bridge.updateDynamicLights(DynamicLights.lights(), DynamicLights.count());
@@ -594,9 +661,25 @@ public final class TerrainHooks {
 
     private static int packChunks(BlockRenderLayer layer, List<RenderChunk> chunks) {
         int count = chunks.size();
-        if (chunkData.length < count * 4) {
-            chunkData = new int[Integer.highestOneBit(count * 4) * 2];
+        int ordinal = layer.ordinal();
+        if (layerData[ordinal] != null && layerGeneration[ordinal] == chunkListGeneration
+                && layerListSize[ordinal] == count) {
+            packHits++;
+            chunkData = layerData[ordinal];
+            int drawn = layerCount[ordinal];
+            if (layer == BlockRenderLayer.SOLID) {
+                lastSolidDrawn = drawn;
+                lastLayerDraws = drawn;
+            } else {
+                lastLayerDraws += drawn;
+            }
+            return drawn;
         }
+        packMisses++;
+        if (layerData[ordinal] == null || layerData[ordinal].length < count * 4) {
+            layerData[ordinal] = new int[Math.max(1024, Integer.highestOneBit(count * 4) * 2)];
+        }
+        chunkData = layerData[ordinal];
         int i = 0;
         for (RenderChunk chunk : chunks) {
             VertexBuffer vb = chunk.getVertexBufferByLayer(layer.ordinal());
@@ -615,6 +698,9 @@ public final class TerrainHooks {
             chunkData[i++] = pos.getY();
             chunkData[i++] = pos.getZ();
         }
+        layerCount[ordinal] = i / 4;
+        layerGeneration[ordinal] = chunkListGeneration;
+        layerListSize[ordinal] = count;
         if (layer == BlockRenderLayer.SOLID) {
             lastSolidDrawn = i / 4;
             lastLayerDraws = i / 4;

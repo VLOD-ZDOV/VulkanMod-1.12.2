@@ -45,6 +45,11 @@ public abstract class VertexBufferMixin implements VertexBufferSlot {
     public synchronized int vulkanmod112$slotOrAssign() {
         if (vulkanmod112$slot == ChunkSlots.UNASSIGNED) {
             vulkanmod112$slot = ChunkSlots.allocate();
+            // A number that goes into the packed chunk list has changed, and
+            // that list is now kept between frames. An upload into a slot that
+            // already exists is not this: the record holds the slot, not what
+            // is in it.
+            TerrainHooks.noteChunkListChanged();
         }
         return vulkanmod112$slot;
     }
@@ -84,6 +89,7 @@ public abstract class VertexBufferMixin implements VertexBufferSlot {
             // publish into it, and only then does the slot go back for reuse.
             ChunkMirror.onBufferDelete(slot);
             ChunkSlots.release(slot);
+            TerrainHooks.noteChunkListChanged();
         }
     }
 

@@ -15,6 +15,7 @@ import org.lwjgl.util.vector.Vector3f;
 import net.vulkanmod112.client.RenderInfo;
 import net.vulkanmod112.client.SectionIndex;
 import net.vulkanmod112.client.SeedFacings;
+import net.vulkanmod112.client.TerrainHooks;
 import net.vulkanmod112.client.VanillaFrame;
 import net.vulkanmod112.client.VisibilityWalk;
 import net.vulkanmod112.client.VulkanConfig;
@@ -188,8 +189,12 @@ public abstract class OwnVisibilityWalkMixin implements SectionIndex {
         }
         if (!vulkanmod112$run(self, viewEntity, partialTicks, camera, playerSpectator)) {
             VanillaFrame.countOwnWalkFallback();
+            // Vanilla is about to refill the list itself, so whatever was
+            // packed from the old one describes a world that is gone.
+            TerrainHooks.noteChunkListChanged();
             return true;
         }
+        TerrainHooks.noteChunkListChanged();
         VanillaFrame.countOwnWalk(vulkanmod112$walk.tested(), vulkanmod112$visible.size(),
                 System.nanoTime() - started);
 

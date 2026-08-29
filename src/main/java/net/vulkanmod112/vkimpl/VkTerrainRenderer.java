@@ -1935,6 +1935,20 @@ final class VkTerrainRenderer {
     private long mirrorLookups;
     private long worstMirrorLookupNanos;
 
+    /**
+     * The per-chunk write loop, timed on its own and separately from the
+     * lookup above it.
+     *
+     * Here to answer one question before any caching is written: of the
+     * thirty-six bytes this loop puts down per chunk per layer, twenty are the
+     * draw command and do not depend on where the camera is, so they could be
+     * kept between frames — but only if writing them is what costs. The loop
+     * also skips, counts and reads an entry per chunk, and none of that goes
+     * away. Caching the wrong half is the mistake this counter exists to stop.
+     */
+    private long chunkWriteNanos;
+    private long chunkWriteChunks;
+
     /** Frames the background cap held back; they are sleeps, not stalls. */
     private boolean frameThrottled;
     private long throttledFrames;
@@ -2055,6 +2069,14 @@ final class VkTerrainRenderer {
         mirrorLookupNanos = 0;
         mirrorLookups = 0;
         worstMirrorLookupNanos = 0;
+        if (chunkWriteChunks != 0) {
+            sb.append(String.format(
+                    "    per-chunk writes %.3f ms over %d chunk-layers, %.1f ns each\n",
+                    chunkWriteNanos / 1e6, chunkWriteChunks,
+                    (double) chunkWriteNanos / chunkWriteChunks));
+        }
+        chunkWriteNanos = 0;
+        chunkWriteChunks = 0;
         sb.append(String.format(
                 "    settings: read %d times over %d frames\n", settingsReads, settingsFrames));
         settingsReads = 0;
@@ -2766,6 +2788,7 @@ final class VkTerrainRenderer {
             if (lookupNanos > worstMirrorLookupNanos) {
                 worstMirrorLookupNanos = lookupNanos;
             }
+            long writeStart = System.nanoTime();
             for (int c = 0; c < chunkCount; c++) {
                 VkChunkMirror.Entry entry = lookupScratch[c];
                 if (entry == null || entry.size < VertexLayout.stride()
@@ -2814,6 +2837,8 @@ final class VkTerrainRenderer {
                 MemoryUtil.memPutInt(command + 12, (int) (entry.offset / VertexLayout.stride()));
                 MemoryUtil.memPutInt(command + 16, drawCount++);
             }
+            chunkWriteNanos += System.nanoTime() - writeStart;
+            chunkWriteChunks += chunkCount;
             if (drawCount != 0) {
                 vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout,
                         0, stack.longs(drawDescriptorSets[batchIndex]), null);

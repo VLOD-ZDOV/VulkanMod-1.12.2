@@ -26,13 +26,22 @@ public final class VulkanLoader {
     private static final Pattern LWJGL3_JAR = Pattern.compile("lwjgl(-[a-z]+)?-3\\..*\\.jar");
     private static final String IMPL_CLASS = "net.vulkanmod112.vkimpl.VulkanContextImpl";
 
-    private static VulkanBridge bridge;
+    /**
+     * Volatile so that reading it needs no monitor.
+     *
+     * It is written once, inside the synchronized constructor below, and read
+     * from the render thread several times a frame and from chunk-building
+     * threads besides. A monitor was being taken for each of those reads, on a
+     * field that never changes again after the one write; volatile gives the
+     * same publication guarantee for a read that cannot contend.
+     */
+    private static volatile VulkanBridge bridge;
 
     private VulkanLoader() {
     }
 
     /** Non-constructing accessor for very early callers (mixins). */
-    public static synchronized VulkanBridge bridgeIfReady() {
+    public static VulkanBridge bridgeIfReady() {
         return bridge;
     }
 
