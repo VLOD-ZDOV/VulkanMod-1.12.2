@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+- **The list of chunks to draw is kept between frames.** It was built four
+  times a frame, once per layer, out of numbers that never depended on where
+  the camera was — a mirror slot and a block position. It is now rebuilt only
+  when the visible set is walked afresh or a slot is handed out or given back,
+  which in flight is one frame in ten. Nothing about the picture changes, and
+  that was checked by comparing frames rather than by looking: the difference
+  from the previous build is a handful of cows that had walked.
+
 - **Rain no longer falls through twenty blocks of rock.** How wet a floor got
   was taken from its sky light, which is not the same question as whether the
   sky can reach it: a cave with a mouth some distance away still carries sky
