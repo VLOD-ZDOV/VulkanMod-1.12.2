@@ -281,6 +281,27 @@ const vec3 HAZE_LEAN = vec3(0.32, 0.13, -0.17);
 const float ICE_MIRROR_MAX = 0.55;
 
 /**
+ * What is left of the ice sheen when looking straight down at it.
+ *
+ * Reported as "the ice stops reflecting if you stand on it", and that was
+ * exactly what the code did: the sheen was a bare Fresnel term, which is
+ * (1 - facing) to the fifth, and standing on a frozen lake makes facing one.
+ * Five times zero is zero, and the block went flat under the player's feet
+ * while the same block twenty away still held the sky.
+ *
+ * A floor rather than a different curve, because the wet-surface sheen forty
+ * lines down already needed one for the same reason and settled it the same
+ * way. Ice is smoother than a wet block, so this is lower than its 0.18.
+ *
+ * Not the physical number. Real ice reflects about two per cent of what
+ * arrives straight on, and two per cent of a sky is not visible on a texture
+ * this legible — the block would still read as having gone flat. This is the
+ * smallest value at which standing on the lake does not look like the effect
+ * switching itself off.
+ */
+const float ICE_SHEEN_FLOOR = 0.06;
+
+/**
  * How steep the surface has to be before a caustic band is fully dark, and how
  * much brighter the flat parts get.
  *
@@ -1553,7 +1574,22 @@ void main() {
     // where light comes from, not about what is above the surface.
     if (!BLEND && frame.surface.z > 0.0 && geometricNormal.y > 0.9
             && !foliage && material != MATERIAL_LAVA) {
-        float wet = frame.surface.z * vLight.y;
+        // Only a face the sky can actually reach, and "actually" is the whole
+        // of the fix. This was the sky light itself, which is not the same
+        // question: a cave with a mouth twenty blocks away still carries sky
+        // light eight, and eight of fifteen made that floor half wet. It was
+        // reported exactly that way — the floor of a cave with an opening got
+        // rained on, and only burying yourself deep enough made it stop.
+        //
+        // The numbers are the lightmap's own: the game writes a sky level
+        // times sixteen and the vertex shader adds half a texel over 256, so
+        // level fifteen is 0.96875 and level fourteen is 0.90625. Taking the
+        // step between exactly those two means one block of overhang is dry
+        // and open ground is wet, with the interpolation across a face giving
+        // the boundary a soft edge for free. A canopy of leaves also stops it,
+        // which is right: rain does not fall through a tree either.
+        float skyOpen = smoothstep(0.90625, 0.96875, vLight.y);
+        float wet = frame.surface.z * skyOpen;
         shaded *= 1.0 - WET_DARKEN * wet;
         // The same Fresnel the water uses, against the same fog colour that
         // stands in for the sky everywhere else in this shader — but only
@@ -1884,8 +1920,8 @@ void main() {
 #ifndef RAY_QUERY
         if (frame.surface.x > 0.0 && material == MATERIAL_ICE
                 && frame.fogColor.a > 0.5) {
-            float sheen = fresnel(normal) * frame.surface.x * ICE_MIRROR_MAX
-                    * vLight.y;
+            float sheen = mix(ICE_SHEEN_FLOOR, 1.0, fresnel(normal))
+                    * frame.surface.x * ICE_MIRROR_MAX * vLight.y;
             shaded = mix(shaded, fogRgb, sheen);
             // Where it turns into sky it stops being see-through, exactly as
             // the water above does — a mirror that lets the riverbed through
