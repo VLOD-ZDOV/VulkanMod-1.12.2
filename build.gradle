@@ -597,6 +597,14 @@ tasks.matching { it.name in ['runClient', 'runObfClient'] }.configureEach {
     // -PflightSeconds, -PflightSettle, -PflightShots, -PflightPatience,
     // -PflightPos, -PflightProfiler, -PflightPreset, -PflightHour and
     // -PflightWeather.
+    // -PcountFacings tallies which way each chunk quad faces while it is
+    // copied. It prices grouping a chunk's geometry by facing so the groups
+    // pointing away from the camera are never drawn: the card already throws
+    // those triangles away, but only after fetching every vertex, and the
+    // terrain pass is bound by that fetch.
+    if (project.hasProperty('countFacings')) {
+        jvmArgs '-Dvulkanmod112.countFacings=true'
+    }
     if (project.hasProperty('flight')) {
         jvmArgs '-Dvulkanmod112.flight=' + project.property('flight')
         ['flightTag', 'flightSeed', 'flightDistance', 'flightSeconds',

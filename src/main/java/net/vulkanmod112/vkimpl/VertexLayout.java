@@ -73,6 +73,34 @@ import org.lwjgl.system.MemoryUtil;
  */
 public final class VertexLayout {
 
+    /**
+     * Which way each quad faces, tallied while the geometry is copied.
+     *
+     * An instrument, not a feature, and it exists to price one specific idea
+     * before anybody builds it. Half the faces of a world made of boxes point
+     * away from wherever you stand, and the card throws those away — but only
+     * after fetching and transforming every one of their vertices, because
+     * back-face culling happens after the vertex shader. Grouping a chunk's
+     * quads by facing at copy time and skipping the groups that point away
+     * would drop them before the fetch, and the terrain pass is bound by
+     * exactly that fetch: measured, it is 0.32 ms of fixed cost against 0.0095
+     * ms per megapixel, so nine times the pixels cost it a fifth.
+     *
+     * What the theory cannot say is how the world actually divides, because a
+     * Minecraft world is not a uniform box: the ground is one enormous
+     * upward-facing sheet, and plants are crossed quads that face nothing and
+     * can never be grouped. Hence six buckets and a seventh for those.
+     *
+     * Off unless {@code -Dvulkanmod112.countFacings=true}: it is a cross
+     * product per quad on the chunk builder threads, and those are quiet but
+     * not free.
+     */
+    private static final boolean COUNT_FACINGS = Boolean.getBoolean("vulkanmod112.countFacings");
+
+    /** -X, +X, -Y, +Y, -Z, +Z, and quads that lie on no axis. */
+    private static final java.util.concurrent.atomic.AtomicLongArray FACINGS =
+            new java.util.concurrent.atomic.AtomicLongArray(7);
+
     /** Vanilla's BLOCK vertex: pos 3f | colour 4ub | uv 2f | lightmap 2s. */
     public static final int SOURCE_STRIDE = 28;
 
@@ -213,6 +241,9 @@ public final class VertexLayout {
      * @param sourceBytes how many bytes of vanilla geometry, a multiple of 28
      */
     public static void copy(long source, long destination, int sourceBytes) {
+        if (COUNT_FACINGS) {
+            tallyFacings(source, sourceBytes);
+        }
         if (!COMPACT) {
             MemoryUtil.memCopy(source, destination, sourceBytes);
             return;
@@ -277,6 +308,64 @@ public final class VertexLayout {
      * All three are meant to stay at zero, and a report that never shows them
      * is a report that cannot tell anybody it went wrong.
      */
+    /**
+     * Counts one chunk layer's quads by which way they face.
+     *
+     * Accumulated locally and published once for the whole layer: a counter
+     * touched per quad from every builder thread would cost more than the
+     * thing it is measuring, which this project has already paid for once.
+     */
+    private static void tallyFacings(long source, int sourceBytes) {
+        int quads = sourceBytes / (SOURCE_STRIDE * 4);
+        int[] local = new int[7];
+        for (int q = 0; q < quads; q++) {
+            long v0 = source + (long) q * 4 * SOURCE_STRIDE;
+            long v1 = v0 + SOURCE_STRIDE;
+            long v2 = v1 + SOURCE_STRIDE;
+            float ax = MemoryUtil.memGetFloat(v1) - MemoryUtil.memGetFloat(v0);
+            float ay = MemoryUtil.memGetFloat(v1 + 4) - MemoryUtil.memGetFloat(v0 + 4);
+            float az = MemoryUtil.memGetFloat(v1 + 8) - MemoryUtil.memGetFloat(v0 + 8);
+            float bx = MemoryUtil.memGetFloat(v2) - MemoryUtil.memGetFloat(v0);
+            float by = MemoryUtil.memGetFloat(v2 + 4) - MemoryUtil.memGetFloat(v0 + 4);
+            float bz = MemoryUtil.memGetFloat(v2 + 8) - MemoryUtil.memGetFloat(v0 + 8);
+            float nx = ay * bz - az * by;
+            float ny = az * bx - ax * bz;
+            float nz = ax * by - ay * bx;
+            float length = (float) Math.sqrt(nx * nx + ny * ny + nz * nz);
+            if (length <= 1.0e-9f) {
+                local[6]++;
+                continue;
+            }
+            nx /= length;
+            ny /= length;
+            nz /= length;
+            // On an axis only if it is on it squarely; a plant's crossed quad
+            // sits at forty-five degrees and belongs in the last bucket, since
+            // no grouping by facing could ever skip it.
+            float straight = 0.999f;
+            if (nx > straight) {
+                local[1]++;
+            } else if (nx < -straight) {
+                local[0]++;
+            } else if (ny > straight) {
+                local[3]++;
+            } else if (ny < -straight) {
+                local[2]++;
+            } else if (nz > straight) {
+                local[5]++;
+            } else if (nz < -straight) {
+                local[4]++;
+            } else {
+                local[6]++;
+            }
+        }
+        for (int i = 0; i < 7; i++) {
+            if (local[i] != 0) {
+                FACINGS.addAndGet(i, local[i]);
+            }
+        }
+    }
+
     public static String stats() {
         String line = "vertex layout: " + reason
                 + (atlasPixels > 0 ? ", atlas " + atlasPixels + " px" : "");
@@ -289,6 +378,23 @@ public final class VertexLayout {
             clampedPositions = 0L;
             clampedLight = 0L;
             clampedTexture = 0L;
+        }
+        if (COUNT_FACINGS) {
+            long total = 0L;
+            for (int i = 0; i < 7; i++) {
+                total += FACINGS.get(i);
+            }
+            if (total != 0L) {
+                String[] names = {"-X", "+X", "down", "up", "-Z", "+Z", "on no axis"};
+                StringBuilder facing = new StringBuilder("\n  quad facings: ");
+                for (int i = 0; i < 7; i++) {
+                    facing.append(names[i]).append(' ')
+                            .append(String.format("%.1f%%", 100.0 * FACINGS.get(i) / total));
+                    facing.append(i == 6 ? "" : ", ");
+                }
+                facing.append(" — over ").append(total).append(" quads");
+                line += facing.toString();
+            }
         }
         return line;
     }
