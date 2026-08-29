@@ -53,6 +53,14 @@ public final class ChunkMirror {
         }
     }
 
+    /** Which layer this slot is for; see {@link VulkanBridge#noteChunkLayer}. */
+    public static void onLayer(int slot, boolean translucent) {
+        VulkanBridge bridge = TerrainHooks.liveBridge();
+        if (bridge != null && bridge.isInitialized()) {
+            bridge.noteChunkLayer(slot, translucent);
+        }
+    }
+
     public static void onBufferDelete(int slot) {
         VulkanBridge bridge = TerrainHooks.liveBridge();
         if (bridge != null && bridge.isInitialized()) {

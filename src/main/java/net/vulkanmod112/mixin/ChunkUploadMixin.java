@@ -60,8 +60,13 @@ public abstract class ChunkUploadMixin {
         // On both threads, and before the geometry either way: this is the last
         // place that still knows which BufferBuilder holds the chunk, and the
         // runs recorded against it are keyed by nothing else.
+        boolean translucent = layer == BlockRenderLayer.TRANSLUCENT;
+        // Before the geometry on both threads, for the same reason the runs are:
+        // this is the last place that knows which layer the slot is for, and the
+        // copy needs to know before it decides whether it may sort the quads.
+        ChunkMirror.onLayer(slot, translucent);
         if (VulkanConfig.isMaterialTags()) {
-            MaterialRuns.publish(slot, builder, layer == BlockRenderLayer.TRANSLUCENT);
+            MaterialRuns.publish(slot, builder, translucent);
         }
         if (Minecraft.getMinecraft().isCallingFromMinecraftThread()) {
             // Vanilla uploads inline on this path, so the ordinary mirror hook

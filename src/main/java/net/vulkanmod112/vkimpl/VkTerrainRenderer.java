@@ -1321,6 +1321,15 @@ final class VkTerrainRenderer {
     private int frameChunks;
     private int frameVertices;
     private int frameSkipped;
+    /**
+     * Vertices not fetched this frame because their face points away.
+     *
+     * The number that says whether grouping by facing is doing anything, and it
+     * is the whole reason the grouping is worth its complication: the card
+     * discards these triangles either way, but only after the vertex shader has
+     * read every one of them.
+     */
+    private int frameFacingSkipped;
     private boolean glErrorLogged;
     // Frame-time breakdown, averaged and logged every TIMING_WINDOW frames
     private static final int TIMING_WINDOW = 600;
@@ -2307,7 +2316,15 @@ final class VkTerrainRenderer {
         sb.append("  terrain: frame ").append(frameCounter)
                 .append(", ").append(frameChunks).append(" chunks, ")
                 .append(frameVertices).append(" vertices, ")
-                .append(frameSkipped).append(" skipped\n");
+                .append(frameSkipped).append(" skipped");
+        if (frameFacingSkipped > 0) {
+            sb.append(", ").append(frameFacingSkipped)
+                    .append(" not fetched — face away (")
+                    .append(String.format("%.1f%%",
+                            100.0 * frameFacingSkipped / (frameVertices + frameFacingSkipped)))
+                    .append(')');
+        }
+        sb.append('\n');
         sb.append("  targets: ").append(width).append('x').append(height)
                 .append(", depth ").append(depthFormat == VK_FORMAT_X8_D24_UNORM_PACK32 ? "D24" : "D32F")
                 .append(", depth blit ").append(depthBlit ? "on" : "off")
@@ -2623,6 +2640,7 @@ final class VkTerrainRenderer {
             firstFrameStage("recording draw commands");
             frameChunks = 0;
             frameVertices = 0;
+            frameFacingSkipped = 0;
             frameSkipped = 0;
             // Anything left over belonged to a frame that never reached its
             // translucent pass — a world that unloaded, a layer refused. It is
@@ -2801,12 +2819,41 @@ final class VkTerrainRenderer {
                     frameSkipped++;
                     continue; // grew mid-frame; drawable next frame
                 }
+                // The two ends of a grouped range that this camera cannot see.
+                //
+                // A section is sixteen blocks tall, its downward-facing quads
+                // lie inside that span, and a camera above all of them sees the
+                // underside of none — the card would work that out too, but only
+                // after fetching every one of those vertices, and fetching is
+                // what this pass is bound by. Both ends can never go at once,
+                // and geometry that was never grouped has zero at both.
+                int stride = VertexLayout.stride();
+                int firstQuad = 0;
+                int drawnVertices = vertexCount;
+                if (entry.grouped) {
+                    // Which of this section's sixteen levels the camera is in,
+                    // or one past either end when it is outside. Everything
+                    // below it that faces down and everything above it that
+                    // faces up is geometry this camera cannot see, and both
+                    // ends of the range can go in the same frame.
+                    int level = (int) Math.floor(viewY - chunks[c * 4 + 2]);
+                    int below = level < 0 ? 0 : level > 16 ? 16 : level;
+                    int above = level + 1 < 0 ? 0 : level + 1 > 16 ? 16 : level + 1;
+                    firstQuad = entry.shelves[below];
+                    int tailQuads = entry.shelves[17 + above];
+                    drawnVertices -= (firstQuad + tailQuads) * 4;
+                }
+                if (drawnVertices <= 0) {
+                    frameFacingSkipped += vertexCount;
+                    continue;
+                }
+                frameFacingSkipped += vertexCount - drawnVertices;
                 if (drawCount >= indirectDrawCapacity) {
                     frameSkipped++;
                     continue;
                 }
                 frameChunks++;
-                frameVertices += vertexCount;
+                frameVertices += drawnVertices;
                 long origin = mapped + (long) drawCount * DRAW_ORIGIN_BYTES;
                 MemoryUtil.memPutFloat(origin, (float) (chunks[c * 4 + 1] - viewX));
                 MemoryUtil.memPutFloat(origin + 4, (float) (chunks[c * 4 + 2] - viewY));
@@ -2831,9 +2878,14 @@ final class VkTerrainRenderer {
                     logDrawInputs(mvp, push, entry);
                 }
                 long command = mapped + drawCommandOffset + (long) drawCount * DRAW_COMMAND_BYTES;
-                MemoryUtil.memPutInt(command, vertexCount / 4 * 6);
+                MemoryUtil.memPutInt(command, drawnVertices / 4 * 6);
                 MemoryUtil.memPutInt(command + 4, 1);
-                MemoryUtil.memPutInt(command + 8, 0);
+                // Six indices a quad, so skipping whole quads at the front is
+                // an offset into the shared quad index buffer and nothing else.
+                // The base vertex is untouched, which keeps the corner number
+                // the shader derives from it: a whole number of quads is a
+                // whole number of fours.
+                MemoryUtil.memPutInt(command + 8, firstQuad * 6);
                 MemoryUtil.memPutInt(command + 12, (int) (entry.offset / VertexLayout.stride()));
                 MemoryUtil.memPutInt(command + 16, drawCount++);
             }

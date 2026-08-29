@@ -58,6 +58,29 @@ final class VkChunkMirror {
         int capacity;
         int size;
         /**
+         * How many bytes at the start of this range face straight down, and how
+         * many at the end face straight up.
+         *
+         * Zero for geometry that was not grouped, which is the safe reading:
+         * the draw then covers the whole range exactly as it always did.
+         */
+        /**
+         * How many down-facing quads of this range lie below each of the
+         * section's seventeen level boundaries, and how many up-facing ones lie
+         * at or above it — the first seventeen entries and the second.
+         *
+         * A camera knows from these exactly how much of the front and the back
+         * of the range it cannot see, and both at once. One conservative pair of
+         * heights was tried instead and answered for a seventh of the geometry
+         * where this answers for a fifth: a single overhang near the top of a
+         * section made the answer no for everything below it.
+         *
+         * {@link #grouped} rather than a zero test, because a chunk with no
+         * down-facing quads at all is a legitimate answer and not "unsorted".
+         */
+        final int[] shelves = new int[34];
+        boolean grouped;
+        /**
          * Bumped on every upload into this slot.
          *
          * Where the chunk lives and how long it is are not enough to tell that
@@ -191,6 +214,9 @@ final class VkChunkMirror {
     private static final class Staged {
         long srcOffset;
         int size;
+        /** Down-facing quads below each level, then up-facing at or above it. */
+        final int[] shelves = new int[34];
+        boolean grouped;
     }
 
     /**
@@ -349,6 +375,20 @@ final class VkChunkMirror {
     private final Object materialLock = new Object();
     private int[][] slotRuns = new int[1024][];
     private int[] slotRunCount = new int[1024];
+    /**
+     * Whether this slot's runs have already been put in the order the copy
+     * sorted its quads into.
+     *
+     * Needed because the same geometry can be copied twice: a builder thread
+     * stages it, the staging ring is reset before the render thread gets there,
+     * and the render thread copies it again from the game's own buffer. The
+     * geometry is then written once from the original and would have its runs
+     * permuted twice — the same mistake as sorting an already sorted list with
+     * a different key. Found by the material view, which paints the world by
+     * what it is made of: two runs of one build differ there by 0.02% of pixels
+     * and this showed 0.81%.
+     */
+    private boolean[] slotRunsPermuted = new boolean[1024];
     private long materialsStaged;
     private long materialsApplied;
     private long materialsMissing;
@@ -566,7 +606,8 @@ final class VkChunkMirror {
         boolean copied = false;
         boolean published = false;
         try {
-            VertexLayout.copy(MemoryUtil.memAddress(data), mapped + offset, sourceSize);
+            groupedCopy(slot, MemoryUtil.memAddress(data), mapped + offset, sourceSize,
+                    workerGrouping.get());
             copied = true;
         } finally {
             // No return from here: the in-flight count has to be given back
@@ -585,6 +626,12 @@ final class VkChunkMirror {
                     }
                     entry.srcOffset = offset;
                     entry.size = size;
+                    Grouping grouping = workerGrouping.get();
+                    entry.grouped = grouping.grouped;
+                    if (grouping.grouped) {
+                        System.arraycopy(grouping.counts, VertexLayout.DOWN_TABLE,
+                                entry.shelves, 0, 34);
+                    }
                     workerStaged++;
                     published = true;
                 } else {
@@ -593,6 +640,225 @@ final class VkChunkMirror {
             }
         }
         return published;
+    }
+
+    /**
+     * Scratch for one grouped copy, kept per thread so a copy allocates nothing.
+     *
+     * One byte per quad and one byte per quad again for the material walk, both
+     * grown to the largest chunk layer that thread has seen. A builder thread
+     * copies one layer at a time, so there is no sharing to guard.
+     */
+    private static final class Grouping {
+        byte[] quadShelf = new byte[4096];
+        byte[] quadMaterial = new byte[4096];
+        int[] quadTarget = new int[4096];
+        final int[] counts = new int[VertexLayout.COUNTS];
+        boolean grouped;
+
+        byte[] fitMaterial(int vertices) {
+            if (quadMaterial.length < vertices) {
+                int length = quadMaterial.length;
+                while (length < vertices) {
+                    length *= 2;
+                }
+                quadMaterial = new byte[length];
+            }
+            return quadMaterial;
+        }
+
+        void fit(int quads) {
+            if (quadShelf.length < quads) {
+                int length = quadShelf.length;
+                while (length < quads) {
+                    length *= 2;
+                }
+                quadShelf = new byte[length];
+                quadMaterial = new byte[length];
+                quadTarget = new int[length];
+            }
+        }
+    }
+
+    private final ThreadLocal<Grouping> workerGrouping = new ThreadLocal<Grouping>() {
+        @Override
+        protected Grouping initialValue() {
+            return new Grouping();
+        }
+    };
+
+    /** The render thread's own, for the path where it does the copy itself. */
+    private final Grouping renderGrouping = new Grouping();
+
+    /**
+     * Copies one chunk layer, sorting its quads by facing when that is allowed.
+     *
+     * Not allowed for the translucent layer, and the reason is the one thing
+     * this must never break: those quads arrive sorted back to front, and the
+     * order is what makes water in front of glass look like water in front of
+     * glass. Nothing here can tell which layer it is holding, so the caller's
+     * geometry is grouped only when the setting says so and the layer has no
+     * ordering to lose — see {@link #groupingWanted(int)}.
+     */
+    private void groupedCopy(int slot, long source, long destination, int sourceBytes,
+                             Grouping grouping) {
+        grouping.grouped = false;
+        if (!groupingWanted(slot)) {
+            VertexLayout.copy(source, destination, sourceBytes);
+            return;
+        }
+        int quads = sourceBytes / (VertexLayout.SOURCE_STRIDE * 4);
+        grouping.fit(Math.max(1, quads));
+        if (!VertexLayout.copyGrouped(source, destination, sourceBytes,
+                grouping.quadShelf, grouping.quadTarget, grouping.counts)) {
+            return;
+        }
+        grouping.grouped = true;
+        if (grouping.counts[0] != 0 || grouping.counts[1] != 0) {
+            permuteMaterialRuns(slot, grouping, quads);
+        }
+    }
+
+    /**
+     * Rewrites this slot's material runs into the order the quads were just put
+     * in.
+     *
+     * The runs say "up to this vertex, this material", so a permutation of the
+     * quads makes every one of them wrong. They are expanded to one material a
+     * quad, walked through the same three cursors the copy used, and encoded
+     * again — which splits each run into at most three, so a layer's eight or so
+     * runs become at most twenty-four.
+     *
+     * Done here rather than where the runs are consumed because only this side
+     * knows the permutation, and keeping it alive until the render thread asked
+     * for it would mean an array per slot that outlives the copy.
+     */
+    private void permuteMaterialRuns(int slot, Grouping grouping, int quads) {
+        synchronized (materialLock) {
+            if (slot >= slotRunCount.length) {
+                return;
+            }
+            int count = slotRunCount[slot];
+            int[] runs = slotRuns[slot];
+            if (count <= 0 || runs == null || slotRunsPermuted[slot]) {
+                return;
+            }
+            // Expanded per vertex, not per quad: a run boundary is stated in
+            // vertices, and dividing it by four would quietly round a boundary
+            // that did not land on a quad onto the wrong side of one.
+            int vertices = quads * 4;
+            byte[] material = grouping.fitMaterial(vertices);
+            int written = 0;
+            for (int r = 0; r < count && written < vertices; r++) {
+                int end = Math.min(runs[r * 2], vertices);
+                byte value = (byte) runs[r * 2 + 1];
+                while (written < end) {
+                    material[written++] = value;
+                }
+            }
+            while (written < vertices) {
+                material[written++] = 0;
+            }
+            // Permute, by the very indices the copy wrote to. Recomputing them
+            // here from the shelves would be a second implementation of the same
+            // arithmetic, and the two drifting apart would show as materials
+            // landing on the wrong blocks — a thing nobody would trace back here.
+            int[] target = grouping.quadTarget;
+            int[] rebuilt = runsScratch(vertices);
+            for (int q = 0; q < quads; q++) {
+                int to = target[q] * 4;
+                int from = q * 4;
+                rebuilt[to] = material[from] & 0xFF;
+                rebuilt[to + 1] = material[from + 1] & 0xFF;
+                rebuilt[to + 2] = material[from + 2] & 0xFF;
+                rebuilt[to + 3] = material[from + 3] & 0xFF;
+            }
+            // Encode: one run per stretch of vertices that share a material.
+            int runCount = 0;
+            int start = 0;
+            while (start < vertices) {
+                int value = rebuilt[start];
+                int end = start + 1;
+                while (end < vertices && rebuilt[end] == value) {
+                    end++;
+                }
+                if (runs.length < (runCount + 1) * 2) {
+                    int[] grown = new int[Math.max(32, runs.length * 2)];
+                    System.arraycopy(runs, 0, grown, 0, runs.length);
+                    runs = grown;
+                    slotRuns[slot] = runs;
+                }
+                runs[runCount * 2] = end;
+                runs[runCount * 2 + 1] = value;
+                runCount++;
+                start = end;
+            }
+            slotRunCount[slot] = runCount;
+            slotRunsPermuted[slot] = true;
+        }
+    }
+
+    /**
+     * Which slots hold geometry that may be sorted by facing.
+     *
+     * Everything except the translucent layer, and that exception is the whole
+     * reason this exists: those quads arrive sorted back to front by the game
+     * and the order is the effect. Stamped by the upload hook, which is the last
+     * place that still knows which layer a slot is for.
+     */
+    private volatile boolean[] slotGroupable = new boolean[1024];
+
+    void noteLayer(int slot, boolean translucent) {
+        if (slot < 0) {
+            return;
+        }
+        boolean[] flags = slotGroupable;
+        if (slot >= flags.length) {
+            synchronized (workerLock) {
+                flags = slotGroupable;
+                if (slot >= flags.length) {
+                    int length = flags.length;
+                    while (slot >= length) {
+                        length *= 2;
+                    }
+                    boolean[] grown = new boolean[length];
+                    System.arraycopy(flags, 0, grown, 0, flags.length);
+                    slotGroupable = grown;
+                    flags = grown;
+                }
+            }
+        }
+        flags[slot] = !translucent;
+    }
+
+    private boolean groupingWanted(int slot) {
+        if (!GROUP_FACINGS || slot < 0) {
+            return false;
+        }
+        boolean[] flags = slotGroupable;
+        return slot < flags.length && flags[slot];
+    }
+
+    /**
+     * Read once, for the same reason the packed layout is: it decides what goes
+     * into the geometry buffer, and a buffer holding two orders at once is a
+     * world drawn wrong in exactly the chunks that were built before the switch.
+     */
+    private static final boolean GROUP_FACINGS =
+            Boolean.getBoolean("vulkanmod112.groupFacings");
+
+    /** Caller must hold {@link #materialLock}. */
+    private int[] materialOrderScratch = new int[4096];
+
+    private int[] runsScratch(int quads) {
+        if (materialOrderScratch.length < quads) {
+            int length = materialOrderScratch.length;
+            while (length < quads) {
+                length *= 2;
+            }
+            materialOrderScratch = new int[length];
+        }
+        return materialOrderScratch;
     }
 
     /** Caller must hold {@link #workerLock}. */
@@ -636,8 +902,12 @@ final class VkChunkMirror {
                 System.arraycopy(slotRuns, 0, grownRuns, 0, slotRuns.length);
                 int[] grownCount = new int[length];
                 System.arraycopy(slotRunCount, 0, grownCount, 0, slotRunCount.length);
+                boolean[] grownPermuted = new boolean[length];
+                System.arraycopy(slotRunsPermuted, 0, grownPermuted, 0,
+                        slotRunsPermuted.length);
                 slotRuns = grownRuns;
                 slotRunCount = grownCount;
+                slotRunsPermuted = grownPermuted;
             }
             int[] stored = slotRuns[slot];
             if (stored == null || stored.length < runCount * 2) {
@@ -646,6 +916,9 @@ final class VkChunkMirror {
             }
             System.arraycopy(runs, 0, stored, 0, runCount * 2);
             slotRunCount[slot] = runCount;
+            if (slot < slotRunsPermuted.length) {
+                slotRunsPermuted[slot] = false;
+            }
             materialsStaged++;
         }
     }
@@ -665,6 +938,7 @@ final class VkChunkMirror {
                 count = slotRunCount[slot];
                 runs = slotRuns[slot];
                 slotRunCount[slot] = 0;
+                slotRunsPermuted[slot] = false;
             }
         }
         if (count == 0 || runs == null) {
@@ -694,6 +968,7 @@ final class VkChunkMirror {
         synchronized (materialLock) {
             if (slot < slotRunCount.length) {
                 slotRunCount[slot] = 0;
+                slotRunsPermuted[slot] = false;
             }
         }
     }
@@ -705,6 +980,21 @@ final class VkChunkMirror {
     }
 
     /** The staged copy for this slot if it still matches, else -1. */
+    /** {@link #takeStaged} plus the two group sizes the copy worked out. */
+    private long takeStagedGrouped(int slot, int size, Entry entry) {
+        Staged record;
+        synchronized (workerLock) {
+            record = staged.get(slot);
+            if (record != null && record.size == size) {
+                entry.grouped = record.grouped;
+                if (record.grouped) {
+                    System.arraycopy(record.shelves, 0, entry.shelves, 0, 34);
+                }
+            }
+        }
+        return takeStaged(slot, size);
+    }
+
     private long takeStaged(int slot, int size) {
         synchronized (workerLock) {
             Staged entry = staged.remove(slot);
@@ -754,7 +1044,7 @@ final class VkChunkMirror {
             // memory it points into, and discards the staged records with it.
             ensureStagingRing(size + (materials ? vertexCount : 0));
             beginUploads();
-            long src = takeStaged(slot, size);
+            long src = takeStagedGrouped(slot, size, entry);
             long materialSrc = -1L;
             if (src < 0) {
                 // May submit and wait before returning 0, so it has to come
@@ -763,8 +1053,13 @@ final class VkChunkMirror {
                 long range = allocateStagingRange(size + (materials ? vertexCount : 0));
                 src = range;
                 materialSrc = range + size;
-                VertexLayout.copy(MemoryUtil.memAddress(data), stagingMappedAddress + src,
-                        sourceSize);
+                groupedCopy(slot, MemoryUtil.memAddress(data), stagingMappedAddress + src,
+                        sourceSize, renderGrouping);
+                entry.grouped = renderGrouping.grouped;
+                if (renderGrouping.grouped) {
+                    System.arraycopy(renderGrouping.counts, VertexLayout.DOWN_TABLE,
+                            entry.shelves, 0, 34);
+                }
             } else if (materials) {
                 // The geometry is already in the ring's builder region, which
                 // this cannot disturb: it only ever rewinds the render thread's

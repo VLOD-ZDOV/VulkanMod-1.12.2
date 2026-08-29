@@ -602,6 +602,13 @@ tasks.matching { it.name in ['runClient', 'runObfClient'] }.configureEach {
     // pointing away from the camera are never drawn: the card already throws
     // those triangles away, but only after fetching every vertex, and the
     // terrain pass is bound by that fetch.
+    // -PgroupFacings=true sorts each chunk's quads into down-facing, the rest,
+    // and up-facing, so a camera above or below a section never fetches the
+    // half of it that points the other way. Read once at start, like the packed
+    // layout: one geometry buffer cannot hold two orders at once.
+    if (project.hasProperty('groupFacings')) {
+        jvmArgs '-Dvulkanmod112.groupFacings=' + project.property('groupFacings')
+    }
     if (project.hasProperty('countFacings')) {
         jvmArgs '-Dvulkanmod112.countFacings=true'
     }

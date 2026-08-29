@@ -81,6 +81,17 @@ public interface VulkanBridge {
      */
     void mirrorChunkBuffer(int slot, java.nio.ByteBuffer data);
 
+    /**
+     * Says which layer a mirror slot holds, before any geometry arrives for it.
+     *
+     * One thing depends on it: whether the copy may sort that chunk's quads by
+     * which way they face. The translucent layer may not — the game hands those
+     * quads over sorted back to front and the order is what makes the picture —
+     * and this is the only moment anything on the Vulkan side could learn the
+     * difference.
+     */
+    void noteChunkLayer(int slot, boolean translucent);
+
     /** Frees the Vulkan mirror of a deleted game VBO. */
     void releaseChunkBuffer(int slot);
 

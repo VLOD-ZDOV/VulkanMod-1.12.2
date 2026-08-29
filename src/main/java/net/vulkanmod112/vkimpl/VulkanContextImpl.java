@@ -914,6 +914,20 @@ public final class VulkanContextImpl implements VulkanBridge {
     }
 
     @Override
+    public void noteChunkLayer(int slot, boolean translucent) {
+        // Not synchronized and deliberately so: this runs on the chunk builder
+        // threads, once per upload, ahead of geometry that is copied without
+        // this monitor either. What it writes is one boolean in an array the
+        // copy reads, and a stale read costs a chunk that was not sorted --
+        // which is the safe direction, since an unsorted chunk simply draws
+        // whole.
+        VkChunkMirror mirror = chunkMirror;
+        if (mirror != null) {
+            mirror.noteLayer(slot, translucent);
+        }
+    }
+
+    @Override
     public synchronized void mirrorChunkBuffer(int slot, java.nio.ByteBuffer data) {
         if (!initialized) {
             return;
