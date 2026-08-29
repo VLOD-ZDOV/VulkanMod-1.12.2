@@ -99,14 +99,24 @@ public final class VulkanConfig {
      * Give the game's own layer filter the sections that hold blocks, rather
      * than every section on screen.
      *
-     * Off by default while it is new, and the reason is the failure it would
-     * have: a section missing from that list is a chunk that stops being drawn,
-     * which looks exactly like terrain that has not finished building. The list
-     * is exact by construction and checked against the full scan under a build
-     * flag, but "off first, on once it has been flown" is the rule this project
-     * already follows for anything that decides what gets drawn.
+     * On, and it has now been flown for. The rule this project follows is "off
+     * first, on once it has been flown", and both halves of that have been
+     * answered.
+     *
+     * <b>Correct:</b> the build flag that walks the long list as well and counts
+     * what the short one is missing was run over a moving route at render
+     * distance 32 — some 16 500 layer passes, around 2 000 sections a pass that
+     * genuinely hold geometry, and <b>none</b> missing.
+     *
+     * <b>Worth having:</b> this was hard to see because on the machine it was
+     * written on the frame waits for the card, and work taken off the processor
+     * then buys nothing. Shrinking the window moves the ceiling back onto the
+     * processor without changing how many chunks there are, and there, in four
+     * interleaved runs, it is worth seven per cent — 1320 frames a second to
+     * 1424, with the two sets not overlapping. Where the card is the ceiling it
+     * is still free; it is simply invisible.
      */
-    static final boolean DEF_SHORT_LAYER_SECTIONS = false;
+    static final boolean DEF_SHORT_LAYER_SECTIONS = true;
     /**
      * Pack a chunk vertex into sixteen bytes instead of mirroring vanilla's
      * twenty-eight unchanged.
@@ -156,7 +166,7 @@ public final class VulkanConfig {
      * choice once, which is the price, and it is said in the log rather than
      * done quietly.
      */
-    static final int SETTINGS_REVISION = 1;
+    static final int SETTINGS_REVISION = 2;
     /**
      * Shortlist the chunks the rebuild pass at the end of {@code setupTerrain}
      * can act on, instead of letting it scan every visible chunk.
@@ -855,10 +865,12 @@ public final class VulkanConfig {
                         + "walks. It takes that step from 0.72 ms a frame to 0.45, and on the "
                         + "machine it was measured on that bought no frames at all: once the "
                         + "entity passes were shortened the frame stopped waiting on this thread. "
-                        + "Worth turning on if the processor rather than the card is what holds "
-                        + "your frames back. Off by default: what it could get wrong is a chunk "
-                        + "that stops being drawn, and that looks exactly like terrain still "
-                        + "building.");
+                        + "Measured again with the window made small enough that the processor "
+                        + "is what holds the frame back, which is the case this is for: seven per "
+                        + "cent, 1320 frames a second to 1424. Where the card is the ceiling it "
+                        + "costs nothing and shows nothing. On by default now that the list has "
+                        + "been checked against the full scan over 16 500 layer passes with "
+                        + "nothing missing; turn it off if a chunk ever stops being drawn.");
         atlasPixelsSeen = config.getInt("atlasPixelsSeen", CATEGORY_ADVANCED,
                 DEF_ATLAS_PIXELS_SEEN, 0, 65536,
                 "Remembered, not set: how many pixels across the block atlas was last time. "
@@ -894,6 +906,22 @@ public final class VulkanConfig {
                                 + "Advanced turns it off again if you want it off.");
             }
             settingsRevision = 1;
+            store(CATEGORY_ADVANCED, "settingsRevision", settingsRevision);
+        }
+        // Revision 2: the short layer filter list, off since it was written
+        // because nothing could show what it was worth. A small window puts the
+        // processor back in charge of the frame, and there it is seven per cent.
+        if (settingsRevision < 2) {
+            if (shortLayerSections != DEF_SHORT_LAYER_SECTIONS) {
+                shortLayerSections = DEF_SHORT_LAYER_SECTIONS;
+                store(CATEGORY_OPTIMIZATION, "shortLayerSections", shortLayerSections);
+                net.vulkanmod112.VulkanMod112.LOGGER.info(
+                        "Short Layer Filter List is now on by default and has been switched on in "
+                                + "your settings. It is worth around seven per cent when the "
+                                + "processor rather than the card is what holds your frames back; "
+                                + "Optimization turns it off again.");
+            }
+            settingsRevision = 2;
             store(CATEGORY_ADVANCED, "settingsRevision", settingsRevision);
         }
         // The command line wins, so the two arms of a comparison differ by one
