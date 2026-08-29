@@ -8,7 +8,12 @@
   when the visible set is walked afresh or a slot is handed out or given back,
   which in flight is one frame in ten. Nothing about the picture changes, and
   that was checked by comparing frames rather than by looking: the difference
-  from the previous build is a handful of cows that had walked.
+  from the previous build is a handful of cows that had walked. Be told what it
+  is worth on a fast machine: nothing. Standing in one place, where the
+  measurement is good to half a per cent, the frame rate is the same to within
+  one frame — because at this render distance the card is what the frame waits
+  for, and this is work taken off the processor. It is there for the machines
+  where that is the other way round.
 
 - **Rain no longer falls through twenty blocks of rock.** How wet a floor got
   was taken from its sky light, which is not the same question as whether the
