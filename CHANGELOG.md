@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+- **The short layer filter list is on by default.** Four times a frame the game
+  walks every visible section asking whether it has anything in the layer being
+  drawn — at render distance 32 that is around 20 000 questions of which some
+  2 000 are useful, and the answer is one bit on an object this mod's visibility
+  search already has in its hand. This has existed and been switched off since
+  it was written, because on the machine it was written on it bought nothing:
+  that frame waits for the card, and this is work taken off the processor. Made
+  small enough that the processor is the ceiling again, it is worth seven per
+  cent. What it could get wrong is a chunk that stops being drawn, so it was not
+  turned on by eye: the mod can walk the long list alongside the short one and
+  count what is missing, and over 16 500 layer passes on a moving route nothing
+  was. Optimization turns it off again, and a settings file from an earlier
+  version is moved once, with a line in the log saying so.
+
 - **The list of chunks to draw is kept between frames.** It was built four
   times a frame, once per layer, out of numbers that never depended on where
   the camera was — a mirror slot and a block position. It is now rebuilt only
