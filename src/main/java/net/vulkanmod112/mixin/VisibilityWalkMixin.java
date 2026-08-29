@@ -3,6 +3,7 @@ package net.vulkanmod112.mixin;
 import net.minecraft.client.renderer.RenderGlobal;
 import net.minecraft.client.renderer.culling.ICamera;
 import net.minecraft.entity.Entity;
+import net.vulkanmod112.client.TerrainHooks;
 import net.vulkanmod112.client.VanillaFrame;
 import net.vulkanmod112.client.VulkanConfig;
 import net.vulkanmod112.client.WalkTimer;
@@ -121,6 +122,11 @@ public abstract class VisibilityWalkMixin implements WalkTimer {
     @Override
     public void vulkanmod112$noteWalkRan() {
         VanillaFrame.countWalkRan();
+        // The one place both walks meet. The packed chunk list is kept between
+        // frames now, and this is the instruction that says the set it was
+        // packed from is being replaced — whether the replacement search did it
+        // or vanilla's own flood fill did.
+        TerrainHooks.noteChunkListChanged();
     }
 
     /** The rearm for any visible chunk that still needs rebuilding. */

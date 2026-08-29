@@ -152,7 +152,21 @@ public final class TerrainHooks {
     private static final int[] layerCount = new int[4];
     private static final int[] layerGeneration = {-1, -1, -1, -1};
     private static final int[] layerListSize = new int[4];
+    private static final int[] layerReuses = new int[4];
     private static int chunkListGeneration;
+
+    /**
+     * How many frames in a row a layer may be drawn from the kept list.
+     *
+     * Insurance, not tuning. Every path that changes the list calls
+     * {@link #noteChunkListChanged()} — but one of those calls lives in a mixin,
+     * and a mixin in this mod can take itself out of the game when it fails to
+     * apply. If that ever happens to the one watching the walk, without this
+     * the world would stop changing and nothing would say why. With it, the
+     * worst case is a list a fifth of a second old, which is a bug somebody
+     * reports rather than a frozen world.
+     */
+    private static final int LIST_REUSE_CEILING = 20;
     private static long packHits;
     private static long packMisses;
 
@@ -663,8 +677,10 @@ public final class TerrainHooks {
         int count = chunks.size();
         int ordinal = layer.ordinal();
         if (layerData[ordinal] != null && layerGeneration[ordinal] == chunkListGeneration
-                && layerListSize[ordinal] == count) {
+                && layerListSize[ordinal] == count
+                && layerReuses[ordinal] < LIST_REUSE_CEILING) {
             packHits++;
+            layerReuses[ordinal]++;
             chunkData = layerData[ordinal];
             int drawn = layerCount[ordinal];
             if (layer == BlockRenderLayer.SOLID) {
@@ -699,6 +715,7 @@ public final class TerrainHooks {
             chunkData[i++] = pos.getZ();
         }
         layerCount[ordinal] = i / 4;
+        layerReuses[ordinal] = 0;
         layerGeneration[ordinal] = chunkListGeneration;
         layerListSize[ordinal] = count;
         if (layer == BlockRenderLayer.SOLID) {
