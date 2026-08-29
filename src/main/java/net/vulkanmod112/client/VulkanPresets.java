@@ -299,9 +299,15 @@ public final class VulkanPresets {
         look.backgroundFps = 5;
         look.animations = false;
         look.flatBlockColours = false;
-        // A third frame in flight gives the processor more room when it is the
-        // thing holding the frame up, which is what this preset assumes.
-        look.framesInFlight = 3;
+        // Two, not three. A third frame in flight was here on the reasoning
+        // that it gives the processor more room when the processor is what
+        // holds the frame up — and at render distance 32, where that is most
+        // nearly true, it was measured and it is not: two pairs of runs came
+        // out at 933 and 922 frames a second while two runs of the same build
+        // differed by 42. What the third frame does cost is certain rather
+        // than hoped for: a frame of input latency and a third more of every
+        // per-frame buffer.
+        look.framesInFlight = 2;
         // Chunk building is what the frame waits for at long render distances,
         // and vanilla sizes that thread pool from the heap rather than from the
         // processor. A preset named for performance is the right place to take
