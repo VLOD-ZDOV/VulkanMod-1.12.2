@@ -371,6 +371,32 @@ final class VkTerrainRenderer {
     private final long[] drawBatchMapped = new long[framesInFlight * BATCHES_PER_FRAME];
     private final long[] drawDescriptorSets = new long[framesInFlight * BATCHES_PER_FRAME];
     /** Draws each batch buffer can hold; grown to fit the scene, never shrunk. */
+    /**
+     * Where the side shelves sit in a chunk's copy of the shelf tables, and
+     * which is which, in the ring order the copy step wrote them in.
+     */
+    private static final int SIDE_ROW = VertexLayout.SIDE_TABLE - VertexLayout.DOWN_TABLE;
+    private static final int SIDE_NEG_X = 0;
+    private static final int SIDE_NEG_Z = 1;
+    private static final int SIDE_POS_X = 2;
+    private static final int SIDE_POS_Z = 3;
+
+    /**
+     * The runs of quads one chunk still has to draw, at most three of them.
+     *
+     * Fields rather than locals because this is written for every chunk of
+     * every layer of every frame, and a two-element array allocated there is
+     * some twenty thousand allocations a frame.
+     */
+    private final int[] drawRunFrom = new int[3];
+    private final int[] drawRunTo = new int[3];
+
+    /**
+     * How many draws a chunk can turn into, so the batch is sized for the worst
+     * case rather than the usual one.
+     */
+    private static final int RUNS_PER_CHUNK = 3;
+
     private int indirectDrawCapacity = INITIAL_INDIRECT_DRAWS;
     private long drawCommandOffset = (long) INITIAL_INDIRECT_DRAWS * DRAW_ORIGIN_BYTES;
     private long drawBatchBytes = drawCommandOffset
@@ -1860,7 +1886,7 @@ final class VkTerrainRenderer {
             firstFrameStage("targets shared with OpenGL");
             // Sized from the previous frame's largest layer as well, so a growth
             // step is not spent on SOLID only to be undone by CUTOUT.
-            ensureDrawBatchCapacity(Math.max(chunkCount, peakDrawsNeeded));
+            ensureDrawBatchCapacity(Math.max(chunkCount, peakDrawsNeeded) * RUNS_PER_CHUNK);
             peakDrawsNeeded = chunkCount;
             beginFrame(mvp, mirror);
             // Solid and leaves together, which is not what this did at first:
@@ -2843,9 +2869,13 @@ final class VkTerrainRenderer {
                 // after fetching every one of those vertices, and fetching is
                 // what this pass is bound by. Both ends can never go at once,
                 // and geometry that was never grouped has zero at both.
-                int stride = VertexLayout.stride();
-                int firstQuad = 0;
-                int drawnVertices = vertexCount;
+                int quadCount = vertexCount / 4;
+                int begin = 0;
+                int end = quadCount;
+                int holeOneFrom = 0;
+                int holeOneTo = 0;
+                int holeTwoFrom = 0;
+                int holeTwoTo = 0;
                 if (entry.grouped) {
                     // Which of this section's sixteen levels the camera is in,
                     // or one past either end when it is outside. Everything
@@ -2856,25 +2886,74 @@ final class VkTerrainRenderer {
                             viewY + cameraOffset[1] - chunks[c * 4 + 2]);
                     int below = level < 0 ? 0 : level > 16 ? 16 : level;
                     int above = level + 1 < 0 ? 0 : level + 1 > 16 ? 16 : level + 1;
-                    firstQuad = entry.shelves[below];
-                    int tailQuads = entry.shelves[17 + above];
-                    drawnVertices -= (firstQuad + tailQuads) * 4;
+                    begin = entry.shelves[below];
+                    end = quadCount - entry.shelves[17 + above];
+                    // The sideways half of the same argument, and it needs no
+                    // levels: a camera east of the whole section sees none of
+                    // its west-facing quads, and at this render distance a
+                    // camera is outside all but a handful of sections in x and
+                    // in z both.
+                    double sideX = viewX + cameraOffset[0] - chunks[c * 4 + 1];
+                    double sideZ = viewZ + cameraOffset[2] - chunks[c * 4 + 3];
+                    int first = sideX >= 16.0 ? SIDE_NEG_X : sideX <= 0.0 ? SIDE_POS_X : -1;
+                    int second = sideZ >= 16.0 ? SIDE_NEG_Z : sideZ <= 0.0 ? SIDE_POS_Z : -1;
+                    if (first > second) {
+                        int swap = first;
+                        first = second;
+                        second = swap;
+                    }
+                    // The shelves are a ring, so two neighbours are one hole
+                    // and the opposite corner is two.
+                    if (first >= 0) {
+                        holeOneFrom = entry.shelves[SIDE_ROW + first];
+                        holeOneTo = entry.shelves[SIDE_ROW + (second == first + 1
+                                ? second + 1 : first + 1)];
+                        if (second != first + 1) {
+                            holeTwoFrom = entry.shelves[SIDE_ROW + second];
+                            holeTwoTo = entry.shelves[SIDE_ROW + second + 1];
+                        }
+                    } else if (second >= 0) {
+                        holeOneFrom = entry.shelves[SIDE_ROW + second];
+                        holeOneTo = entry.shelves[SIDE_ROW + second + 1];
+                    }
+                }
+                // The kept quads, as one to three runs: what is left of the
+                // range once the two ends and the holes in the middle are gone.
+                int runs = 0;
+                int cursor = begin;
+                if (holeOneTo > holeOneFrom) {
+                    if (holeOneFrom > cursor) {
+                        drawRunFrom[runs] = cursor;
+                        drawRunTo[runs++] = holeOneFrom;
+                    }
+                    cursor = holeOneTo;
+                }
+                if (holeTwoTo > holeTwoFrom) {
+                    if (holeTwoFrom > cursor) {
+                        drawRunFrom[runs] = cursor;
+                        drawRunTo[runs++] = holeTwoFrom;
+                    }
+                    cursor = holeTwoTo;
+                }
+                if (end > cursor) {
+                    drawRunFrom[runs] = cursor;
+                    drawRunTo[runs++] = end;
+                }
+                int drawnVertices = 0;
+                for (int r = 0; r < runs; r++) {
+                    drawnVertices += (drawRunTo[r] - drawRunFrom[r]) * 4;
                 }
                 if (drawnVertices <= 0) {
                     frameFacingSkipped += vertexCount;
                     continue;
                 }
                 frameFacingSkipped += vertexCount - drawnVertices;
-                if (drawCount >= indirectDrawCapacity) {
+                if (drawCount + runs > indirectDrawCapacity) {
                     frameSkipped++;
                     continue;
                 }
                 frameChunks++;
                 frameVertices += drawnVertices;
-                long origin = mapped + (long) drawCount * DRAW_ORIGIN_BYTES;
-                MemoryUtil.memPutFloat(origin, (float) (chunks[c * 4 + 1] - viewX));
-                MemoryUtil.memPutFloat(origin + 4, (float) (chunks[c * 4 + 2] - viewY));
-                MemoryUtil.memPutFloat(origin + 8, (float) (chunks[c * 4 + 3] - viewZ));
                 // Where this chunk's first vertex sits within a quad.
                 //
                 // gl_VertexIndex carries the draw's vertexOffset added in, and
@@ -2885,26 +2964,38 @@ final class VkTerrainRenderer {
                 // low two bits cannot simply be masked off. Handing them over
                 // costs a float that was being written as zero anyway.
                 int baseVertex = (int) (entry.offset / VertexLayout.stride());
-                MemoryUtil.memPutFloat(origin + 12, baseVertex & 3);
-                if (logInputs) {
-                    logInputs = false;
-                    ByteBuffer push = stack.malloc(12);
-                    push.putFloat(0, MemoryUtil.memGetFloat(origin));
-                    push.putFloat(4, MemoryUtil.memGetFloat(origin + 4));
-                    push.putFloat(8, MemoryUtil.memGetFloat(origin + 8));
-                    logDrawInputs(mvp, push, entry);
+                // One origin per command rather than one per chunk. A command
+                // finds its chunk through its own draw number, so two runs of
+                // the same chunk each need their own copy of the same four
+                // floats — sixteen bytes against a whole run of vertices not
+                // fetched, and it keeps the shader's one indexing rule intact.
+                for (int r = 0; r < runs; r++) {
+                    long origin = mapped + (long) drawCount * DRAW_ORIGIN_BYTES;
+                    MemoryUtil.memPutFloat(origin, (float) (chunks[c * 4 + 1] - viewX));
+                    MemoryUtil.memPutFloat(origin + 4, (float) (chunks[c * 4 + 2] - viewY));
+                    MemoryUtil.memPutFloat(origin + 8, (float) (chunks[c * 4 + 3] - viewZ));
+                    MemoryUtil.memPutFloat(origin + 12, baseVertex & 3);
+                    if (logInputs) {
+                        logInputs = false;
+                        ByteBuffer push = stack.malloc(12);
+                        push.putFloat(0, MemoryUtil.memGetFloat(origin));
+                        push.putFloat(4, MemoryUtil.memGetFloat(origin + 4));
+                        push.putFloat(8, MemoryUtil.memGetFloat(origin + 8));
+                        logDrawInputs(mvp, push, entry);
+                    }
+                    long command = mapped + drawCommandOffset
+                            + (long) drawCount * DRAW_COMMAND_BYTES;
+                    MemoryUtil.memPutInt(command, (drawRunTo[r] - drawRunFrom[r]) * 6);
+                    MemoryUtil.memPutInt(command + 4, 1);
+                    // Six indices a quad, so starting part way in is an offset
+                    // into the shared quad index buffer and nothing else. The
+                    // base vertex is untouched, which keeps the corner number
+                    // the shader derives from it: a whole number of quads is a
+                    // whole number of fours.
+                    MemoryUtil.memPutInt(command + 8, drawRunFrom[r] * 6);
+                    MemoryUtil.memPutInt(command + 12, baseVertex);
+                    MemoryUtil.memPutInt(command + 16, drawCount++);
                 }
-                long command = mapped + drawCommandOffset + (long) drawCount * DRAW_COMMAND_BYTES;
-                MemoryUtil.memPutInt(command, drawnVertices / 4 * 6);
-                MemoryUtil.memPutInt(command + 4, 1);
-                // Six indices a quad, so skipping whole quads at the front is
-                // an offset into the shared quad index buffer and nothing else.
-                // The base vertex is untouched, which keeps the corner number
-                // the shader derives from it: a whole number of quads is a
-                // whole number of fours.
-                MemoryUtil.memPutInt(command + 8, firstQuad * 6);
-                MemoryUtil.memPutInt(command + 12, (int) (entry.offset / VertexLayout.stride()));
-                MemoryUtil.memPutInt(command + 16, drawCount++);
             }
             chunkWriteNanos += System.nanoTime() - writeStart;
             chunkWriteChunks += chunkCount;

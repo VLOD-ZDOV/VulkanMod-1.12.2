@@ -78,7 +78,7 @@ final class VkChunkMirror {
          * {@link #grouped} rather than a zero test, because a chunk with no
          * down-facing quads at all is a legitimate answer and not "unsorted".
          */
-        final int[] shelves = new int[34];
+        final int[] shelves = new int[VertexLayout.DRAW_TABLES];
         boolean grouped;
         /**
          * Bumped on every upload into this slot.
@@ -215,7 +215,7 @@ final class VkChunkMirror {
         long srcOffset;
         int size;
         /** Down-facing quads below each level, then up-facing at or above it. */
-        final int[] shelves = new int[34];
+        final int[] shelves = new int[VertexLayout.DRAW_TABLES];
         boolean grouped;
         /**
          * This copy's materials, one byte a vertex, in this copy's own order.
@@ -634,7 +634,7 @@ final class VkChunkMirror {
                     entry.materialVertices = 0;
                     if (grouping.grouped) {
                         System.arraycopy(grouping.counts, VertexLayout.DOWN_TABLE,
-                                entry.shelves, 0, 34);
+                                entry.shelves, 0, VertexLayout.DRAW_TABLES);
                         int carried = grouping.permutedVertices;
                         if (carried > 0) {
                             if (entry.material.length < carried) {
@@ -1011,7 +1011,7 @@ final class VkChunkMirror {
             if (record != null && record.size == size) {
                 entry.grouped = record.grouped;
                 if (record.grouped) {
-                    System.arraycopy(record.shelves, 0, entry.shelves, 0, 34);
+                    System.arraycopy(record.shelves, 0, entry.shelves, 0, VertexLayout.DRAW_TABLES);
                 }
                 if (record.materialVertices > 0) {
                     if (carriedMaterial.length < record.materialVertices) {
@@ -1091,7 +1091,7 @@ final class VkChunkMirror {
                 carriedVertices = 0;
                 if (renderGrouping.grouped) {
                     System.arraycopy(renderGrouping.counts, VertexLayout.DOWN_TABLE,
-                            entry.shelves, 0, 34);
+                            entry.shelves, 0, VertexLayout.DRAW_TABLES);
                     carriedVertices = renderGrouping.permutedVertices;
                     if (carriedVertices > 0) {
                         if (carriedMaterial.length < carriedVertices) {

@@ -272,24 +272,43 @@ public final class VertexLayout {
         MemoryUtil.memPutShort(to + 14, texture(MemoryUtil.memGetFloat(from + 20)));
     }
 
-    /** Quads whose face points straight down, then everything else, then up. */
+    /** Which way a quad's face points, as far as skipping it goes. */
     public static final int GROUP_DOWN = 0;
     public static final int GROUP_MIDDLE = 1;
     public static final int GROUP_UP = 2;
+    public static final int GROUP_NEG_X = 3;
+    public static final int GROUP_NEG_Z = 4;
+    public static final int GROUP_POS_X = 5;
+    public static final int GROUP_POS_Z = 6;
 
     /** Shelf 16: down-facing quads outside the section, never skipped. */
     private static final int DOWN_OUTSIDE = 16;
-    /** Shelf 17: quads that face neither straight up nor straight down. */
-    private static final int MIDDLE_SHELF = 17;
-    /** Shelf 18: up-facing quads outside the section's own levels. */
-    private static final int UP_SHELF = 18;
-    /** Down 0..16, the middle, up 18..34. */
-    public static final int SHELVES = 35;
-    /** Where the two tables the draw side reads begin inside {@code counts}. */
+    /**
+     * Shelves 17..20: the four sideways facings, in a ring.
+     *
+     * The order is −X, −Z, +X, +Z rather than the obvious −X, +X, −Z, +Z, and
+     * that is the whole trick of it. A camera sees exactly one of each opposite
+     * pair, so the two shelves it can see are one from the X pair and one from
+     * the Z pair — and in a ring, any such choice is two neighbours. Three of
+     * the four corners of the world therefore leave a single hole in the range
+     * and the fourth leaves two, instead of two holes every time.
+     */
+    private static final int SIDE_SHELF = 17;
+    /** Shelf 21: quads that face along no axis at all — crossed plants, slopes. */
+    private static final int MIDDLE_SHELF = 21;
+    /** Shelf 22: up-facing quads outside the section's own levels. */
+    private static final int UP_SHELF = 22;
+    /** Down 0..16, the four sides, the middle, up 22..38. */
+    public static final int SHELVES = 39;
+    /** Where the three tables the draw side reads begin inside {@code counts}. */
     public static final int DOWN_TABLE = 4;
     public static final int UP_TABLE = 21;
+    /** Five quad offsets: where each of the four side shelves starts, and their end. */
+    public static final int SIDE_TABLE = 38;
     /** How long {@code counts} has to be. */
-    public static final int COUNTS = 38;
+    public static final int COUNTS = 43;
+    /** How many of {@code counts} the draw side keeps, from {@link #DOWN_TABLE} on. */
+    public static final int DRAW_TABLES = COUNTS - DOWN_TABLE;
 
     private static final ThreadLocal<int[]> SHELF_TALLY = new ThreadLocal<int[]>() {
         @Override
@@ -374,12 +393,32 @@ public final class VertexLayout {
             int shelf;
             if (group == GROUP_MIDDLE) {
                 shelf = MIDDLE_SHELF;
-            } else {
+            } else if (group == GROUP_DOWN || group == GROUP_UP) {
                 int level = (int) Math.floor(MemoryUtil.memGetFloat(quad + 4));
                 boolean inside = level >= 0 && level < 16;
                 shelf = group == GROUP_DOWN
                         ? (inside ? level : DOWN_OUTSIDE)
                         : (inside ? UP_SHELF + 1 + level : UP_SHELF);
+            } else {
+                // The sideways ones are not shelved by which column they stand
+                // in, and that is a deliberate difference from the vertical
+                // ones. A camera is nearly always outside a section's own
+                // sixteen blocks of x and of z — at this render distance all but
+                // a handful of sections are — so the whole-section answer is
+                // already the exact one, and seventeen shelves an axis would buy
+                // a fraction of a per cent for four times the bookkeeping.
+                //
+                // That answer is only exact while the quad is inside the
+                // section it was built for. A model may reach past its own
+                // block — vanilla's do not, but a mod's may — and one that
+                // reaches out to the east would be dropped by a camera further
+                // east still, which is the section's answer and not the quad's.
+                // Those go in the middle, where nothing is ever skipped.
+                boolean alongX = group == GROUP_NEG_X || group == GROUP_POS_X;
+                float on = MemoryUtil.memGetFloat(quad + (alongX ? 0 : 8));
+                shelf = on >= 0.0f && on <= 16.0f
+                        ? SIDE_SHELF + (group - GROUP_NEG_X)
+                        : MIDDLE_SHELF;
             }
             quadShelf[q] = (byte) shelf;
             tally[shelf]++;
@@ -408,6 +447,13 @@ public final class VertexLayout {
         }
         counts[0] = (tally[DOWN_OUTSIDE] + below) * 4;
         counts[1] = (tally[UP_SHELF] + above) * 4;
+        // Where each side shelf begins and where the last one ends, in quads.
+        // Taken before the placement loop below, which spends `start` as it
+        // goes.
+        for (int side = 0; side < 4; side++) {
+            counts[SIDE_TABLE + side] = start[SIDE_SHELF + side];
+        }
+        counts[SIDE_TABLE + 4] = start[MIDDLE_SHELF];
         int stride = stride();
         for (int q = 0; q < quads; q++) {
             int target = start[quadShelf[q] & 0xFF]++;
@@ -437,7 +483,7 @@ public final class VertexLayout {
      * disappears from under the camera the moment this is switched on, which is
      * the loudest failure available and the cheapest to see.
      */
-    private static int facingGroup(long quad) {
+    static int facingGroup(long quad) {
         float ax = MemoryUtil.memGetFloat(quad + SOURCE_STRIDE) - MemoryUtil.memGetFloat(quad);
         float ay = MemoryUtil.memGetFloat(quad + SOURCE_STRIDE + 4) - MemoryUtil.memGetFloat(quad + 4);
         float az = MemoryUtil.memGetFloat(quad + SOURCE_STRIDE + 8) - MemoryUtil.memGetFloat(quad + 8);
@@ -451,13 +497,18 @@ public final class VertexLayout {
         if (square <= 1.0e-18f) {
             return GROUP_MIDDLE;
         }
-        // Straight up or straight down only: a plant's crossed quad is at
-        // forty-five degrees and stays in the middle, where it is always drawn.
-        float flatness = ny * ny / square;
-        if (flatness < 0.998f) {
-            return GROUP_MIDDLE;
+        // Along one axis only: a plant's crossed quad is at forty-five degrees
+        // and stays in the middle, where it is always drawn.
+        if (ny * ny / square >= 0.998f) {
+            return ny > 0.0f ? GROUP_UP : GROUP_DOWN;
         }
-        return ny > 0.0f ? GROUP_UP : GROUP_DOWN;
+        if (nx * nx / square >= 0.998f) {
+            return nx > 0.0f ? GROUP_POS_X : GROUP_NEG_X;
+        }
+        if (nz * nz / square >= 0.998f) {
+            return nz > 0.0f ? GROUP_POS_Z : GROUP_NEG_Z;
+        }
+        return GROUP_MIDDLE;
     }
 
     static short position(float value) {

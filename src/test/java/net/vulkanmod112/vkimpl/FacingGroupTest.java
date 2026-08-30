@@ -129,6 +129,99 @@ class FacingGroupTest {
         }
     }
 
+    /** One quad facing squarely along an axis, or along none of them. */
+    private static void writeFacing(ByteBuffer buffer, int quad, float y, int facing, int tag) {
+        // 0 down, 1 up, 2 −X, 3 +X, 4 −Z, 5 +Z, 6 on no axis at all. The
+        // winding decides the normal, so these are corner orders and nothing
+        // else — get one backwards and the test says so rather than the world.
+        float[][] corners;
+        switch (facing) {
+            case 0:
+                corners = new float[][] {{0, y, 0}, {1, y, 0}, {1, y, 1}, {0, y, 1}};
+                break;
+            case 1:
+                corners = new float[][] {{0, y, 0}, {0, y, 1}, {1, y, 1}, {1, y, 0}};
+                break;
+            case 2:
+                corners = new float[][] {{0, y, 0}, {0, y, 1}, {0, y + 1, 1}, {0, y + 1, 0}};
+                break;
+            case 3:
+                corners = new float[][] {{1, y, 0}, {1, y + 1, 0}, {1, y + 1, 1}, {1, y, 1}};
+                break;
+            case 4:
+                corners = new float[][] {{0, y, 0}, {0, y + 1, 0}, {1, y + 1, 0}, {1, y, 0}};
+                break;
+            case 5:
+                corners = new float[][] {{0, y, 1}, {1, y, 1}, {1, y + 1, 1}, {0, y + 1, 1}};
+                break;
+            default:
+                corners = new float[][] {{0, y, 0}, {1, y, 1}, {1, y + 1, 1}, {0, y + 1, 0}};
+                break;
+        }
+        for (int c = 0; c < 4; c++) {
+            int at = (quad * 4 + c) * STRIDE;
+            buffer.putFloat(at, corners[c][0]);
+            buffer.putFloat(at + 4, corners[c][1]);
+            buffer.putFloat(at + 8, corners[c][2]);
+            buffer.putInt(at + 12, tag);
+            buffer.putFloat(at + 16, 0.0f);
+            buffer.putFloat(at + 20, 0.0f);
+            buffer.putShort(at + 24, (short) 240);
+            buffer.putShort(at + 26, (short) 240);
+        }
+    }
+
+    @Test
+    void sidewaysQuadsLandInTheRingInOrder() {
+        int perFacing = 3;
+        int quads = 7 * perFacing;
+        ByteBuffer source = MemoryUtil.memAlloc(quads * 4 * STRIDE);
+        ByteBuffer packed = MemoryUtil.memAlloc(quads * 4 * VertexLayout.SOURCE_STRIDE);
+        try {
+            // Interleaved rather than grouped, so arriving sorted cannot pass
+            // for having been sorted.
+            for (int q = 0; q < quads; q++) {
+                writeFacing(source, q, q % 16, q % 7, q);
+            }
+            byte[] shelf = new byte[quads];
+            int[] target = new int[quads];
+            int[] counts = new int[VertexLayout.COUNTS];
+            assertTrue(VertexLayout.copyGrouped(MemoryUtil.memAddress(source),
+                    MemoryUtil.memAddress(packed), quads * 4 * STRIDE, shelf, target, counts),
+                    "a whole number of quads should group");
+
+            // The ring is −X, −Z, +X, +Z, and each of its four shelves holds
+            // its three quads and only those.
+            int[] ring = {2, 4, 3, 5};
+            for (int side = 0; side < 4; side++) {
+                int from = counts[VertexLayout.SIDE_TABLE + side];
+                int to = counts[VertexLayout.SIDE_TABLE + side + 1];
+                assertEquals(perFacing, to - from,
+                        "shelf " + side + " of the ring holds its own quads");
+                for (int p = from; p < to; p++) {
+                    int tag = MemoryUtil.memGetInt(MemoryUtil.memAddress(packed)
+                            + (long) p * 4 * VertexLayout.stride() + colourOffset());
+                    assertEquals(ring[side], tag % 7,
+                            "quad at slot " + p + " faces the way its shelf says");
+                }
+            }
+
+            // The four shelves are consecutive, which is what lets two of them
+            // be skipped as one hole.
+            assertEquals(counts[VertexLayout.SIDE_TABLE] + 4 * perFacing,
+                    counts[VertexLayout.SIDE_TABLE + 4],
+                    "the ring is one unbroken stretch");
+
+            // And the vertical shelves still answer as they did: a camera above
+            // the section skips every down-facing quad and no side-facing one.
+            assertEquals(perFacing, counts[0] / 4, "one facing down per group");
+            assertEquals(perFacing, counts[1] / 4, "one facing up per group");
+        } finally {
+            MemoryUtil.memFree(source);
+            MemoryUtil.memFree(packed);
+        }
+    }
+
     /** Where the untouched colour word sits, in whichever layout is compiled in. */
     private static int colourOffset() {
         return VertexLayout.stride() == VertexLayout.COMPACT_STRIDE ? 8 : 12;
