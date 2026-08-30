@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+- **A chunk's faces can be sorted by which way they point** — Optimization →
+  Group Quad Facings, off while it is new. Standing above a floor you cannot see
+  its underside, and the card knows that as well as you do; what it cannot do is
+  know it in time. Back-face culling happens after the vertex shader, so every
+  one of those hidden vertices is read from memory and transformed before being
+  thrown away, and reading vertices is precisely what this renderer's terrain
+  pass is limited by — nine times the pixels cost it a fifth, nine million
+  vertices cost it everything. Sorted at copy time into the faces that point
+  down, the ones that point neither way, and the ones that point up, the draw
+  simply stops short of the half a camera is on the wrong side of. Measured at
+  render distance 32: 12.8% of the reading never happens, and the frame rate
+  goes from 633 to 671 standing and from 566 to 597 flying. It is off by default
+  for a reason worth stating: while it was being built it was wrong twice, and
+  both times the ordinary picture looked perfect — only the view that paints the
+  world by material showed it. Something that can be wrong without looking wrong
+  should have a session behind it first. Takes effect on the next start.
+
 - **The short layer filter list is on by default.** Four times a frame the game
   walks every visible section asking whether it has anything in the layer being
   drawn — at render distance 32 that is around 20 000 questions of which some
