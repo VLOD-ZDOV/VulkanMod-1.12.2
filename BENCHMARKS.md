@@ -56,9 +56,11 @@ better.
 | Nothirium | 865 | 855 | **822** | 565 |
 | Relictium | 659 | 656 | 659 | **646** |
 
-"Everything on" means packed chunk vertices and the short layer filter list. The packing has
-since become the default; the layer filter is still off, and it is off because it is new rather
-than because it costs anything.
+"Everything on" means packed chunk vertices and the short layer filter list. **Both are the
+default now**, so the row above them is the one to read for a fresh install — the table is kept
+as measured rather than restated, because the two rows together are what say how much of the
+gain is settings and how much is the renderer. The one setting still off is Group Quad Facings,
+which is newer than this table and worth about another six per cent.
 
 Against the game's own renderer:
 
