@@ -9,11 +9,17 @@
   one of those hidden vertices is read from memory and transformed before being
   thrown away, and reading vertices is precisely what this renderer's terrain
   pass is limited by — nine times the pixels cost it a fifth, nine million
-  vertices cost it everything. Sorted at copy time into the faces that point
-  down, the ones that point neither way, and the ones that point up, the draw
-  simply stops short of the half a camera is on the wrong side of. Measured at
-  render distance 32: 12.8% of the reading never happens, and the frame rate
-  goes from 633 to 671 standing and from 566 to 597 flying. It shipped switched
+  vertices cost it everything. Sorted at copy time by which way each face
+  points, the draw simply stops short of the parts a camera is on the wrong side
+  of: the undersides of the floor it stands on, the tops of the ceiling above
+  it, and the two sides of every section that face away from it. The four
+  sideways shelves are kept in a ring rather than in pairs, which is the whole
+  trick of the thing — a camera sees one of each opposite pair, and in a ring
+  any such choice is two neighbours, so what it cannot see is usually one
+  unbroken stretch and never more than two. Measured at render distance 32:
+  **36% of the reading never happens**, and the frame rate rises thirteen per
+  cent at 720p, twelve at 1080p, eleven at 1440p and five at 4K, where the frame
+  is spending its time on pixels rather than vertices. It shipped switched
   off for a reason worth stating: while it was being built it was wrong twice,
   and both times the ordinary picture looked perfect — only the view that paints
   the world by material showed it. Something that can be wrong without looking

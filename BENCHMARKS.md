@@ -53,8 +53,8 @@ better.
 | The game's own renderer | 163 | 165 | 163 | 152 |
 | **This mod** | **953** | 855 | 734 | 532 |
 | **This mod, everything on** | **1128** | **972** | 797 | 564 |
-| **This mod, with facing groups** | **1155** | **997** | 808 | 560 |
-| Nothirium | 865 | 855 | **822** | 565 |
+| **This mod, with facing groups** | **1231** | **1059** | **856** | 576 |
+| Nothirium | 865 | 855 | 822 | 565 |
 | Relictium | 659 | 656 | 659 | **646** |
 
 The first four rows are all this mod; they differ only in settings, and they are kept apart
@@ -64,12 +64,13 @@ adds quad facing groups, and **all three of those are the default now**, so the 
 the one to read for a fresh install.
 
 That fourth row was measured in a later session, so it comes with its own control: the same
-build with facing groups switched off, run alongside it, at 1104 / 932 / 777 / 546. That is two
-to four per cent under the row above — the machine, not the code, and within the noise floor
-this table already declares. Read the facing-group row as the row above it plus **+4.6% / +7.0%
-/ +4.0% / +2.6%**, which is what the paired runs actually measured, and note that the gain is
-largest in the middle: a small window is short of chunks to save on and a large one spends its
-frame on pixels instead.
+build with facing groups switched off, run alongside it in the same session, at 1087 / 944 / 770
+/ 547. That control sits two to four per cent under the row above it, which is the machine
+rather than the code and inside the noise floor this table already declares. What the paired
+runs measured is **+13.3% / +12.2% / +11.2% / +5.4%**, and the shape of that is the same
+statement the rest of the table makes: the saving is vertices never read, so it is worth most
+where the frame is short and least where a screen's worth of pixels is what the frame is
+spending its time on.
 
 Against the game's own renderer:
 
@@ -77,7 +78,7 @@ Against the game's own renderer:
 |---|---|---|---|---|
 | **This mod** | **5.8x** | **5.2x** | **4.5x** | **3.5x** |
 | **This mod, everything on** | **6.9x** | **5.9x** | **4.9x** | **3.7x** |
-| **This mod, with facing groups** | **7.1x** | **6.0x** | **5.0x** | **3.7x** |
+| **This mod, with facing groups** | **7.6x** | **6.4x** | **5.3x** | **3.8x** |
 | Nothirium | 5.3x | 5.2x | 5.0x | 3.7x |
 | Relictium | 4.0x | 4.0x | 4.0x | 4.3x |
 
@@ -107,11 +108,12 @@ So: **at 1280 × 720 this mod is the fastest thing in the table, by a third. At 
 is the slowest of the three replacements.** Both of those are the same fact seen from two ends,
 and neither is worth stating without the other.
 
-Facing groups move the middle of that sentence rather than either end. At 2560 × 1440 this mod
-and Nothirium are now level — 808 against 822 is inside the four per cent this table calls
-noise, and it was a nine per cent gap before. At 3840 × 2160 nothing changes, because what
-holds the frame there is a screen's worth of pixels handed across twice, and no amount of
-geometry left unread touches that.
+Facing groups moved the middle of that sentence. At 2560 × 1440 this mod is now ahead of
+Nothirium rather than nine per cent behind it — 856 against 822 — and at 3840 × 2160 the two are
+level, 576 against 565, where it used to be the one place a replacement clearly beat this one.
+Relictium still wins 4K by a tenth, and for the reason the shapes give: it is not spending its
+frame on pixels, and this mod is. Nothing about geometry left unread touches a screen's worth of
+colour composited and a screen's worth of depth handed across, and that is what is left.
 
 **Below about eighteen chunks of render distance the game's own renderer is still faster than
 this one**, whatever the window. This mod trades a cost per chunk for a cost per pixel, and at

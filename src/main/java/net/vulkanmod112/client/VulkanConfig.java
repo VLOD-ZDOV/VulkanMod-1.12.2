@@ -141,9 +141,9 @@ public final class VulkanConfig {
      */
     static final boolean DEF_COMPACT_VERTICES = true;
     /**
-     * Sort each chunk's quads into down-facing, everything else, and up-facing,
-     * so a camera above or below a section never fetches the half of it that
-     * points the other way.
+     * Sort each chunk's quads by which way they face, so a camera never fetches
+     * the sides of a section that point away from it — the underside of a floor
+     * it is standing on, and the west face of a wall it is standing east of.
      *
      * On by default. It shipped off for one reason — both faults found while it
      * was being built were invisible in the ordinary picture, and only the
@@ -151,12 +151,19 @@ public final class VulkanConfig {
      * that can be wrong without looking wrong waits a while before it is on for
      * everybody. It has since been played with and nothing was found.
      *
-     * Measured at render distance 32: 12.8% of the vertex fetch never happens,
-     * and the frame rate goes from 633 and 635 to 671 and 670 standing still,
-     * and from 567 and 566 to 597 flying. The picture was checked three ways
-     * and matched the control pair each time, the strictest being the material
-     * view along a moving route, where not one pixel differed by more than the
-     * threshold a person can see.
+     * Measured at render distance 32, over eight paired runs at four window
+     * sizes: **36% of the vertex fetch never happens**, and the frame rate
+     * rises 13.3% / 12.2% / 11.2% / 5.4% going from a small window to a large
+     * one. It falls off at the top because a 4K frame is spending its time on
+     * pixels rather than on vertices, and no amount of geometry left unread
+     * touches that.
+     *
+     * The picture was checked the strict way each time: the material view along
+     * a moving route, six frames, against a control pair of two runs of the
+     * identical build. The two sets of differences match frame for frame, and
+     * in two frames of six the switched-on comparison differs *less* than the
+     * control does — which is the signature of animals having walked and of
+     * nothing else.
      */
     static final boolean DEF_GROUP_FACINGS = true;
     /**
@@ -904,11 +911,12 @@ public final class VulkanConfig {
                         + "underside, and the card knows that too — but it only finds out after "
                         + "reading every one of those vertices, and reading vertices is what this "
                         + "renderer's terrain pass is limited by. Measured at render distance 32: "
-                        + "12.8% of the reading stops happening and the frame rate rises about "
-                        + "six per cent. Takes effect on the next start, because one geometry "
-                        + "buffer cannot hold two orders at once. On by default; turn it off if "
-                        + "a face ever goes missing where the camera crosses a floor or a "
-                        + "ceiling.");
+                        + "36% of the reading stops happening, and the frame rate rises eleven to "
+                        + "thirteen per cent up to 1440p and five at 4K, where the frame is "
+                        + "spending its time on pixels instead. Takes effect on the next start, "
+                        + "because one geometry buffer cannot hold two orders at once. On by "
+                        + "default; turn it off if a face ever goes missing where the camera "
+                        + "crosses a floor, a ceiling or a wall.");
         compactVertices = config.getBoolean("compactVertices", CATEGORY_ADVANCED,
                 DEF_COMPACT_VERTICES,
                 "Pack each chunk vertex into 16 bytes instead of the 28 the game uses. The "
