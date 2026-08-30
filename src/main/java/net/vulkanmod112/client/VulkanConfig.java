@@ -145,10 +145,11 @@ public final class VulkanConfig {
      * so a camera above or below a section never fetches the half of it that
      * points the other way.
      *
-     * Off while it is new, and the reason is what went wrong twice while it was
-     * being built: both faults were invisible in the ordinary picture and only
-     * the diagnostic that paints the world by material showed them. Something
-     * that can be wrong without looking wrong ships off first.
+     * On by default. It shipped off for one reason — both faults found while it
+     * was being built were invisible in the ordinary picture, and only the
+     * diagnostic that paints the world by material showed them, so something
+     * that can be wrong without looking wrong waits a while before it is on for
+     * everybody. It has since been played with and nothing was found.
      *
      * Measured at render distance 32: 12.8% of the vertex fetch never happens,
      * and the frame rate goes from 633 and 635 to 671 and 670 standing still,
@@ -157,7 +158,7 @@ public final class VulkanConfig {
      * view along a moving route, where not one pixel differed by more than the
      * threshold a person can see.
      */
-    static final boolean DEF_GROUP_FACINGS = false;
+    static final boolean DEF_GROUP_FACINGS = true;
     /**
      * How many pixels across the block atlas was, last time one was seen.
      *
@@ -184,7 +185,7 @@ public final class VulkanConfig {
      * choice once, which is the price, and it is said in the log rather than
      * done quietly.
      */
-    static final int SETTINGS_REVISION = 2;
+    static final int SETTINGS_REVISION = 3;
     /**
      * Shortlist the chunks the rebuild pass at the end of {@code setupTerrain}
      * can act on, instead of letting it scan every visible chunk.
@@ -905,9 +906,9 @@ public final class VulkanConfig {
                         + "renderer's terrain pass is limited by. Measured at render distance 32: "
                         + "12.8% of the reading stops happening and the frame rate rises about "
                         + "six per cent. Takes effect on the next start, because one geometry "
-                        + "buffer cannot hold two orders at once. Off while it is new: what it "
-                        + "could get wrong is subtle rather than loud, so give it a session "
-                        + "before trusting it.");
+                        + "buffer cannot hold two orders at once. On by default; turn it off if "
+                        + "a face ever goes missing where the camera crosses a floor or a "
+                        + "ceiling.");
         compactVertices = config.getBoolean("compactVertices", CATEGORY_ADVANCED,
                 DEF_COMPACT_VERTICES,
                 "Pack each chunk vertex into 16 bytes instead of the 28 the game uses. The "
@@ -953,6 +954,22 @@ public final class VulkanConfig {
                                 + "Optimization turns it off again.");
             }
             settingsRevision = 2;
+            store(CATEGORY_ADVANCED, "settingsRevision", settingsRevision);
+        }
+        // Revision 3: quad facing groups, off since they were written because
+        // what they could get wrong does not look wrong. They have been played
+        // with since and nothing turned up, and they are the largest single
+        // saving left in the terrain pass.
+        if (settingsRevision < 3) {
+            if (groupFacings != DEF_GROUP_FACINGS) {
+                groupFacings = DEF_GROUP_FACINGS;
+                store(CATEGORY_OPTIMIZATION, "groupQuadFacings", groupFacings);
+                net.vulkanmod112.VulkanMod112.LOGGER.info(
+                        "Group Quad Facings is now on by default and has been switched on in your "
+                                + "settings. It stops the card reading about an eighth of the "
+                                + "world's vertices; Optimization turns it off again.");
+            }
+            settingsRevision = 3;
             store(CATEGORY_ADVANCED, "settingsRevision", settingsRevision);
         }
         // The command line wins, so the two arms of a comparison differ by one

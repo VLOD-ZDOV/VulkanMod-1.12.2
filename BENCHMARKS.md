@@ -53,14 +53,23 @@ better.
 | The game's own renderer | 163 | 165 | 163 | 152 |
 | **This mod** | **953** | 855 | 734 | 532 |
 | **This mod, everything on** | **1128** | **972** | 797 | 564 |
+| **This mod, with facing groups** | **1155** | **997** | 808 | 560 |
 | Nothirium | 865 | 855 | **822** | 565 |
 | Relictium | 659 | 656 | 659 | **646** |
 
-"Everything on" means packed chunk vertices and the short layer filter list. **Both are the
-default now**, so the row above them is the one to read for a fresh install — the table is kept
-as measured rather than restated, because the two rows together are what say how much of the
-gain is settings and how much is the renderer. The one setting still off is Group Quad Facings,
-which is newer than this table and worth about another six per cent.
+The first four rows are all this mod; they differ only in settings, and they are kept apart
+because that is what says how much of the gain is a switch and how much is the renderer.
+"Everything on" is packed chunk vertices and the short layer filter list. The last of the four
+adds quad facing groups, and **all three of those are the default now**, so the fourth row is
+the one to read for a fresh install.
+
+That fourth row was measured in a later session, so it comes with its own control: the same
+build with facing groups switched off, run alongside it, at 1104 / 932 / 777 / 546. That is two
+to four per cent under the row above — the machine, not the code, and within the noise floor
+this table already declares. Read the facing-group row as the row above it plus **+4.6% / +7.0%
+/ +4.0% / +2.6%**, which is what the paired runs actually measured, and note that the gain is
+largest in the middle: a small window is short of chunks to save on and a large one spends its
+frame on pixels instead.
 
 Against the game's own renderer:
 
@@ -68,6 +77,7 @@ Against the game's own renderer:
 |---|---|---|---|---|
 | **This mod** | **5.8x** | **5.2x** | **4.5x** | **3.5x** |
 | **This mod, everything on** | **6.9x** | **5.9x** | **4.9x** | **3.7x** |
+| **This mod, with facing groups** | **7.1x** | **6.0x** | **5.0x** | **3.7x** |
 | Nothirium | 5.3x | 5.2x | 5.0x | 3.7x |
 | Relictium | 4.0x | 4.0x | 4.0x | 4.3x |
 
@@ -93,9 +103,15 @@ window:
   frame rate. It composites a full screen of colour and hands a full screen of depth across
   twice a frame, and none of the other three do any of that.
 
-So: **at 1280 × 720 this mod is the fastest thing in the table, by a fifth. At 3840 × 2160 it
+So: **at 1280 × 720 this mod is the fastest thing in the table, by a third. At 3840 × 2160 it
 is the slowest of the three replacements.** Both of those are the same fact seen from two ends,
 and neither is worth stating without the other.
+
+Facing groups move the middle of that sentence rather than either end. At 2560 × 1440 this mod
+and Nothirium are now level — 808 against 822 is inside the four per cent this table calls
+noise, and it was a nine per cent gap before. At 3840 × 2160 nothing changes, because what
+holds the frame there is a screen's worth of pixels handed across twice, and no amount of
+geometry left unread touches that.
 
 **Below about eighteen chunks of render distance the game's own renderer is still faster than
 this one**, whatever the window. This mod trades a cost per chunk for a cost per pixel, and at
