@@ -1,6 +1,25 @@
 # Changelog
 
-## [Unreleased]
+## [0.10.0-alpha.3]
+
+The third alpha, published for the same reason as the two before it: to be
+reported against rather than because it is finished. Everything below was flown
+on one machine on Linux and nowhere else.
+
+**What is different about this one is that it is mostly switches being turned
+on.** Three optimisations shipped in the earlier alphas switched off, because
+each of them replaces something the game does rather than something this mod
+does, and the way they fail is quiet. They have since been measured, checked
+against the picture they replace, and flown; so packed chunk vertices, the short
+layer filter list and quad facing groups are all on by default now. A settings
+file from an earlier alpha is moved once, and the log says which settings moved
+and why. Every one of them can be turned off again where it came from.
+
+The largest single change is the last of those three, and it grew after it was
+written: it now leaves unread **36% of the world's vertices** — the undersides
+of the floor you are standing on, the tops of the ceiling above you, and the two
+sides of every chunk that face away from you. That is worth between five and
+thirteen per cent of the frame rate depending on how big the window is.
 
 - **A chunk's faces are sorted by which way they point** — Optimization →
   Group Quad Facings, on by default. Standing above a floor you cannot see
