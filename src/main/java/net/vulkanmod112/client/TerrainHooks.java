@@ -520,6 +520,7 @@ public final class TerrainHooks {
                 glQueryNanos += System.nanoTime() - queriedAt;
                 glQueryFrames++;
                 bridge.updateFogState(FOG);
+                bridge.updateCameraOffset(CAMERA_OFFSET);
                 DynamicLights.gather(viewX, viewY, viewZ);
                 bridge.updateDynamicLights(DynamicLights.lights(), DynamicLights.count());
                 captureSun(mc);
@@ -904,6 +905,25 @@ public final class TerrainHooks {
         FOG[6] = GL11.glGetFloat(GL11.GL_FOG_DENSITY);
     }
 
+    /**
+     * Where the camera is, relative to the point chunk geometry is offset from.
+     *
+     * These are not the same point and that is the whole reason this exists.
+     * The game hands chunk positions over relative to the view entity's
+     * <b>feet</b> — {@code ChunkRenderContainer.initialize} is called with
+     * {@code posY} — while the camera itself sits at eye height, or in third
+     * person somewhere else entirely. Anything that asks "is the camera above
+     * this face" has to ask about the camera, and using the feet is wrong by
+     * about a block and a half in the direction that hides geometry which
+     * should be drawn.
+     *
+     * Taken from the model-view matrix rather than from the entity, because the
+     * matrix is what actually drew the frame: it is right for third person, for
+     * a spectator, for a mod that moves the camera, and for anything else that
+     * never touches {@code getEyeHeight}.
+     */
+    private static final float[] CAMERA_OFFSET = {0.0f, 1.62f, 0.0f};
+
     /** MVP = depth-range fix (GL [-1,1] → VK [0,1]) * projection * modelview. */
     private static void captureMatrices() {
         MODELVIEW.clear();
@@ -914,6 +934,12 @@ public final class TerrainHooks {
         PROJECTION.get(PROJ).clear();
         Matrices.multiply(PROJ, MV, MVP);
         Matrices.toVulkanDepth(MVP);
+        // The eye, in the space the vertices are expressed in. For a rigid
+        // model-view that is minus the rotation, transposed, applied to the
+        // translation — the point that the matrix maps to the origin.
+        CAMERA_OFFSET[0] = -(MV[0] * MV[12] + MV[1] * MV[13] + MV[2] * MV[14]);
+        CAMERA_OFFSET[1] = -(MV[4] * MV[12] + MV[5] * MV[13] + MV[6] * MV[14]);
+        CAMERA_OFFSET[2] = -(MV[8] * MV[12] + MV[9] * MV[13] + MV[10] * MV[14]);
     }
 
     /**

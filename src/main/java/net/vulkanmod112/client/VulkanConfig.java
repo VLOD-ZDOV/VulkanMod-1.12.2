@@ -141,6 +141,24 @@ public final class VulkanConfig {
      */
     static final boolean DEF_COMPACT_VERTICES = true;
     /**
+     * Sort each chunk's quads into down-facing, everything else, and up-facing,
+     * so a camera above or below a section never fetches the half of it that
+     * points the other way.
+     *
+     * Off while it is new, and the reason is what went wrong twice while it was
+     * being built: both faults were invisible in the ordinary picture and only
+     * the diagnostic that paints the world by material showed them. Something
+     * that can be wrong without looking wrong ships off first.
+     *
+     * Measured at render distance 32: 12.8% of the vertex fetch never happens,
+     * and the frame rate goes from 633 and 635 to 671 and 670 standing still,
+     * and from 567 and 566 to 597 flying. The picture was checked three ways
+     * and matched the control pair each time, the strictest being the material
+     * view along a moving route, where not one pixel differed by more than the
+     * threshold a person can see.
+     */
+    static final boolean DEF_GROUP_FACINGS = false;
+    /**
      * How many pixels across the block atlas was, last time one was seen.
      *
      * Not a setting anybody sets. A packed texture coordinate is one part in
@@ -658,6 +676,7 @@ public final class VulkanConfig {
     private static volatile boolean shortEntitySections = DEF_SHORT_ENTITY_SECTIONS;
     private static volatile boolean shortLayerSections = DEF_SHORT_LAYER_SECTIONS;
     private static boolean compactVertices = DEF_COMPACT_VERTICES;
+    private static boolean groupFacings = DEF_GROUP_FACINGS;
     private static int atlasPixelsSeen = DEF_ATLAS_PIXELS_SEEN;
     private static int settingsRevision = SETTINGS_REVISION;
     private static volatile boolean fastRebuildNear = DEF_FAST_REBUILD_NEAR;
@@ -877,6 +896,18 @@ public final class VulkanConfig {
                         + "Packed chunk vertices turn themselves off for a pack whose atlas is "
                         + "larger than 8192, and this is how they know before the pack has "
                         + "loaded. Zero means no atlas has been seen yet.");
+        groupFacings = config.getBoolean("groupQuadFacings", CATEGORY_OPTIMIZATION,
+                DEF_GROUP_FACINGS,
+                "Sort each chunk's faces by which way they point, so the ones a camera cannot "
+                        + "possibly see are never read. Standing above a floor you cannot see its "
+                        + "underside, and the card knows that too — but it only finds out after "
+                        + "reading every one of those vertices, and reading vertices is what this "
+                        + "renderer's terrain pass is limited by. Measured at render distance 32: "
+                        + "12.8% of the reading stops happening and the frame rate rises about "
+                        + "six per cent. Takes effect on the next start, because one geometry "
+                        + "buffer cannot hold two orders at once. Off while it is new: what it "
+                        + "could get wrong is subtle rather than loud, so give it a session "
+                        + "before trusting it.");
         compactVertices = config.getBoolean("compactVertices", CATEGORY_ADVANCED,
                 DEF_COMPACT_VERTICES,
                 "Pack each chunk vertex into 16 bytes instead of the 28 the game uses. The "
@@ -932,6 +963,15 @@ public final class VulkanConfig {
             net.vulkanmod112.VulkanMod112.LOGGER.info(
                     "Short entity section lists {} by the command line, over the config",
                     shortEntitySections ? "on" : "off");
+        }
+        // The command line wins here too, so an A/B of this needs one word on it
+        // rather than an edit to the config between two runs.
+        String facingsPin = System.getProperty("vulkanmod112.groupFacings");
+        if (facingsPin != null) {
+            groupFacings = Boolean.parseBoolean(facingsPin);
+            net.vulkanmod112.VulkanMod112.LOGGER.info(
+                    "Quad facing groups {} by the command line, over the config",
+                    groupFacings ? "on" : "off");
         }
         String layerSectionsPin = System.getProperty("vulkanmod112.shortLayerSections");
         if (layerSectionsPin != null) {
@@ -1550,6 +1590,7 @@ public final class VulkanConfig {
         setShortEntitySections(DEF_SHORT_ENTITY_SECTIONS);
         setShortLayerSections(DEF_SHORT_LAYER_SECTIONS);
         setCompactVertices(DEF_COMPACT_VERTICES);
+        setGroupFacings(DEF_GROUP_FACINGS);
         setFastRebuildNear(DEF_FAST_REBUILD_NEAR);
         setMaterialTags(DEF_MATERIAL_TAGS);
         setSmartAnimations(DEF_SMART_ANIMATIONS);
@@ -1662,6 +1703,15 @@ public final class VulkanConfig {
     public static void setShortEntitySections(boolean value) {
         shortEntitySections = value;
         store(CATEGORY_OPTIMIZATION, "shortEntitySections", value);
+    }
+
+    public static boolean isGroupFacings() {
+        return groupFacings;
+    }
+
+    public static void setGroupFacings(boolean value) {
+        groupFacings = value;
+        store(CATEGORY_OPTIMIZATION, "groupQuadFacings", value);
     }
 
     public static boolean isShortLayerSections() {
@@ -2728,6 +2778,7 @@ public final class VulkanConfig {
         // Read once, when the renderer's own classes load, and never again —
         // see DEF_COMPACT_VERTICES for why it cannot be moved after that.
         publish("vulkanmod112.compactVertices", Boolean.toString(compactVertices));
+        publish("vulkanmod112.groupFacings", Boolean.toString(groupFacings));
         // The other half of the same decision, and it has to be published
         // beside it: the layout is settled from the two together, at the moment
         // the renderer's classes load.

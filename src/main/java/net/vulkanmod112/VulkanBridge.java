@@ -92,6 +92,18 @@ public interface VulkanBridge {
      */
     void noteChunkLayer(int slot, boolean translucent);
 
+    /**
+     * Where the camera sits relative to the point chunk geometry is offset
+     * from, as {@code x, y, z}.
+     *
+     * The game offsets chunks from the view entity's feet and puts the camera
+     * at eye height, so the two differ by about a block and a half in first
+     * person and by whatever the mod or the third-person view says otherwise.
+     * Anything deciding what the camera can see has to use this and not the
+     * offset point.
+     */
+    void updateCameraOffset(float[] offset);
+
     /** Frees the Vulkan mirror of a deleted game VBO. */
     void releaseChunkBuffer(int slot);
 

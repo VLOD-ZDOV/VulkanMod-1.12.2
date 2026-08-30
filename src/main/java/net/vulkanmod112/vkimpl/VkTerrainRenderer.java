@@ -1330,6 +1330,22 @@ final class VkTerrainRenderer {
      * read every one of them.
      */
     private int frameFacingSkipped;
+    /**
+     * Where the camera is relative to the point chunk geometry is offset from.
+     *
+     * Starts at a standing player's eye so that a frame drawn before the first
+     * update is close rather than wrong; every frame that draws terrain sets it
+     * before anything is recorded.
+     */
+    private final float[] cameraOffset = {0.0f, 1.62f, 0.0f};
+
+    void setCameraOffset(float[] offset) {
+        if (offset != null && offset.length >= 3) {
+            cameraOffset[0] = offset[0];
+            cameraOffset[1] = offset[1];
+            cameraOffset[2] = offset[2];
+        }
+    }
     private boolean glErrorLogged;
     // Frame-time breakdown, averaged and logged every TIMING_WINDOW frames
     private static final int TIMING_WINDOW = 600;
@@ -2836,7 +2852,8 @@ final class VkTerrainRenderer {
                     // below it that faces down and everything above it that
                     // faces up is geometry this camera cannot see, and both
                     // ends of the range can go in the same frame.
-                    int level = (int) Math.floor(viewY - chunks[c * 4 + 2]);
+                    int level = (int) Math.floor(
+                            viewY + cameraOffset[1] - chunks[c * 4 + 2]);
                     int below = level < 0 ? 0 : level > 16 ? 16 : level;
                     int above = level + 1 < 0 ? 0 : level + 1 > 16 ? 16 : level + 1;
                     firstQuad = entry.shelves[below];

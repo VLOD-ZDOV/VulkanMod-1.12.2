@@ -914,6 +914,14 @@ public final class VulkanContextImpl implements VulkanBridge {
     }
 
     @Override
+    public synchronized void updateCameraOffset(float[] offset) {
+        if (!initialized || !interopCapable) {
+            return;
+        }
+        terrainRenderer().setCameraOffset(offset);
+    }
+
+    @Override
     public void noteChunkLayer(int slot, boolean translucent) {
         // Not synchronized and deliberately so: this runs on the chunk builder
         // threads, once per upload, ahead of geometry that is copied without
