@@ -278,6 +278,22 @@ final class VkRayTracing {
     /** The frame the current batch of builds belongs to, for retiring. */
     private long buildFrameIndex;
 
+    /**
+     * The two per-frame lists this used to allocate afresh every frame.
+     *
+     * At a long render distance the chunk array alone was tens of kilobytes a
+     * frame, several hundred times a second, and none of it outlives the method
+     * that fills it. Fields instead, on the same reasoning as the renderer's own
+     * lookup scratch: {@code update} is called from the render thread and from
+     * nowhere else, so there is one caller and no need for a lock.
+     *
+     * Entries past this frame's count are left where they are rather than
+     * cleared. They are read only below {@code chunkCount}, and clearing them
+     * would be the per-frame work this is removing.
+     */
+    private VkChunkMirror.Entry[] entryScratch = new VkChunkMirror.Entry[0];
+    private final java.util.ArrayList<Blas> buildScratch = new java.util.ArrayList<Blas>();
+
     private void buildFrame(int[] chunks, int chunkCount, VkChunkMirror mirror, long frameIndex,
                             double viewX, double viewY, double viewZ) {
         buildFrameIndex = frameIndex;
@@ -285,11 +301,15 @@ final class VkRayTracing {
         int budget = buildsPerFrame();
         int maxStructures = maxStructures();
 
-        VkChunkMirror.Entry[] entries = new VkChunkMirror.Entry[chunkCount];
+        if (entryScratch.length < chunkCount) {
+            entryScratch = new VkChunkMirror.Entry[Integer.highestOneBit(chunkCount) * 2];
+        }
+        VkChunkMirror.Entry[] entries = entryScratch;
         mirror.findAll(chunks, chunkCount, entries);
 
         live.clear();
-        java.util.ArrayList<Blas> toBuild = new java.util.ArrayList<Blas>();
+        java.util.ArrayList<Blas> toBuild = buildScratch;
+        toBuild.clear();
         long geometryAddress = bufferAddress(mirror.geometryBuffer());
         if (geometryAddress == 0) {
             return;
