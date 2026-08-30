@@ -483,6 +483,8 @@ public final class VulkanConfig {
     static final int DEF_SKY_GRADIENT = 0;
     static final boolean DEF_SCENE_OCCLUSION = false;
     static final int DEF_LEAF_SHADOWS = 0;
+    /** How brightly a leaf passes the sun through to the eye behind it. */
+    static final int DEF_LEAF_GLOW = 0;
     /** How dark a short shadow towards the sun, over the finished picture. */
     static final int DEF_CONTACT_SHADOWS = 0;
     /** How much a creature's own faces shade themselves against the sun. */
@@ -724,6 +726,7 @@ public final class VulkanConfig {
     private static volatile int skyGradient = DEF_SKY_GRADIENT;
     private static volatile boolean sceneOcclusion = DEF_SCENE_OCCLUSION;
     private static volatile int leafShadows = DEF_LEAF_SHADOWS;
+    private static volatile int leafGlow = DEF_LEAF_GLOW;
     private static volatile int contactShadows = DEF_CONTACT_SHADOWS;
     private static volatile int creatureLight = DEF_CREATURE_LIGHT;
     private static boolean showCreatureLight = DEF_SHOW_CREATURE_LIGHT;
@@ -1200,6 +1203,14 @@ public final class VulkanConfig {
                         + "than where its holes are - averaged over frames it comes out as "
                         + "dapple. Needs ray tracing and sun shadows; costs more the more of the "
                         + "screen is under a tree.");
+        leafGlow = config.getInt("leafGlow", CATEGORY_GENERAL, DEF_LEAF_GLOW, 0, 100,
+                "How brightly a leaf lets the sun through from behind it. The game shades a leaf "
+                        + "by how much light reaches it, so a tree with the sun behind it is a "
+                        + "dark cut-out - the light that goes through the leaf and on towards you "
+                        + "is not in that answer at all. This asks one question, whether the sun "
+                        + "is behind this leaf from where you are standing, and brightens it in "
+                        + "its own colour when it is. Costs a dot product on leaves and plants "
+                        + "and nothing anywhere else; no rays, so it works with tracing off.");
         hdrFrame = config.getBoolean("hdrFrame", CATEGORY_GENERAL, DEF_HDR_FRAME,
                 "Ask the game for a frame with room above white in it. Minecraft draws the world into eight bits a channel, so anything brighter than white is cut off before any effect here ever sees it - which is why the glow has no light to add, a highlight on water arrives already flattened into a white patch, and the tone curve can only tilt colours "
                         + "rather than shape the light. With this on the frame holds sixteen bits a channel and the tone pass closes the range back down along a film curve at the end. Applies at once, costs video memory, and is asked of the driver first - if it will not have it, the log says so and nothing changes. Goes back to eight bits by itself if the Vulkan renderer stops drawing, because the pass that closes the range back down lives there.");
@@ -1651,6 +1662,7 @@ public final class VulkanConfig {
         setWaterRefraction(DEF_WATER_REFRACTION);
         setCelestialGlint(DEF_CELESTIAL_GLINT);
         setIceShine(DEF_ICE_SHINE);
+        setLeafGlow(DEF_LEAF_GLOW);
         setWaterCaustics(DEF_WATER_CAUSTICS);
         setWetSurfaces(DEF_WET_SURFACES);
         setSunHaze(DEF_SUN_HAZE);
@@ -1968,6 +1980,16 @@ public final class VulkanConfig {
     public static void setCelestialGlint(int value) {
         celestialGlint = clamp(value, 0, 100);
         store(CATEGORY_GENERAL, "celestialGlint", celestialGlint);
+        applySystemProperties();
+    }
+
+    public static int getLeafGlow() {
+        return leafGlow;
+    }
+
+    public static void setLeafGlow(int value) {
+        leafGlow = clamp(value, 0, 100);
+        store(CATEGORY_GENERAL, "leafGlow", leafGlow);
         applySystemProperties();
     }
 
@@ -2832,6 +2854,7 @@ public final class VulkanConfig {
         publish("vulkanmod112.skyGradient", Integer.toString(skyGradient));
         publish("vulkanmod112.sceneOcclusion", Boolean.toString(sceneOcclusion));
         publish("vulkanmod112.leafShadows", Integer.toString(leafShadows));
+        publish("vulkanmod112.leafGlow", Integer.toString(leafGlow));
         publish("vulkanmod112.contactShadows", Integer.toString(contactShadows));
         publish("vulkanmod112.creatureLight", Integer.toString(creatureLight));
         publish("vulkanmod112.showCreatureLight", Boolean.toString(showCreatureLight));

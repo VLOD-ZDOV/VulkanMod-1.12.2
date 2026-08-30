@@ -1874,6 +1874,40 @@ final class VulkanOptions {
                                         VulkanConfig.setFoliageSway(value);
                                     }
                                 }),
+                        new VRangeOption("Leaf Glow",
+                                "How brightly a leaf lets the sun through from behind it. The "
+                                        + "game shades a leaf by how much light reaches it, so a "
+                                        + "tree with the sun behind it comes out a dark cut-out — "
+                                        + "the light that goes through the leaf and on towards "
+                                        + "you is not in that answer at all. It is the difference "
+                                        + "between a canopy that reads as a solid block of green "
+                                        + "and one that reads as being made of leaves.\n\nNot "
+                                        + "physics, and deliberately so. It asks one question — "
+                                        + "is the sun behind this leaf from where you are "
+                                        + "standing — and brightens the leaf in its own colour "
+                                        + "when it is, which is the question your eye is actually "
+                                        + "answering when it calls a crown lit through. No normal "
+                                        + "is involved, because a cross-shaped plant has no "
+                                        + "honest one and this has to work on grass as much as on "
+                                        + "leaves.\n\nHeld down in two places: by the sky light "
+                                        + "the leaf already has, so nothing glows under a canopy "
+                                        + "or in a cave, and by how high the sun is, so it does "
+                                        + "not switch on at dawn while the world is still dark.",
+                                Cost.of(Level.NONE, Level.LOW, Level.NONE),
+                                "Needs Material Tags on; nothing else can tell a leaf from a "
+                                        + "wall. Works with ray tracing off — it costs no rays.",
+                                0, 100, 5, "%", "OFF",
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getLeafGlow();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setLeafGlow(value);
+                                    }
+                                }),
                         new VRangeOption("Water Waves",
                                 "How much a moving wave pattern tilts the surface of water. "
                                         + "Nothing is displaced and nothing is built: the water "

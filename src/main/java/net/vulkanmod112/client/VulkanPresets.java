@@ -124,6 +124,7 @@ public final class VulkanPresets {
         int skyGradient;
         boolean sceneOcclusion;
         int leafShadows;
+        int leafGlow;
         int contactShadows;
         int creatureLight;
         int cloudShadows;
@@ -251,6 +252,7 @@ public final class VulkanPresets {
         look.skyGradient = 55;
         look.sceneOcclusion = true;
         look.leafShadows = 100;
+        look.leafGlow = 55;
         look.contactShadows = 60;
         look.creatureLight = 55;
         look.cloudShadows = 45;
@@ -440,6 +442,7 @@ public final class VulkanPresets {
         VulkanConfig.setSkyGradient(look.skyGradient);
         VulkanConfig.setSceneOcclusion(look.sceneOcclusion);
         VulkanConfig.setLeafShadows(look.leafShadows);
+        VulkanConfig.setLeafGlow(look.leafGlow);
         VulkanConfig.setContactShadows(look.contactShadows);
         VulkanConfig.setCreatureLight(look.creatureLight);
         VulkanConfig.setCloudShadows(look.cloudShadows);

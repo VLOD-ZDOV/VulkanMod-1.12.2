@@ -95,7 +95,7 @@ layout(set = 0, binding = 3, std140) uniform Frame {
     //     stone. Read only where rays are traced.
     // z = 1 when the frame carries more than eight bits a channel, which is
     //     what decides how far a glint is allowed to go past white.
-    // w is spare and zeroed.
+    // w = how brightly a leaf lets the sun through from behind. 0 off.
     vec4 world;
 } frame;
 
@@ -687,6 +687,61 @@ bool rayBlocked(vec3 from, vec3 direction, float start, float reach) {
  *    back lit and draw a visible circle around the player. The strength fades
  *    out over the last quarter instead.
  */
+/**
+ * How tight the lobe of light coming through a leaf is.
+ *
+ * The effect is only ever seen looking towards the sun, and how narrowly is
+ * the whole of what makes it read as light through a leaf rather than as a
+ * wash over the canopy. Four is a wide enough cone that a whole crown lights
+ * up when the sun is behind it, and narrow enough that turning ninety degrees
+ * away from the sun takes it to nothing.
+ */
+const float LEAF_GLOW_TIGHTNESS = 4.0;
+
+/**
+ * The sun coming through a leaf from behind, rather than off its front.
+ *
+ * Without this a tree lit from behind is a dark cut-out: the game shades a
+ * leaf by how much light *reaches* it, and light that goes through it and on
+ * towards the eye is not in that answer at all. It is the difference between
+ * a canopy that looks like a solid block of green and one that looks like it
+ * is made of leaves.
+ *
+ * Deliberately not physics. Real subsurface scattering asks how far light
+ * travels inside a material; this asks one question — is the sun behind this
+ * leaf from where you are standing — and that is the question the eye is
+ * actually answering when it calls a crown "lit through". No normal is
+ * involved, and that is on purpose rather than a saving: a cross-shaped plant
+ * has no honest normal, and this has to work on grass as much as on leaves.
+ *
+ * Two things hold it down where it would otherwise be wrong. It is multiplied
+ * by the sky light the leaf already receives, so a leaf deep under a canopy or
+ * in a cave does not glow with a sun it cannot see. And it is faded in as the
+ * sun climbs, on the same threshold the shadows use, so it does not switch on
+ * at dawn while the world is still dark.
+ *
+ * The leaf's own colour is carried through it. That is what stops it being a
+ * white haze: light through green is green, and the effect is recognisable
+ * precisely because the crown goes brighter *and* more saturated at once.
+ */
+vec3 leafTransmission(vec3 albedo, float skyLight) {
+    float strength = frame.world.w;
+    if (strength <= 0.0 || frame.sun.y <= 0.0) {
+        return vec3(0.0);
+    }
+    // The eye looks back along the light that went through: the sun's own
+    // direction of travel is away from the sun, and this is brightest when the
+    // two line up.
+    vec3 toEye = normalize(-vRelative);
+    float through = max(0.0, dot(toEye, -frame.sun.xyz));
+    if (through <= 0.0) {
+        return vec3(0.0);
+    }
+    float risen = smoothstep(0.02, 0.30, frame.sun.y);
+    return albedo * (strength * risen * skyLight
+            * pow(through, LEAF_GLOW_TIGHTNESS));
+}
+
 float sunShadow(vec3 normal) {
 #ifdef RAY_QUERY
     if (frame.sun.w <= 0.0 || frame.sun.y <= 0.0) {
@@ -1530,6 +1585,13 @@ void main() {
     skyLight = mix(skyLight, skyLight * frame.sunParams.y, sunShadow(normal));
     vec3 light = texture(lightmap, vec2(blockLight, skyLight)).rgb;
     vec3 shaded = tex.rgb * vColor.rgb * light * waveShade;
+    // Added before the material view below rather than after it: the view that
+    // paints the world by material is a diagnostic, and a diagnostic that has
+    // an effect mixed into it answers a different question than the one it is
+    // being asked.
+    if (foliage) {
+        shaded += leafTransmission(tex.rgb * vColor.rgb, skyLight);
+    }
     // Worked out once. The translucent pass needs the same answer again at
     // the very end, after the water code has finished repainting the surface,
     // and asking materialColor twice puts the whole chain of comparisons into

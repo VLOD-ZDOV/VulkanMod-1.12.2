@@ -1,5 +1,29 @@
 # Changelog
 
+## [Unreleased]
+
+- **A leaf lets the sun through from behind it** — Effects → Leaf Glow, off by
+  default like every other effect here. The game shades a leaf by how much light
+  *reaches* it, and light that goes through the leaf and on towards you is not
+  in that answer at all — which is why a tree with the sun behind it comes out a
+  dark cut-out, and why a canopy reads as a solid block of green rather than as
+  something made of leaves. This asks one question, whether the sun is behind
+  this leaf from where you are standing, and brightens the leaf in its own
+  colour when it is. Not physics, and deliberately so: real subsurface
+  scattering asks how far light travels inside a material, while the question
+  the eye is actually answering when it calls a crown "lit through" is the
+  simple one. No normal is involved either, because a cross-shaped plant has no
+  honest normal and this has to work on grass as much as on leaves. Two things
+  hold it where it would otherwise be wrong — the sky light the leaf already
+  has, so nothing glows under a canopy or in a cave, and how high the sun is, so
+  it does not switch on at dawn while the world is still dark. It costs a dot
+  product on leaves and plants and nothing anywhere else, needs no rays, and
+  works with ray tracing off. Checked the way an effect that could be a wash
+  over the whole canopy has to be: looking into a low sun it changes 5.5% of the
+  picture, brightening and green; looking the other way, 0.05%; at noon, none at
+  all — against a control pair of two runs of the identical build that differ by
+  0.02%.
+
 ## [0.10.0-alpha.3]
 
 The third alpha, published for the same reason as the two before it: to be

@@ -934,6 +934,15 @@ final class VkTerrainRenderer {
      * is thinner than it looks, which some people will prefer to either end.
      */
     private float leafShadows;
+
+    /**
+     * How much of the sun a leaf passes through to the eye behind it.
+     *
+     * Unlike {@link #leafShadows} this needs no rays: it asks whether the sun
+     * is behind this leaf from where the camera is, which is a dot product, so
+     * it lives in both the traced shader and the plain one.
+     */
+    private float leafGlow;
     private int skyGradientProgram;
     private int skyGradientStrengthUniform;
     private int skyGradientTopUniform;
@@ -7784,6 +7793,8 @@ final class VkTerrainRenderer {
         // the exact complaint the lower ceiling exists to answer.
         MemoryUtil.memPutFloat(base + 1016,
                 colourFormat == VK_FORMAT_R16G16B16A16_SFLOAT ? 1.0f : 0.0f);
+        // How brightly a leaf lets the sun through from behind it.
+        MemoryUtil.memPutFloat(base + 1020, leafGlow);
     }
 
     /**
@@ -8015,6 +8026,7 @@ final class VkTerrainRenderer {
         sceneOcclusion = Boolean.parseBoolean(
                 System.getProperty("vulkanmod112.sceneOcclusion", "false"));
         leafShadows = clampPercent(intProperty("vulkanmod112.leafShadows", 0));
+        leafGlow = clampPercent(intProperty("vulkanmod112.leafGlow", 0));
         aoRadius = Math.max(1, Math.min(6, intProperty("vulkanmod112.aoRadius", 2)));
         iceShine = clampPercent(intProperty("vulkanmod112.iceShine", 0));
         waterCaustics = clampPercent(intProperty("vulkanmod112.waterCaustics", 0));
