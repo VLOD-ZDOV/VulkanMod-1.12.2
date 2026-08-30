@@ -253,6 +253,67 @@ decides whether a long render distance is possible at all.
 
 ---
 
+## Where a frame actually goes, measured from one spot
+
+Everything above is frame rates. This is the same frame taken apart, standing
+still at render distance 32 with effects off, so that nothing moves between the
+readings. "The card" is the sum of the timer queries OpenGL answers.
+
+| Window | megapixels | the frame | the card |
+|---|---|---|---|
+| 1280 × 720 | 0.92 | 0.80 ms | 0.78 ms |
+| 1920 × 1080 | 2.07 | 0.95 ms | 0.93 ms |
+| 2560 × 1440 | 3.69 | 1.17 ms | 1.16 ms |
+| 3840 × 2160 | 8.29 | 1.71 ms | 1.71 ms |
+
+**The two columns agree at every size, so the card is what the frame waits for**
+— at this render distance, on this machine, at any window. The processor is
+never the limit here, and that is worth knowing before believing any claim about
+work taken off it: it can be real work, genuinely removed, and buy nothing.
+
+A straight line through those four points gives **0.66 ms of fixed cost plus
+0.121 ms per megapixel**. The two halves have different owners:
+
+- **The fixed part is mostly vertices.** 0.43 ms of it is the Vulkan terrain
+  pass, and 9.19 M vertices at the measured 0.048 ms per million is 0.44 — the
+  same number from the other side.
+- **The per-pixel part is almost none of it the terrain pass.** Measured on its
+  own, that pass costs 0.33 ms at 720p and 0.40 at 4K: **nine times the pixels
+  for a fifth more time.** What does scale is handing the frame over — a
+  full-screen composite and the depth going back — and the driver's own present,
+  which the game's renderer pays as well.
+
+Two things follow, and they are the reason this section exists rather than a
+list of ideas:
+
+- **Rendering the terrain smaller and scaling it up saves almost nothing here.**
+  At 4K it would take about 0.06 ms off a 1.71 ms frame before paying for the
+  upscale, because resolution is not what this pass is spending. That is the
+  answer to "why not FSR or DLSS", and it is a measurement rather than an
+  opinion. There is a second reason as well: this mod draws only terrain, and a
+  temporal upscaler needs motion vectors for everything in the frame.
+- **Fewer vertices is the lever that is left.** Sorting a chunk's faces so a
+  camera never reads the ones pointing away from it takes 12.8% off the reading
+  and about six per cent off the frame; that is Optimization → Group Quad
+  Facings, off while it is new.
+
+### Below the render distance where this mod pays for itself
+
+At **8 chunks**, 1080p, the same route, the game's own renderer is still ahead —
+1929 and 1913 frames a second against 1680 and 1699. The gap is 14%, and it used
+to be 34% before the creature pass and the packed vertex; what is left of it is
+visible in the same decomposition. Vanilla spends 0.37 ms of its 0.52 ms frame
+**waiting for the driver** — it is idle — while this mod spends 0.11. The card
+does 0.079 ms of "world and interface" work for vanilla and 0.346 for this mod,
+and the terrain itself is 0.05 of that. The rest is the handover, which costs the
+same whether there are ten chunks on screen or three thousand.
+
+So the honest statement about short render distances has not changed, and now it
+has a mechanism: **this mod pays a fixed toll per frame, and below about
+eighteen chunks there is not enough drawing for the toll to be worth paying.**
+
+---
+
 ## What is not in the table
 
 - **OptiFine** does not start in a development client at all, so it could not be measured this
