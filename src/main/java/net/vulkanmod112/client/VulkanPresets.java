@@ -163,7 +163,18 @@ public final class VulkanPresets {
      * show somebody an effect at its most demanding and least finished — the
      * slider is still there for anyone who wants to push it.
      */
-    public static void beautiful(Minecraft mc) {
+    /**
+     * What every showcase look shares: how the machine is asked to behave.
+     *
+     * Split out when the one "everything on" preset became four. The four
+     * differ in exactly one thing — what the world is supposed to look like —
+     * and everything below is the other thing: distances, threads, mipmapping,
+     * how many frames may be in flight. Repeating those four times would have
+     * meant four places to fix the next time one of them is wrong, and this
+     * class already has a comment about a rule that was written and then
+     * broken by everything added after it.
+     */
+    private static Look showcase() {
         Look look = new Look();
         look.entityDistance = 256;
         look.tileEntityDistance = 128;
@@ -173,13 +184,12 @@ public final class VulkanPresets {
         look.framesInFlight = 3;
         // Set here too, and not only by the presets named for speed. Building
         // chunks costs no pixels, so the size of that pool is not a looks
-        // question and never was — and this is the preset that asks for
-        // thirty-two chunks of render distance, which is the setting that
-        // makes the pool the thing the frame waits for. Left alone it came
-        // out of vanilla's arithmetic over the heap: measured in a heavy pack
-        // at this distance, half the frames took four milliseconds and one in
-        // twenty took thirty, which reads as a stutter rather than as the two
-        // hundred frames the average claims.
+        // question and never was — and these are the presets that ask for the
+        // most world on screen, which is what makes the pool the thing the
+        // frame waits for. Left alone it came out of vanilla's arithmetic over
+        // the heap: measured in a heavy pack, half the frames took four
+        // milliseconds and one in twenty took thirty, which reads as a stutter
+        // rather than as the two hundred frames the average claims.
         look.chunkBuildThreads = VulkanConfig.coresForChunkBuilding();
         look.particles = 0;
         look.fancy = true;
@@ -192,10 +202,9 @@ public final class VulkanPresets {
         //
         // Thirty-two was this preset's own idea of "the machine can afford it",
         // and on a card that can it still stutters: at that distance the frame
-        // waits for chunks being rebuilt, not for anything drawn, so half the
-        // frames come in at four milliseconds and one in twenty at thirty. The
-        // effects here cost per pixel and barely notice the distance, so the
-        // distance was buying nothing this preset is for.
+        // waits for chunks being rebuilt, not for anything drawn. The effects
+        // here cost per pixel and barely notice the distance, so the distance
+        // was buying nothing these presets are for.
         //
         // A cap and not an exact value because the two failures are not
         // symmetric. Coming down from a distance somebody chose costs them
@@ -210,16 +219,8 @@ public final class VulkanPresets {
         // Without this line every effect below is switched on and does nothing.
         look.materialTags = true;
         look.dynamicLights = true;
-        look.directionalLight = 65;
-        look.heightFog = 20;
-        look.waterReflection = 70;
-        look.waterWaves = 50;
-        // Quieter than it was: at fifty-five a field reads as wind rather
-        // than as grass, and the point of the preset is a world that looks
-        // right standing still as well as in motion.
-        look.foliageSway = 38;
-        look.bloom = 45;
-        // Off in the preset named for looks, and this is the honest thing to do.
+
+        // Off in every one of these, and this is the honest thing to do.
         //
         // Every description this project ships already says screen reflections
         // are unfinished — nothing off the edge of the frame, nothing behind
@@ -239,6 +240,36 @@ public final class VulkanPresets {
         //
         // The slider is untouched and one row away for anyone who wants it.
         look.screenReflections = 0;
+
+        // Shared because they are not a look either: a round sun is the shape
+        // of the thing, not a mood, and leaf shadows are the difference between
+        // a canopy that casts dapple and one that casts a disc.
+        look.roundSun = true;
+        look.roundMoon = true;
+        look.leafShadows = 100;
+        look.hdrFrame = true;
+        return look;
+    }
+
+    /**
+     * Everything on, on the assumption that the machine can afford it.
+     *
+     * The mirror image of Potato, and written second on purpose: a preset that
+     * only ever gives things up leaves nothing to come back to. This is what
+     * "come back" means — and it is the neutral one of the four looks, the one
+     * that does not lean the picture anywhere.
+     */
+    public static void beautiful(Minecraft mc) {
+        Look look = showcase();
+        look.directionalLight = 65;
+        look.heightFog = 20;
+        look.waterReflection = 70;
+        look.waterWaves = 50;
+        // Quieter than it was: at fifty-five a field reads as wind rather
+        // than as grass, and the point of the preset is a world that looks
+        // right standing still as well as in motion.
+        look.foliageSway = 38;
+        look.bloom = 45;
         look.shaderAmbientOcclusion = 60;
         look.sceneTone = 45;
         look.sceneWarmth = 55;
@@ -251,15 +282,137 @@ public final class VulkanPresets {
         look.cloudTint = 70;
         look.skyGradient = 55;
         look.sceneOcclusion = true;
-        look.leafShadows = 100;
         look.leafGlow = 55;
         look.contactShadows = 60;
         look.creatureLight = 55;
         look.cloudShadows = 45;
         look.godRays = 45;
-        look.hdrFrame = true;
-        look.roundSun = true;
-        look.roundMoon = true;
+        apply(mc, look);
+    }
+
+    /**
+     * Low sun, warm air, everything the light passes through lit from behind.
+     *
+     * The three looks below exist because one preset called "Beautiful" cannot
+     * answer "what does this mod look like" — it can only answer it once. These
+     * are the same effects at different settings, which is what a shader pack
+     * is; nothing here is a new pass and nothing costs more than the preset it
+     * came from.
+     *
+     * This one leans on the two effects that only a low sun can show: the haze
+     * the air picks up looking towards it, and the light that comes through a
+     * leaf rather than off it. Rain is switched off — an evening that is
+     * golden is not also wet — and the ice keeps only what it needs to stop
+     * looking like flat blue glass.
+     */
+    public static void goldenHour(Minecraft mc) {
+        Look look = showcase();
+        look.directionalLight = 70;
+        look.heightFog = 35;
+        look.waterReflection = 70;
+        look.waterWaves = 45;
+        look.foliageSway = 38;
+        look.bloom = 60;
+        look.shaderAmbientOcclusion = 45;
+        look.sceneTone = 55;
+        look.sceneWarmth = 80;
+        look.exposure = 55;
+        look.waterRefraction = 45;
+        look.celestialGlint = 70;
+        look.iceShine = 40;
+        look.waterCaustics = 55;
+        look.wetSurfaces = 0;
+        look.sunHaze = 85;
+        look.cloudTint = 85;
+        look.skyGradient = 45;
+        look.sceneOcclusion = true;
+        // The one this look is built around, and the reason it is worth having
+        // as a look at all: a crown with the sun behind it stops being a dark
+        // cut-out and starts being made of leaves.
+        look.leafGlow = 80;
+        look.contactShadows = 70;
+        look.creatureLight = 55;
+        look.cloudShadows = 50;
+        look.godRays = 70;
+        apply(mc, look);
+    }
+
+    /**
+     * Hard light, cold air, and the shadows doing the work.
+     *
+     * The opposite lean: almost no haze and almost no shafts, because both are
+     * warm and both soften. What is turned up instead is everything that
+     * describes shape — occlusion, contact shadows, the shadow of a cloud — and
+     * the two surfaces that read as cold, which are ice and a wet stone.
+     */
+    public static void coldFront(Minecraft mc) {
+        Look look = showcase();
+        look.directionalLight = 55;
+        look.heightFog = 30;
+        look.waterReflection = 75;
+        look.waterWaves = 55;
+        look.foliageSway = 30;
+        look.bloom = 25;
+        look.shaderAmbientOcclusion = 80;
+        look.aoRadius = 3;
+        look.sceneTone = 40;
+        look.sceneWarmth = 25;
+        look.exposure = 48;
+        look.waterRefraction = 50;
+        look.celestialGlint = 35;
+        look.iceShine = 85;
+        look.waterCaustics = 40;
+        look.wetSurfaces = 80;
+        look.sunHaze = 15;
+        look.cloudTint = 40;
+        look.skyGradient = 75;
+        look.sceneOcclusion = true;
+        look.leafGlow = 25;
+        look.contactShadows = 75;
+        look.creatureLight = 45;
+        look.cloudShadows = 60;
+        look.godRays = 15;
+        apply(mc, look);
+    }
+
+    /**
+     * Soft, low in contrast, with the light bleeding the way a lens does it.
+     *
+     * Bloom carries this one, and the exposure is brought down to make room for
+     * it: a glow added on top of a picture already at full brightness only
+     * flattens it, which is the mistake this look exists to avoid making. The
+     * height fog is deep so distance reads as air rather than as a smaller
+     * copy of what is near.
+     */
+    public static void softFilm(Minecraft mc) {
+        Look look = showcase();
+        look.directionalLight = 55;
+        look.heightFog = 45;
+        look.heightFogDepth = 34;
+        look.waterReflection = 65;
+        look.waterWaves = 40;
+        look.foliageSway = 34;
+        look.bloom = 75;
+        look.shaderAmbientOcclusion = 50;
+        look.sceneTone = 70;
+        look.sceneWarmth = 60;
+        // Below the middle on purpose. See the note above: this is the one
+        // number that decides whether the bloom reads as light or as haze.
+        look.exposure = 45;
+        look.waterRefraction = 40;
+        look.celestialGlint = 45;
+        look.iceShine = 45;
+        look.waterCaustics = 45;
+        look.wetSurfaces = 40;
+        look.sunHaze = 45;
+        look.cloudTint = 60;
+        look.skyGradient = 50;
+        look.sceneOcclusion = true;
+        look.leafGlow = 60;
+        look.contactShadows = 45;
+        look.creatureLight = 60;
+        look.cloudShadows = 40;
+        look.godRays = 55;
         apply(mc, look);
     }
 

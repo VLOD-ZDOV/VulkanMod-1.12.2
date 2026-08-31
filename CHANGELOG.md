@@ -2,6 +2,38 @@
 
 ## [Unreleased]
 
+- **Three more looks beside Beautiful** — Golden Hour, Cold Front and Soft
+  Film. They are the same effects at different settings, which is what a shader
+  pack is: none of them adds a pass, and none costs more than the preset it
+  came from. Golden Hour leans on the two things only a low sun can show, the
+  haze the air picks up looking towards it and the light that comes through a
+  leaf rather than off it, with the rain switched off because an evening that
+  is golden is not also wet. Cold Front does the opposite — almost no haze and
+  almost no shafts, since both are warm and both soften — and turns up
+  everything that describes shape instead: occlusion, contact shadows, the
+  shadow of a cloud, and the two surfaces that read as cold. Soft Film is
+  carried by the glow, with the exposure brought down to make room for it,
+  because a glow added on top of a picture already at full brightness only
+  flattens it. Beautiful is unchanged and is now the neutral one of the four.
+  What every look shares — distances, threads, mipmapping, the twelve-chunk cap
+  — is stated in one place rather than four, so the next time one of those is
+  wrong there is one place to fix it.
+
+- **The settings search finds a row by what it can be set to.** Reported as
+  "the time switch is not in the search": it is, and it is called Time Control
+  — but somebody looking for it types the answer rather than the question,
+  "fixed" or "frozen", and those words were in neither its name nor its
+  description. The same went for "off", which is the whole of what half these
+  rows do. Values are now in the index, scored below a name and above a
+  description, so a row that is *called* something still beats one that merely
+  offers it.
+
+- **Stable and Balanced say what they actually do.** Stable is also the reset
+  button — everything this mod owns back to shipped, Minecraft's own settings
+  untouched — and neither of those was written down anywhere. Balanced is
+  Stable and then it reaches into Minecraft's settings as well, which is the
+  whole difference between them.
+
 - **A leaf lets the sun through from behind it** — Effects → Leaf Glow, off by
   default like every other effect here. The game shades a leaf by how much light
   *reaches* it, and light that goes through the leaf and on towards you is not

@@ -68,21 +68,68 @@ final class VulkanOptions {
                                     }
                                 }),
                         new VActionOption("Beautiful",
-                                "Everything this mod can add, turned on: directional light, height "
-                                        + "fog, water that reflects and moves, swaying leaves, glow "
-                                        + "and ambient occlusion — with fancy graphics, full "
-                                        + "particles and the view capped at twelve chunks. It used "
-                                        + "to ask for thirty-two, which bought this preset nothing: "
-                                        + "its effects are paid per pixel, while rebuilding chunks "
-                                        + "at that range is what put a stutter in it. Screen "
-                                        + "reflections are set well below their maximum on purpose: "
-                                        + "they are the newest effect here and the least settled. "
-                                        + "Expect to lose frames.",
+                                "Everything this mod can add, turned on, and the neutral one of "
+                                        + "the four looks — it does not lean the picture anywhere. "
+                                        + "Directional light, height fog, water that reflects and "
+                                        + "moves, swaying leaves, glow and ambient occlusion, with "
+                                        + "fancy graphics, full particles and the view capped at "
+                                        + "twelve chunks. It used to ask for thirty-two, which "
+                                        + "bought this preset nothing: its effects are paid per "
+                                        + "pixel, while rebuilding chunks at that range is what "
+                                        + "put a stutter in it. Screen reflections stay off — they "
+                                        + "are the newest effect here and the least settled, and "
+                                        + "the row for them is one away. Expect to lose frames."
+                                        + "\n\nThe three below are the same effects at different "
+                                        + "settings, which is what a shader pack is. None of them "
+                                        + "adds a pass or costs more than this one.",
                                 Cost.of(Level.MEDIUM, Level.HIGH, Level.MEDIUM), "Apply",
                                 new VActionOption.Action() {
                                     @Override
                                     public void run() {
                                         VulkanPresets.beautiful(mc);
+                                    }
+                                }),
+                        new VActionOption("Golden Hour",
+                                "A low sun, warm air, and everything the light passes through lit "
+                                        + "from behind. Leans on the two things only a low sun can "
+                                        + "show: the haze the air picks up looking towards it, and "
+                                        + "the light that comes through a leaf rather than off it "
+                                        + "— a crown with the sun behind it stops being a dark "
+                                        + "cut-out. Rain is off, because an evening that is golden "
+                                        + "is not also wet.",
+                                Cost.of(Level.MEDIUM, Level.HIGH, Level.MEDIUM), "Apply",
+                                new VActionOption.Action() {
+                                    @Override
+                                    public void run() {
+                                        VulkanPresets.goldenHour(mc);
+                                    }
+                                }),
+                        new VActionOption("Cold Front",
+                                "Hard light, cold air, and the shadows doing the work. Almost no "
+                                        + "haze and almost no shafts — both are warm and both "
+                                        + "soften. What is turned up instead is everything that "
+                                        + "describes shape: occlusion, contact shadows, the shadow "
+                                        + "of a cloud, and the two surfaces that read as cold, "
+                                        + "which are ice and a wet stone.",
+                                Cost.of(Level.MEDIUM, Level.HIGH, Level.MEDIUM), "Apply",
+                                new VActionOption.Action() {
+                                    @Override
+                                    public void run() {
+                                        VulkanPresets.coldFront(mc);
+                                    }
+                                }),
+                        new VActionOption("Soft Film",
+                                "Soft, low in contrast, with the light bleeding the way a lens "
+                                        + "does it. The glow carries this one and the exposure is "
+                                        + "brought down to make room for it — a glow added on top "
+                                        + "of a picture already at full brightness only flattens "
+                                        + "it. The height fog is deep, so distance reads as air "
+                                        + "rather than as a smaller copy of what is near.",
+                                Cost.of(Level.MEDIUM, Level.HIGH, Level.MEDIUM), "Apply",
+                                new VActionOption.Action() {
+                                    @Override
+                                    public void run() {
+                                        VulkanPresets.softFilm(mc);
                                     }
                                 }),
                         new VActionOption("Balanced",

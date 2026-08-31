@@ -454,6 +454,12 @@ public final class Flight {
             VulkanPresets.performance(mc);
         } else if ("potato".equals(name)) {
             VulkanPresets.potato(mc);
+        } else if ("goldenhour".equals(name)) {
+            VulkanPresets.goldenHour(mc);
+        } else if ("coldfront".equals(name)) {
+            VulkanPresets.coldFront(mc);
+        } else if ("softfilm".equals(name)) {
+            VulkanPresets.softFilm(mc);
         } else {
             VulkanMod112.LOGGER.warn("Flight was given an unknown preset {}", PRESET);
             return;
