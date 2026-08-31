@@ -122,6 +122,38 @@ public final class OptionSearch {
         best = Math.max(best, inName(normalise(option.name()), q));
         best = Math.max(best, inText(normalise(option.englishTooltip()), q) / 4);
         best = Math.max(best, inText(normalise(option.tooltip()), q) / 4);
+        best = Math.max(best, inValues(option, q));
+        return best;
+    }
+
+    /**
+     * What a row can be set to, not only what it is called.
+     *
+     * Reported as "the time switch is not in the search": it is, and it is
+     * called Time Control — but somebody looking for it looks for the answer
+     * rather than the question, and types "fixed" or "frozen", which are the
+     * words on the row and nowhere in its name or its description. Same for
+     * "off", which is the whole of what half these rows do.
+     *
+     * Scored below a name and above a description. A value is a short, chosen
+     * word rather than incidental prose, so it deserves more than a tooltip
+     * hit; but a row whose *name* matches is still the better answer.
+     */
+    // Package-private for the test: everything it touches is pure English
+    // text, while score() above goes through the translation table and so
+    // needs a running game.
+    static int inValues(VOption option, String q) {
+        int best = 0;
+        if (option instanceof VCyclingOption) {
+            for (String value : ((VCyclingOption) option).englishValues()) {
+                best = Math.max(best, inName(normalise(value), q) / 2);
+            }
+        } else if (option instanceof VRangeOption) {
+            String off = ((VRangeOption) option).englishMinText();
+            if (off != null) {
+                best = Math.max(best, inName(normalise(off), q) / 2);
+            }
+        }
         return best;
     }
 
