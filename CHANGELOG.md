@@ -12,13 +12,13 @@
   rather than copied, so the old file cannot come back later and overwrite
   choices made since.
 
-  One thing this cannot repair: a copy of 0.10.0 already installed is looking
+  One thing this cannot repair: a copy of 0.10.0-alpha.3 or earlier is looking
   for a file called `vulkanmod112-*.jar` when it checks for updates, and will
   not notice the first release under the new name. From this version on both
   names are recognised, so the next rename will not do it again.
 
-- **The jar says which Minecraft it is for.** `vulkanmodnext-1.12.2-0.11.0.jar`
-  rather than `vulkanmodnext-0.11.0.jar`. With two builds of one mod there was
+- **The jar says which Minecraft it is for.** `vulkanmodnext-1.12.2-0.10.0-alpha.4.jar`
+  rather than `vulkanmodnext-0.10.0-alpha.4.jar`. With two builds of one mod there was
   nothing in the old name to tell them apart, and a downloads folder full of
   them said nothing at all. `build/libs` is also cleared of earlier versions
   before a build now, instead of keeping every jar ever made.

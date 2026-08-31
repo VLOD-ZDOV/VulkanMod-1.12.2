@@ -791,7 +791,7 @@ public final class VulkanConfig {
     /**
      * Brings a settings file written under the mod's old name across.
      *
-     * The mod was called VulkanMod112 until 0.11.0 and kept its settings in
+     * The mod was called VulkanMod112 until 0.10.0-alpha.4 and kept its settings in
      * {@code vulkanmod112.cfg}. Renaming without this would not lose the file —
      * it would do something quieter and worse: the mod would find no settings,
      * write a fresh set of defaults, and the player would find every slider

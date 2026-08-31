@@ -80,10 +80,10 @@ public final class UpdateCheck {
      * ever changed what the file is called, so this survives a redesign at the
      * other end that a field name would not.
      *
-     * <p>The game's version sits between the two from 0.11.0 on, and is listed
+     * <p>The game's version sits between the two from 0.10.0-alpha.4 on, and is listed
      * here by name rather than matched as "something that looks like a version".
      * A pattern loose enough to skip any version-shaped token would read
-     * {@code vulkanmodnext-1.12.2-0.11.0} as version 1.12.2 the day the mod's
+     * {@code vulkanmodnext-1.12.2-1.0.0} as version 1.12.2 the day the mod's
      * own number reaches 1 — which is a wrong answer that looks right, and the
      * kind that gets noticed a year later. Adding a line here is the price of
      * shipping for a new version of the game, and it is a small one.
