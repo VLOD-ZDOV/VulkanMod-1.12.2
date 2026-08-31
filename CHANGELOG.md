@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+- **The three passes over the finished frame are now timed on the card.** The
+  Vulkan half of this renderer has been timed since the translucent pass was
+  split out, and the hand-over has had a timer of its own for as long; the
+  occlusion with its light shafts, the grading and the glow had none at all.
+  Every judgement about them came from the frame rate with them on against the
+  frame rate with them off, which on a machine where the card is the ceiling
+  answers a different question than the one being asked. They use the eight-slot
+  ring the other timers already use — an answer is read when the driver says it
+  is there and never waited for — and they are wrapped around each pass rather
+  than written inside it, because all three return early in several places and a
+  timer left open across a frame boundary would swallow the next frame whole.
+  First numbers, at 1920 × 1080 with everything on: occlusion and shafts 0.10 ms,
+  glow 0.10 ms, grading 0.03 ms, against 0.05 ms for handing the frame over. The
+  instrument was then measured against itself over four interleaved runs and
+  costs at most half a per cent, which is the noise floor of a stationary
+  measurement.
+
 - **The atlas mirror stopped asking the driver what is bound.** Every animation
   frame the game uploads is checked against the block atlas before it is copied
   to Vulkan, because the method it is caught in uploads everything — entity

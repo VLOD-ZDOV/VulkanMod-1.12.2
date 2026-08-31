@@ -236,6 +236,28 @@ final class VkTerrainRenderer {
     /** Handing depth back, which the log has been calling untimed. */
     private final GlTimer depthBlitTimer = new GlTimer();
 
+    /**
+     * What each pass over the finished frame costs the card.
+     *
+     * The Vulkan half of this renderer has been timed on the card since the
+     * translucent pass was split out, and the hand-over has its own timer
+     * above. The three passes below — the occlusion and its light shafts, the
+     * grading, the glow — have never been timed at all: every judgement about
+     * them has come from the frame rate with them on against the frame rate
+     * with them off, which on a machine where the card is the ceiling answers a
+     * different question than the one being asked.
+     *
+     * The same eight-slot ring as the others, for the same reason: an answer is
+     * read when the driver says it is there and never waited for.
+     *
+     * Wrapped around each pass rather than written inside it. Every one of the
+     * three returns early in several places, and a timer left open across the
+     * frame boundary would take the whole of the next frame into its number.
+     */
+    private final GlTimer occlusionTimer = new GlTimer();
+    private final GlTimer toneTimer = new GlTimer();
+    private final GlTimer bloomTimer = new GlTimer();
+
     // ------------------------------------------------------------------
     // Sprites: particles, rain and snow
     // ------------------------------------------------------------------
@@ -2395,6 +2417,17 @@ final class VkTerrainRenderer {
         // The three numbers above are the processor's view plus the Vulkan
         // queue's own. This is the other half of the frame: what the card
         // spends inside OpenGL doing our work, which nothing measured before.
+        // One line for the three passes over the finished frame. They are
+        // named for what they do rather than for the method that does them:
+        // the light shafts are inside the occlusion pass and are in its number.
+        if (occlusionTimer.millis() >= 0.0 || toneTimer.millis() >= 0.0
+                || bloomTimer.millis() >= 0.0) {
+            sb.append("  passes on the card: occlusion and shafts ")
+                    .append(glTimeText(occlusionTimer))
+                    .append(", grading ").append(glTimeText(toneTimer))
+                    .append(", glow ").append(glTimeText(bloomTimer))
+                    .append('\n');
+        }
         sb.append("  gl cost: composite ").append(glTimeText(compositeTimer))
                 .append(" of work plus ").append(glTimeText(compositeWaitTimer))
                 .append(" waiting for Vulkan")
@@ -5646,6 +5679,15 @@ final class VkTerrainRenderer {
      * them into two hooks would pay for both twice for nothing.
      */
     void applySceneOcclusion(int sceneTexture) {
+        occlusionTimer.begin();
+        try {
+            applySceneOcclusionTimed(sceneTexture);
+        } finally {
+            occlusionTimer.end();
+        }
+    }
+
+    private void applySceneOcclusionTimed(int sceneTexture) {
         boolean wantOcclusion = sceneOcclusion && !aoFailed && aoWanted();
         boolean wantRays = godRaysWanted();
         if ((!wantOcclusion && !wantRays) || sceneTexture == 0
@@ -6331,6 +6373,15 @@ final class VkTerrainRenderer {
     }
 
     void applySceneTone(int sceneTexture) {
+        toneTimer.begin();
+        try {
+            applySceneToneTimed(sceneTexture);
+        } finally {
+            toneTimer.end();
+        }
+    }
+
+    private void applySceneToneTimed(int sceneTexture) {
         // A floating frame has to be brought back into range here whether
         // anything is being graded or not: this is the last place that
         // sees it before the hand and the interface are drawn over it, and
@@ -6742,6 +6793,15 @@ final class VkTerrainRenderer {
     }
 
     void applySceneBloom(int sceneTexture) {
+        bloomTimer.begin();
+        try {
+            applySceneBloomTimed(sceneTexture);
+        } finally {
+            bloomTimer.end();
+        }
+    }
+
+    private void applySceneBloomTimed(int sceneTexture) {
         if (!bloomReady || bloomStrength <= 0.0f || bloomFailed
                 || bloomTexture[0] == 0 || sceneTexture == 0) {
             return;
