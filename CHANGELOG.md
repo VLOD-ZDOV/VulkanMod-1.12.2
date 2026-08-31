@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+- **The mod is called VulkanMod Next.** It was VulkanMod112, and the name had
+  stopped being true: the same renderer is now being brought to newer versions
+  of the game, and they live in the same repository. The mod id, the settings
+  file and everything else that carried `vulkanmod112` moved with it.
+
+  **Your settings are kept.** The first time this version starts it renames
+  `vulkanmod112.cfg` to `vulkanmodnext.cfg` and carries on with it. Renamed
+  rather than copied, so the old file cannot come back later and overwrite
+  choices made since.
+
+  One thing this cannot repair: a copy of 0.10.0 already installed is looking
+  for a file called `vulkanmod112-*.jar` when it checks for updates, and will
+  not notice the first release under the new name. From this version on both
+  names are recognised, so the next rename will not do it again.
+
+- **A 1.16.5 build has started, in `1.16.5/`.** It draws the world through
+  Vulkan and produces the same picture vanilla does, and it does nothing else
+  yet — none of the effects are ported, and the terrain switch ships off. It is
+  in the repository to be worked on, not to be installed.
+
 - **A card with no memory left now costs you distance, not the session.** When
   the chunk geometry buffer grew, the new buffer was put in place before the
   memory behind it had been paid for — so a card that refused the allocation
@@ -279,9 +299,9 @@ description of what happened.
 
 - **The shimmer of enchanted armour.** The game draws it by rendering the same model twice more with the texture matrix scaled, turned and slid along, which is the whole of the effect — nothing about it reaches the vertices, so a renderer that captures geometry and ignores that matrix captures three copies of one thing and can draw only one. The matrix is mirrored now and the captured coordinates go through it. Skins are handed over before glints, because a glint is depth-tested and writes no depth: it can only appear where the skin it belongs to has already put its own depth there.
 
-- **The class patches are split into eight groups that can be switched off**, under Settings → Advanced → Diagnostics → Class Patches, and a group whose patch fails is quarantined so the next launch starts without it. A failed patch used to poison the class it was aimed at: the loader remembers the failure and everything afterwards sees `NoClassDefFoundError` on a vanilla class, naming neither the patch nor the mod that caused it. Removing mods one at a time cannot isolate that. Deleting `config/vulkanmod112-patches.cfg` turns everything back on.
+- **The class patches are split into eight groups that can be switched off**, under Settings → Advanced → Diagnostics → Class Patches, and a group whose patch fails is quarantined so the next launch starts without it. A failed patch used to poison the class it was aimed at: the loader remembers the failure and everything afterwards sees `NoClassDefFoundError` on a vanilla class, naming neither the patch nor the mod that caused it. Removing mods one at a time cannot isolate that. Deleting `config/vulkanmodnext-patches.cfg` turns everything back on.
 
-- **A file for naming a renderer this build has not heard of.** `config/vulkanmod112-standaside.txt`, one fragment of a jar's file name a line: the Vulkan terrain then does not register itself when that jar is present. Until now the only way was a JVM property, and the only way to add a name was a release.
+- **A file for naming a renderer this build has not heard of.** `config/vulkanmodnext-standaside.txt`, one fragment of a jar's file name a line: the Vulkan terrain then does not register itself when that jar is present. Until now the only way was a JVM property, and the only way to add a name was a release.
 
 - **The mod says when a newer build exists**, in gold at the top of the settings screen, with a button beside Done that opens it. Both places are asked rather than the first that answers, because a release reaches one before the other, and the button leads to whichever of them actually has that version. Comparison is numeric, which matters more than it sounds: 0.10.0 is newer than 0.9.0 and sorts below it as text.
 
@@ -552,7 +572,7 @@ description of what happened.
 
 - **The settings screen nods on the screen you are looking at.** Saving a profile called 67 rocked the settings page behind the profile screen, which is not the one in front of anybody at the moment a profile is written.
 
-- **The renderer refused to start on any modern Java, which is every Cleanroom instance there is.** It said so plainly — "Java 26 is newer than the bundled LWJGL supports" — and the refusal was over a limit that did not exist. The library switches its behaviour on the version of the JNI, not the version of Java, and those two move at different rates: the bundled LWJGL knows JNI 24, and Java 25 and 26 both report exactly that. A Java version was standing in for the number that actually decides, so the check refused a JVM that works. The line is now drawn where the library draws it, the JNI version the JVM reports is written into the log beside it, and `-Dvulkanmod112.javaCeiling=NN` moves it for anyone who wants to find out for themselves. Everything ever measured on such an instance was measuring the game's own renderer.
+- **The renderer refused to start on any modern Java, which is every Cleanroom instance there is.** It said so plainly — "Java 26 is newer than the bundled LWJGL supports" — and the refusal was over a limit that did not exist. The library switches its behaviour on the version of the JNI, not the version of Java, and those two move at different rates: the bundled LWJGL knows JNI 24, and Java 25 and 26 both report exactly that. A Java version was standing in for the number that actually decides, so the check refused a JVM that works. The line is now drawn where the library draws it, the JNI version the JVM reports is written into the log beside it, and `-Dvulkanmodnext.javaCeiling=NN` moves it for anyone who wants to find out for themselves. Everything ever measured on such an instance was measuring the game's own renderer.
 
 - **This mod's copy of LWJGL no longer collides with the loader's.** The native libraries were unpacked to the paths LWJGL itself searches, checksums and all, so a loader shipping a newer LWJGL of its own found ours first and printed `Incompatible Java and native library versions detected` — twice a session, in a game whose world we were not even drawing. Somebody else's error message, caused by us, in the file people are asked to send when something breaks. The libraries now live under a private prefix that nothing else scans.
 
@@ -700,7 +720,7 @@ description of what happened.
 
   There are now two F3 lines whenever the renderer did not come up: that it is off, and why. The reason is the innermost cause, which is usually the real one, unless something along the way already knew what to say — a stack too small for the machine's drivers explains itself far better than the library error underneath it does. The diagnostics tick and the background frame cap, neither of which ever needed Vulkan, keep running.
 
-  `-Dvulkanmod112.forceFallback=true` reaches that state on purpose, because otherwise what a player sees when the renderer is off can only be checked on a machine where it is broken.
+  `-Dvulkanmodnext.forceFallback=true` reaches that state on purpose, because otherwise what a player sees when the renderer is off can only be checked on a machine where it is broken.
 
 - The diagnostics log reported `terrain: Vulkan` on a machine where Vulkan never started, two lines above its own report that it was not initialized. The terrain path was allowed by the settings and nothing had failed since — because nothing had run.
 
@@ -789,7 +809,7 @@ description of what happened.
 - The Mipmap Levels slider no longer reloads every resource in the game, which was crashing it. A full resource reload restarts the sound engine, and this row asked for one on every step of the slider — a slider being something you drag, so a single drag asked for several, a second or so apart. The second sound engine then cannot have an OpenAL context while the first still holds one, the sound loader waits out its thirty-second timeout, and the natives are unloaded from under sound threads that are still calling into them: `UnsatisfiedLinkError`, and the game is gone. Vanilla's own setter has not done this since Forge fixed MC-64581 — it applies the level immediately, marks a flag, and lets one narrow model reload happen when the settings screen closes, which does not touch sound at all. The hand-written copy of that logic is gone and the game's setter is called instead. The row now says the atlas is rebuilt when the screen closes, because that is when it happens.
 
 - The cost of a setting keeps its colour when the description panel does not fit beside the option list. The panel draws CPU, GPU and VRAM as coloured bars and is dropped for a plain tooltip when the window is too narrow in interface units to hold it — which is not a rare case, because at the automatic interface scale on a large display the game picks a very high multiplier and leaves only a few hundred units of width. What was left there was a grey line of text, and a cost with no colour in it says much less at a glance, which is the whole point of stating the three separately.
-- Celeritas and Actinium are recognised as renderer replacements, so this mod's Vulkan terrain stands aside for them the way it already does for OptiFine instead of the game failing to start. Reported from the field against 0.6.0, which 0.5.0 did not do: 0.6.0 replaces the game's visibility search and injects into `RenderGlobal.setupTerrain` in three more places, and the renderer half of this mod is marked required, so an injection that cannot be applied stops the game rather than quietly doing less. Two renderers cannot both own the terrain in any case — with either of these installed you get their renderer, plus this mod's settings screen and game-side optimisations. A renderer this build has not heard of can be named the same way without waiting for a release: `-Dvulkanmod112.extraRendererMarkers=part-of-its-jar-name`, which the startup message now says.
+- Celeritas and Actinium are recognised as renderer replacements, so this mod's Vulkan terrain stands aside for them the way it already does for OptiFine instead of the game failing to start. Reported from the field against 0.6.0, which 0.5.0 did not do: 0.6.0 replaces the game's visibility search and injects into `RenderGlobal.setupTerrain` in three more places, and the renderer half of this mod is marked required, so an injection that cannot be applied stops the game rather than quietly doing less. Two renderers cannot both own the terrain in any case — with either of these installed you get their renderer, plus this mod's settings screen and game-side optimisations. A renderer this build has not heard of can be named the same way without waiting for a release: `-Dvulkanmodnext.extraRendererMarkers=part-of-its-jar-name`, which the startup message now says.
 
 ### Changed
 
@@ -888,7 +908,7 @@ description of what happened.
 ### Added
 
 - GPU timings. Timestamp queries around the terrain pass are read back a frame late and reported alongside the CPU breakdown, so optimisation work can be measured instead of guessed at.
-- Ultra logging: a full diagnostics report written to `logs/vulkanmod112-diagnostics.log`, covering versions, installed mods, GPU and driver, every active renderer path and a periodic snapshot of frame costs and settings.
+- Ultra logging: a full diagnostics report written to `logs/vulkanmodnext-diagnostics.log`, covering versions, installed mods, GPU and driver, every active renderer path and a periodic snapshot of frame costs and settings.
 - Animated block textures can be turned off, which vanilla offers no way to do.
 - Background framerate cap. A minimised window with the frame limit on "unlimited" kept the GPU at full load drawing frames nobody could see; it now sleeps to 10 fps by default while the window is not active.
 
@@ -916,8 +936,8 @@ description of what happened.
 
 ### Added
 
-- OptiFine-style **VulkanMod112 Settings...** entry in Video Settings.
-- Config file at `config/vulkanmod112.cfg`, with live terrain and diagnostic-overlay switches.
+- OptiFine-style **VulkanModNext Settings...** entry in Video Settings.
+- Config file at `config/vulkanmodnext.cfg`, with live terrain and diagnostic-overlay switches.
 - Render-distance slider from 2 to 64 chunks. The vanilla render-distance limit is raised to 64 on startup.
 
 ### Changed

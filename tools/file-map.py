@@ -26,19 +26,19 @@ OUT = os.path.join(ROOT, "docs", "FILE-MAP.md")
 # The halves of the mod, in the order somebody reading it for the first time
 # should meet them.
 AREAS = [
-    ("net.vulkanmod112.mixin",
+    ("net.vulkanmodnext.mixin",
      "Patches",
      "Where the mod attaches to the game. Every one of these is a place the "
      "game has to keep working without us."),
-    ("net.vulkanmod112.client",
+    ("net.vulkanmodnext.client",
      "The Minecraft side",
      "Runs on the game's own class loader with LWJGL 2. Knows what a block is, "
      "and nothing about Vulkan."),
-    ("net.vulkanmod112.vkimpl",
+    ("net.vulkanmodnext.vkimpl",
      "The Vulkan side",
      "Runs on its own class loader with LWJGL 3. Knows nothing about Minecraft "
      "beyond the vertex format and the bridge interface."),
-    ("net.vulkanmod112",
+    ("net.vulkanmodnext",
      "Shared",
      "The little that both halves are allowed to see."),
 ]

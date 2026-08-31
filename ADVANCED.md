@@ -64,25 +64,25 @@ has to be told apart from another one.
 
 | Property | What it does |
 |---|---|
-| `-Dvulkanmod112.terrain=false` | Turn the Vulkan terrain off completely. |
-| `-Dvulkanmod112.validation=true` | Ask for the Vulkan validation layers, when installed. |
-| `-Dvulkanmod112.debugLoader=true` | Print LWJGL loader diagnostics. |
-| `-Dvulkanmod112.cull=false` | Stop culling back faces, for looking at geometry. |
-| `-Dvulkanmod112.overlay=true` | Show the legacy Vulkan demo overlay. |
-| `-Dvulkanmod112.ultraLog=true` | Write the full report to `logs/vulkanmod112-diagnostics.log`. Also in the menu. |
-| `-Dvulkanmod112.extraRendererMarkers=name` | Treat another jar as a renderer replacement and stand aside for it. |
-| `-Dvulkanmod112.depthBlit=false` | Composite depth through a shader instead of `glBlitFramebuffer`. |
-| `-Dvulkanmod112.allowIncompatibleRenderer=true` | Run beside OptiFine or a shader mod anyway. Unsupported. |
-| `-Dvulkanmod112.geometryBudget=MiB` | Geometry budget; 0 derives it from the GPU. Also in the menu. |
-| `-Dvulkanmod112.framesInFlight=1..3` | How far the processor may run ahead of the card. Also in the menu. |
-| `-Dvulkanmod112.rayTracing=true` | Build acceleration structures without opening the menu. |
-| `-Dvulkanmod112.noAtlasAnimations=true` | Stop uploading animated block textures, to tell that path apart from another. |
-| `-Dvulkanmod112.slowChunkMs=N` | How long a chunk build must take before it is named in the log. 100 by default. |
-| `-Dvulkanmod112.rayTracingFoliage=false` | Keep leaves out of the acceleration structures, halving what they hold. |
-| `-Dvulkanmod112.javaCeiling=NN` | The newest Java the bundled LWJGL may run on. What actually decides is the JNI version the JVM reports, which is in the log. |
+| `-Dvulkanmodnext.terrain=false` | Turn the Vulkan terrain off completely. |
+| `-Dvulkanmodnext.validation=true` | Ask for the Vulkan validation layers, when installed. |
+| `-Dvulkanmodnext.debugLoader=true` | Print LWJGL loader diagnostics. |
+| `-Dvulkanmodnext.cull=false` | Stop culling back faces, for looking at geometry. |
+| `-Dvulkanmodnext.overlay=true` | Show the legacy Vulkan demo overlay. |
+| `-Dvulkanmodnext.ultraLog=true` | Write the full report to `logs/vulkanmodnext-diagnostics.log`. Also in the menu. |
+| `-Dvulkanmodnext.extraRendererMarkers=name` | Treat another jar as a renderer replacement and stand aside for it. |
+| `-Dvulkanmodnext.depthBlit=false` | Composite depth through a shader instead of `glBlitFramebuffer`. |
+| `-Dvulkanmodnext.allowIncompatibleRenderer=true` | Run beside OptiFine or a shader mod anyway. Unsupported. |
+| `-Dvulkanmodnext.geometryBudget=MiB` | Geometry budget; 0 derives it from the GPU. Also in the menu. |
+| `-Dvulkanmodnext.framesInFlight=1..3` | How far the processor may run ahead of the card. Also in the menu. |
+| `-Dvulkanmodnext.rayTracing=true` | Build acceleration structures without opening the menu. |
+| `-Dvulkanmodnext.noAtlasAnimations=true` | Stop uploading animated block textures, to tell that path apart from another. |
+| `-Dvulkanmodnext.slowChunkMs=N` | How long a chunk build must take before it is named in the log. 100 by default. |
+| `-Dvulkanmodnext.rayTracingFoliage=false` | Keep leaves out of the acceleration structures, halving what they hold. |
+| `-Dvulkanmodnext.javaCeiling=NN` | The newest Java the bundled LWJGL may run on. What actually decides is the JNI version the JVM reports, which is in the log. |
 
 A renderer replacement this build has not heard of can also be named without waiting for a
-release, in `config/vulkanmod112-standaside.txt`: one fragment of a jar's file name a line.
+release, in `config/vulkanmodnext-standaside.txt`: one fragment of a jar's file name a line.
 
 ---
 
@@ -110,7 +110,7 @@ MixinBooter and nothing else.
 split into eight groups; a group whose patch fails is quarantined and the next launch starts
 without it, with two lines in the log saying what and which. The groups can also be switched
 off by hand under **Settings → Advanced → Diagnostics → Class Patches**, or by deleting
-`config/vulkanmod112-patches.cfg`.
+`config/vulkanmodnext-patches.cfg`.
 
 ---
 
@@ -143,7 +143,7 @@ The F3 overlay reports GPU selection, mirror statistics, the active terrain mode
 chunk count. Periodic log entries report fence wait, command recording, submit and composite,
 and the card's own time.
 
-For anything more, turn on **Ultra Logging** and attach `logs/vulkanmod112-diagnostics.log`.
+For anything more, turn on **Ultra Logging** and attach `logs/vulkanmodnext-diagnostics.log`.
 It records versions, installed mods, the GL driver, every active renderer path, where the
 frame's time went and what every resource is using. Start with `validation=true` when
 chasing a driver or synchronisation problem.

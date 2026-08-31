@@ -1,0 +1,28 @@
+# Build output
+build/
+out/
+classes/
+.gradle/
+
+# The dev client's world, logs and settings
+run/
+
+# Working notes and the port journal — same convention as the 1.12.2 project:
+# everything that is for us rather than for whoever installs the mod.
+docs/
+хлам/
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.classpath
+.project
+.settings/
+eclipse/
+.vscode/
+
+# Python leaves these behind next to tools/*.py
+__pycache__/
+*.pyc

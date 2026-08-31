@@ -20,7 +20,7 @@ import sys
 import tempfile
 
 SOURCE = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..',
-                      'src/main/java/net/vulkanmod112/vkimpl/VkTerrainRenderer.java')
+                      'src/main/java/net/vulkanmodnext/vkimpl/VkTerrainRenderer.java')
 # Every runtime program is built by one of these, and both wrap the body in the
 # same version directive.
 BUILDERS = ('buildQuadProgram(', 'compileGlShader(')

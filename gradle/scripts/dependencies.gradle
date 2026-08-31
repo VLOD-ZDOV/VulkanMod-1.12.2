@@ -133,4 +133,4 @@ tasks.shadowJar {
 }
 
 /** Kept in step with Lwjgl3Natives.PRIVATE_PREFIX on the Java side. */
-ext.NATIVES_PREFIX = 'vulkanmod112-lwjgl/'
+ext.NATIVES_PREFIX = 'vulkanmodnext-lwjgl/'

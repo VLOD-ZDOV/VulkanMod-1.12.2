@@ -1,0 +1,22 @@
+{
+  "package": "net.vulkanmodnext.mixin",
+  "plugin": "net.vulkanmodnext.core.VulkanMixinGate",
+  "required": true,
+  "refmap": "mixins.vulkanmodnext.refmap.json",
+  "target": "@env(DEFAULT)",
+  "minVersion": "0.8.5",
+  "compatibilityLevel": "JAVA_8",
+  "injectors": { "defaultRequire": 1 },
+  "mixins": [],
+  "server": [],
+  "client": [
+    "GuiVideoSettingsMixin",
+    "EntityRenderDistanceMixin",
+    "TileEntityRenderDistanceMixin",
+    "ItemSpriteMixin",
+    "TextureMapAnimationMixin",
+    "AtlasAnimationMixin",
+    "GameShutdownMixin",
+    "ResourcePackIconMixin"
+  ]
+}

@@ -1,24 +1,30 @@
 <h1 align="center">
-  <img src="src/main/resources/assets/vulkanmod112/logo.png" width="96" height="96" alt="">
+  <img src="logo.png" width="128" height="128" alt="">
   <br>
-  VulkanMod112
+  VulkanMod Next
 </h1>
 
 <p align="center">
-  <b>Minecraft 1.12.2 draws its world with Vulkan instead of OpenGL.</b><br>
+  <b>Minecraft draws its world with Vulkan instead of OpenGL.</b><br>
   More frames at high render distances, a menu of effects you assemble yourself,<br>
-  and the performance settings this version never had.
+  and the performance settings the game never had.
 </p>
 
 <p align="center">
-  <a href="https://www.curseforge.com/minecraft/mc-mods/vulkanmod-legacy"><img src="https://cf.way2muchnoise.eu/full_1624664_downloads.svg?badge_style=flat" alt="CurseForge"></a>
-  <a href="https://github.com/VLOD-ZDOV/VulkanMod-1.12.2/releases"><img src="https://img.shields.io/github/downloads/VLOD-ZDOV/VulkanMod-1.12.2/total?style=flat&logo=github&label=GitHub" alt="GitHub downloads"></a>
+  <b>1.12.2</b> is the finished build and the one to install.<br>
+  <b>1.16.5</b> lives in <code>1.16.5/</code> and is early: it draws the world, and little else yet.
+</p>
+
+<p align="center">
+  <a href="https://www.curseforge.com/minecraft/mc-mods/vulkanmod-next"><img src="https://cf.way2muchnoise.eu/full_1624664_downloads.svg?badge_style=flat" alt="CurseForge"></a>
+  <a href="https://github.com/VLOD-ZDOV/VulkanMod-Next/releases"><img src="https://img.shields.io/github/downloads/VLOD-ZDOV/VulkanMod-Next/total?style=flat&logo=github&label=GitHub" alt="GitHub downloads"></a>
   <img src="https://img.shields.io/badge/Minecraft-1.12.2-brightgreen?style=flat" alt="Minecraft 1.12.2">
+  <img src="https://img.shields.io/badge/Minecraft-1.16.5%20(early)-yellow?style=flat" alt="Minecraft 1.16.5, early">
   <img src="https://img.shields.io/badge/licence-LGPL--3.0-blue?style=flat" alt="LGPL-3.0">
 </p>
 
-<!-- Add once the Modrinth project exists, with the real slug in place of vulkanmod-legacy:
-  <a href="https://modrinth.com/mod/vulkanmod-legacy"><img src="https://img.shields.io/modrinth/dt/vulkanmod-legacy?style=flat&logo=modrinth&label=Modrinth" alt="Modrinth"></a>
+<!-- Add once the Modrinth project exists, with the real slug in place of vulkanmod-next:
+  <a href="https://modrinth.com/mod/vulkanmod-next"><img src="https://img.shields.io/modrinth/dt/vulkanmod-next?style=flat&logo=modrinth&label=Modrinth" alt="Modrinth"></a>
 -->
 
 ---
@@ -27,8 +33,11 @@
 
 | | |
 |---|---|
-| **[CurseForge](https://www.curseforge.com/minecraft/mc-mods/vulkanmod-legacy)** | the published build |
-| **[Releases](https://github.com/VLOD-ZDOV/VulkanMod-1.12.2/releases)** | the same jars, and the alphas that go out ahead of them |
+| **[CurseForge](https://www.curseforge.com/minecraft/mc-mods/vulkanmod-next)** | the published build |
+| **[Releases](https://github.com/VLOD-ZDOV/VulkanMod-Next/releases)** | the same jars, and the alphas that go out ahead of them |
+
+Everything below describes the **1.12.2** build. It is the one that is finished, measured
+and worth installing.
 
 **You also need [MixinBooter](https://www.curseforge.com/minecraft/mc-mods/mixinbooter) 10.7
 or newer in your mods folder.** No launcher installs it for you, and without it the game
@@ -80,7 +89,7 @@ background framerate cap, render distance to 64 chunks, hold-to-zoom.
 extension, a model built some way this mod does not understand — each one is a fallback, not
 a crash. → [when a pack fights back](ADVANCED.md#when-a-pack-fights-back)
 
-Open the menu at **Options → Video Settings → VulkanMod112 Settings…**, or press **F6**.
+Open the menu at **Options → Video Settings → VulkanModNext Settings…**, or press **F6**.
 Every row states what it costs on your processor, your graphics card and in video memory
 separately, because which of the three you are short of decides whether a setting helps you
 at all. Five presets do the choosing if you would rather not: **Stable**, **Beautiful**,
@@ -132,7 +141,7 @@ stays · 🔴 cannot be installed together
 Standing aside is automatic and silent. You keep the settings screen, the draw distances, the
 background cap, the zoom and every speed option — you just do not get the Vulkan terrain,
 because two renderers cannot own the world between them. One this build has not heard of can
-be named by hand in `config/vulkanmod112-standaside.txt`.
+be named by hand in `config/vulkanmodnext-standaside.txt`.
 
 ---
 
@@ -182,7 +191,7 @@ it found, in plain numbers, into that file, unasked and whatever the settings ar
 numbers separate all four before anyone has to ask you anything.
 
 Going further is optional: turn on **Ultra Logging** and send
-`logs/vulkanmod112-diagnostics.log` as well. → [what else is in there](ADVANCED.md#diagnostics)
+`logs/vulkanmodnext-diagnostics.log` as well. → [what else is in there](ADVANCED.md#diagnostics)
 
 ---
 
@@ -195,7 +204,27 @@ Going further is optional: turn on **Ultra Logging** and send
 | [ROADMAP.md](ROADMAP.md) | what is [done](ROADMAP.md#done), [planned](ROADMAP.md#planned) and [not planned](ROADMAP.md#not-planned) |
 | [CHANGELOG.md](CHANGELOG.md) | every release, in detail |
 | [ADVANCED.md](ADVANCED.md) | the full feature list, the JVM switches, building, diagnostics |
-| [Issues](https://github.com/VLOD-ZDOV/VulkanMod-1.12.2/issues) | bugs and requests |
+| [1.16.5/](1.16.5) | the port to 1.16.5 — early, see below |
+| [Issues](https://github.com/VLOD-ZDOV/VulkanMod-Next/issues) | bugs and requests |
+
+---
+
+## The 1.16.5 build
+
+It exists, it is in this repository under `1.16.5/`, and it is **not worth installing yet**.
+What it does today: Vulkan comes up on the same card OpenGL is on, chunk geometry is mirrored
+into it, and the world's terrain is drawn by Vulkan and composited back into the game's frame.
+Measured against vanilla on the same world it produces the same picture — 427 distinct colours
+against 428, the same commonest colour covering the same share of the screen.
+
+What it does not do: any of the effects. The settings screen lists all 106 of them and says
+plainly how many actually steer anything, which at the time of writing is 19. The terrain
+switch ships **off**, because a renderer that takes over the world by default before anybody
+has seen it work is a renderer that gets uninstalled.
+
+Two things about it are already better than the 1.12.2 build, and both come from the version
+rather than from us: the game is on LWJGL 3 already, so the whole two-class-loader construction
+is gone, and a 1.16.5 vertex carries its own normal.
 
 ---
 

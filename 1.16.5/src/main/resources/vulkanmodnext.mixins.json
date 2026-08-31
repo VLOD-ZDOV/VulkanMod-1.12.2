@@ -1,0 +1,21 @@
+{
+  "required": true,
+  "package": "net.vulkanmodnext.mixin",
+  "compatibilityLevel": "JAVA_8",
+  "refmap": "vulkanmodnext.refmap.json",
+  "plugin": "net.vulkanmodnext.EarlySetup",
+  "minVersion": "0.8",
+  "client": [
+    "BufferBuilderAccess",
+    "ChunkBufferLayerMixin",
+    "ChunkUploadMixin",
+    "ChunkRenderAccess",
+    "LightTextureAccess",
+    "StartupMixin",
+    "TerrainDrawMixin",
+    "WorldRendererAccess",
+    "VertexBufferMixin",
+    "VertexBufferUploadMixin"
+  ],
+  "injectors": { "defaultRequire": 1 }
+}

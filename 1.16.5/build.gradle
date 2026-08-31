@@ -1,0 +1,159 @@
+plugins {
+    id 'eclipse'
+    id 'idea'
+    id 'net.minecraftforge.gradle' version '[6.0,6.2)'
+    id 'org.spongepowered.mixin' version '0.7.+'
+}
+
+version = mod_version
+group = mod_group_id
+base { archivesName = mod_id }
+
+// 1.16.5 runs on Java 8. Gradle itself needs a newer one to run ForgeGradle 6,
+// which is why the two numbers in this file disagree and are both right.
+java.toolchain.languageVersion = JavaLanguageVersion.of(8)
+
+minecraft {
+    mappings channel: mapping_channel, version: mapping_version
+    copyIdeResources = true
+
+    runs {
+        client {
+            workingDirectory project.file('run')
+            property 'forge.logging.markers', 'REGISTRIES'
+            property 'forge.logging.console.level', 'debug'
+            // The same reason as on 1.12.2: without these OpenGL goes to Mesa
+            // while Vulkan takes the discrete card, and the two halves of the
+            // interop then belong to different devices.
+            environment '__NV_PRIME_RENDER_OFFLOAD', '1'
+            environment '__GLX_VENDOR_LIBRARY_NAME', 'nvidia'
+            // The stack size is NOT set here on purpose. It is set by
+            // EarlySetup, from inside the mod, and leaving the dev client
+            // without the flag is what keeps that honest: if the hook stops
+            // running, this run fails rather than quietly passing on a flag a
+            // player would never have.
+            // -Pworld=<name> opens a world by itself. Nothing interesting
+            // happens in this mod until chunks are being built.
+            // -Pterrain=on draws the world through Vulkan for this run. It
+            // writes no config file: the switch a player sees is separate, and
+            // a test that changes their settings is not a test.
+            if (project.hasProperty('terrain')) {
+                property 'vulkanmodnext.terrain', project.property('terrain')
+            }
+            // -Pshow=materials paints the terrain by material instead of by
+            // texture. A separating experiment, not a feature: it answers "is
+            // the terrain on the screen at all" without depending on anything
+            // the shading does.
+            // -Pcompact=off keeps the vanilla-shaped vertex instead of packing
+            // it to sixteen bytes. The packing is the most version-specific
+            // thing in the port, so it is the first thing to take away.
+            // -Pvalidation turns the Khronos validation layer on. It is the
+            // instrument that speaks when a driver would rather carry on: a
+            // frame that draws nothing and reports no error is exactly what it
+            // exists for.
+            if (project.hasProperty('validation')) {
+                jvmArgs '-Dvulkanmodnext.validation=true'
+            }
+            if (project.hasProperty('compact')) {
+                jvmArgs '-Dvulkanmodnext.compactVertices=' +
+                        (project.property('compact') == 'off' ? 'false' : 'true')
+            }
+            if (project.hasProperty('show')) {
+                jvmArgs '-Dvulkanmodnext.show' +
+                        project.property('show').capitalize() + '=true'
+            }
+            if (project.hasProperty('world')) {
+                property 'vulkanmodnext.world', project.property('world')
+            }
+            mods { "${mod_id}" { source sourceSets.main } }
+        }
+    }
+}
+
+repositories {
+    mavenCentral()
+    maven { url = 'https://repo.spongepowered.org/repository/maven-public/' }
+}
+
+// The refmap is what lets a mixin written against Mojang names find the
+// obfuscated ones at run time. Forge ships Mixin itself, so only the annotation
+// processor and this wiring are ours.
+mixin {
+    add sourceSets.main, "${mod_id}.refmap.json"
+    config "${mod_id}.mixins.json"
+}
+
+dependencies {
+    minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
+
+    // The game ships LWJGL 3.2.2 core, GLFW, OpenGL, STB and OpenAL — but not
+    // the Vulkan bindings, because it has no use for them. They are a pure
+    // Java jar with no natives of their own: they bind to the system's
+    // libvulkan through the loader the game has already started.
+    //
+    // The version is pinned to the game's on purpose. Mixing LWJGL 3.2 core
+    // with 3.3 bindings is the one way to get this wrong, and it fails at run
+    // time rather than at compile time.
+    minecraftLibrary 'org.lwjgl:lwjgl-vulkan:3.2.2'
+
+    annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
+}
+
+// Puts the decompiled game under build/mc-src.
+//
+// The port is mostly reading vanilla and reattaching to it, and this project
+// has a standing rule about that: read the sources on this disk, not the web
+// and not from memory. ForgeGradle will only decompile when something asks for
+// the sources artifact, so this asks.
+configurations {
+    mcSources
+}
+
+dependencies {
+    mcSources "net.minecraftforge:forge:${minecraft_version}-${forge_version}:sources"
+}
+
+tasks.register('mcSources', Copy) {
+    group 'documentation'
+    description 'Decompiles Minecraft and Forge into build/mc-src.'
+    from { configurations.mcSources.collect { zipTree(it) } }
+    into 'build/mc-src'
+}
+
+tasks.named('processResources', ProcessResources).configure {
+    var replacements = [
+            minecraft_version       : minecraft_version,
+            minecraft_version_range : minecraft_version_range,
+            forge_version           : forge_version,
+            forge_version_range     : forge_version_range,
+            loader_version_range    : loader_version_range,
+            mod_id                  : mod_id,
+            mod_name                : mod_name,
+            mod_license             : mod_license,
+            mod_version             : mod_version,
+            mod_authors             : mod_authors,
+            mod_description         : mod_description,
+    ]
+    inputs.properties replacements
+    filesMatching(['META-INF/mods.toml', 'pack.mcmeta']) {
+        expand replacements
+    }
+}
+
+tasks.named('jar', Jar).configure {
+    manifest {
+        attributes([
+                'Specification-Title'     : mod_id,
+                'Specification-Vendor'    : mod_authors,
+                'Specification-Version'   : '1',
+                'Implementation-Title'    : project.name,
+                'Implementation-Version'  : project.jar.archiveVersion,
+                'Implementation-Vendor'   : mod_authors,
+        ])
+    }
+    finalizedBy 'reobfJar'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}

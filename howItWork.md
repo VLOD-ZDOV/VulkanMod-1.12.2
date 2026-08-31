@@ -22,7 +22,7 @@ touched. What changes is what happens to the finished buffer.
 In 1.12.2, every piece of world geometry — each render layer of each chunk section, plus the
 sky and star meshes — passes through one method: `VertexBuffer#bufferData`. That is the only
 choke point all of it goes through, so it is the only place that needs a hook. The mixin at
-`src/main/java/net/vulkanmod112/mixin/VertexBufferMixin.java` intercepts it, and the mirror
+`src/main/java/net/vulkanmodnext/mixin/VertexBufferMixin.java` intercepts it, and the mirror
 takes its own copy of the data first, unconditionally, whatever happens next.
 
 What happens next depends on a setting, **Drop Vanilla Chunk Buffers**, which is on by
@@ -49,7 +49,7 @@ vanilla buffers is only safe once Vulkan is actually drawing the translucent lay
 and glass live in the vanilla buffers and nowhere else until that layer goes through Vulkan;
 emptying them before that would leave an ocean with nothing to draw it, in either renderer,
 and nothing in any log to explain why. `updateVanillaBufferDrop()` in
-`src/main/java/net/vulkanmod112/client/TerrainHooks.java` checks exactly that before turning
+`src/main/java/net/vulkanmodnext/client/TerrainHooks.java` checks exactly that before turning
 the drop on.
 
 ---
@@ -64,7 +64,7 @@ the same block of VRAM, read by both APIs, rather than a copy of it. A pair of s
 keeps the two sides from stepping on each other: Vulkan signals when a frame is ready and
 OpenGL waits for that signal before sampling the texture; OpenGL signals back once it has
 used the frame, and Vulkan waits for that before it starts overwriting the same memory with
-the next one. `src/main/java/net/vulkanmod112/vkimpl/VkInteropRenderer.java` is where this
+the next one. `src/main/java/net/vulkanmodnext/vkimpl/VkInteropRenderer.java` is where this
 scaffolding is built and tested with a single triangle; the same mechanism, extended to a
 full colour and depth target, is what `VkTerrainRenderer` composites the terrain through.
 
@@ -108,7 +108,7 @@ vanilla buffers empty, those draws issue no vertices; the cost that remains is b
 that no longer produces a pixel.
 
 That cost is measured, not assumed. `VanillaFrame.stats()` in
-`src/main/java/net/vulkanmod112/client/VanillaFrame.java` times the three methods that matter
+`src/main/java/net/vulkanmodnext/client/VanillaFrame.java` times the three methods that matter
 and prints them on a line beginning `vanilla frame:`.
 
 It is worth being exact about what that line contains, because the obvious reading of it is
@@ -172,7 +172,7 @@ vanilla buffers are filled again. That rebuild is the cost of the memory saving:
 while the world reappears in the game's own buffers, not a permanently invisible world.
 
 **Patch groups and quarantine.** The class patches that make the Vulkan terrain possible are
-split into eight groups by `src/main/java/net/vulkanmod112/core/VulkanPatchGroups.java` —
+split into eight groups by `src/main/java/net/vulkanmodnext/core/VulkanPatchGroups.java` —
 core terrain, chunk visibility, creatures, dynamic lights, particles, sky and weather,
 animated textures, and the optional speed-ups — and any group can be switched off on its own
 without disabling the rest. If a patch in a group fails to apply, that group is quarantined:
@@ -184,11 +184,11 @@ something a player or a modder can read and act on without guessing.
 **Standing aside for another renderer.** Only one renderer can own the terrain, because two
 mods rewriting the same classes at class-load time — before this mod's own runtime checks
 could step in — simply fail to apply, and a failure there is fatal in a way a runtime fallback
-is not. `src/main/java/net/vulkanmod112/core/VulkanCorePlugin.java` checks, before any mixin
+is not. `src/main/java/net/vulkanmodnext/core/VulkanCorePlugin.java` checks, before any mixin
 is registered, whether a mod that replaces the terrain renderer is present — by looking for
 known tweaker classes on the launch classloader, and by scanning jar names in the mods folder
 for known fragments, with a text file
-(`config/vulkanmod112-standaside.txt`) and a JVM property for naming one this build has not
+(`config/vulkanmodnext-standaside.txt`) and a JVM property for naming one this build has not
 heard of. If one is found, this mod's renderer mixin config is never registered at all: the
 Vulkan terrain does not load, and everything else — the settings screen, the game-side
 optimisations, the draw-distance and animation settings — stays exactly as available as it
@@ -202,7 +202,7 @@ waiting for a release.
 ## Where the numbers come from
 
 Every number in this document, and in the diagnostics log, is measured rather than estimated.
-`src/main/java/net/vulkanmod112/client/Flight.java`, driven by `-Pflight=<route>` at build
+`src/main/java/net/vulkanmodnext/client/Flight.java`, driven by `-Pflight=<route>` at build
 time, is an automated flight harness: the game creates a world from a fixed seed, flies a
 fixed route at a fixed speed, takes screenshots at fixed points along it, and quits — so that
 two builds can be compared frame for frame rather than by two different people flying two

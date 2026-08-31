@@ -61,7 +61,7 @@ jobs:
       - name: Upload the JAR
         uses: actions/upload-artifact@v4
         with:
-          name: vulkanmod112-${{ github.sha }}
+          name: vulkanmodnext-${{ github.sha }}
           path: |
             build/libs/*.jar
             !build/libs/*-dev.jar

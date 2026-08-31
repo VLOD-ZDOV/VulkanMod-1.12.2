@@ -172,7 +172,7 @@ if (propertyBool('use_access_transformer')) {
 // tree so that a machine without the Vulkan SDK can still build this, and are
 // only rewritten when the source is newer.
 tasks.register('compileShaders') {
-    def shaderDir = file('src/main/resources/vulkanmod112/shaders')
+    def shaderDir = file('src/main/resources/vulkanmodnext/shaders')
     inputs.dir shaderDir
     // Deliberately no declared outputs. They would land inside
     // src/main/resources, and Gradle then treats every task that reads the
@@ -452,8 +452,8 @@ tasks.register('generateMixinJson') {
 tasks.register('verifyPatchGroups') {
     group 'verification'
     description 'Checks that every mixin in a config is filed under a patch group.'
-    def configs = fileTree('src/main/resources').matching { include 'mixins.vulkanmod112*.json' }
-    def table = file('src/main/java/net/vulkanmod112/core/VulkanPatchGroups.java')
+    def configs = fileTree('src/main/resources').matching { include 'mixins.vulkanmodnext*.json' }
+    def table = file('src/main/java/net/vulkanmodnext/core/VulkanPatchGroups.java')
     inputs.files configs
     inputs.file table
     doLast {
@@ -549,31 +549,31 @@ tasks.matching { it.name in ['runClient', 'runObfClient'] }.configureEach {
     // lookup the search exists to avoid, so it is for confirming correctness,
     // never for timing.
     if (project.hasProperty('verifyWalk')) {
-        jvmArgs '-Dvulkanmod112.verifyWalk=true'
+        jvmArgs '-Dvulkanmodnext.verifyWalk=true'
     }
     // -PverifyEntitySections makes the shortened entity and block-entity lists
     // be checked against the full scan they replace, and reports what the short
     // one is missing. It costs that full scan, so it answers correctness only.
     if (project.hasProperty('verifyEntitySections')) {
-        jvmArgs '-Dvulkanmod112.verifyEntitySections=true'
+        jvmArgs '-Dvulkanmodnext.verifyEntitySections=true'
     }
     // -PshortEntitySections=true|false pins the shortened entity lists over
     // whatever the config says, which is how the two arms of the comparison are
     // told apart without editing a file between runs.
     if (project.hasProperty('shortEntitySections')) {
-        jvmArgs '-Dvulkanmod112.shortEntitySections=' + project.property('shortEntitySections')
+        jvmArgs '-Dvulkanmodnext.shortEntitySections=' + project.property('shortEntitySections')
     }
     if (project.hasProperty('shortLayerSections')) {
-        jvmArgs '-Dvulkanmod112.shortLayerSections=' + project.property('shortLayerSections')
+        jvmArgs '-Dvulkanmodnext.shortLayerSections=' + project.property('shortLayerSections')
     }
     // -PverifyLayerSections checks the shortened layer filter list against the
     // full scan it replaces. Same shape as the one above, reported apart from
     // it, because losing a chunk and losing a creature are different faults.
     if (project.hasProperty('verifyLayerSections')) {
-        jvmArgs '-Dvulkanmod112.verifyLayerSections=true'
+        jvmArgs '-Dvulkanmodnext.verifyLayerSections=true'
     }
     if (project.hasProperty('skipGlErrorCheck')) {
-        jvmArgs '-Dvulkanmod112.skipGlErrorCheck=true'
+        jvmArgs '-Dvulkanmodnext.skipGlErrorCheck=true'
     }
     // -PcompactVertices packs a chunk vertex into sixteen bytes instead of
     // vanilla's twenty-eight. The terrain pass was measured at 0.048 ms per
@@ -581,7 +581,7 @@ tasks.matching { it.name in ['runClient', 'runObfClient'] }.configureEach {
     // it is actually waiting for. Off unless asked, and it changes the vertex
     // shader that is loaded as well as the buffer that is written.
     if (project.hasProperty('compactVertices')) {
-        jvmArgs '-Dvulkanmod112.compactVertices=true'
+        jvmArgs '-Dvulkanmodnext.compactVertices=true'
     }
     // -PsharedDepth hands the renderer's depth image to the game as its own
     // depth attachment, so the two full-screen depth copies a frame — out for
@@ -590,13 +590,13 @@ tasks.matching { it.name in ['runClient', 'runObfClient'] }.configureEach {
     // two APIs then write one image inside one frame, and the ordering that
     // used to be implicit in the copy is stated instead.
     if (project.hasProperty('sharedDepth')) {
-        jvmArgs '-Dvulkanmod112.sharedDepth=true'
+        jvmArgs '-Dvulkanmodnext.sharedDepth=true'
     }
-    // -PdumpLang writes logs/vulkanmod112-en_us.lang from the settings screen
+    // -PdumpLang writes logs/vulkanmodnext-en_us.lang from the settings screen
     // as it is actually built, which is where the English language file comes
     // from. Open the screen once, then copy the file into resources.
     if (project.hasProperty('dumpLang')) {
-        jvmArgs '-Dvulkanmod112.dumpLang=true'
+        jvmArgs '-Dvulkanmodnext.dumpLang=true'
     }
     // -Pflight=<route> flies the client by itself: it makes a world from a
     // fixed seed, waits for the chunks around the spawn, flies the named route
@@ -617,26 +617,26 @@ tasks.matching { it.name in ['runClient', 'runObfClient'] }.configureEach {
     // half of it that points the other way. Read once at start, like the packed
     // layout: one geometry buffer cannot hold two orders at once.
     if (project.hasProperty('groupFacings')) {
-        jvmArgs '-Dvulkanmod112.groupFacings=' + project.property('groupFacings')
+        jvmArgs '-Dvulkanmodnext.groupFacings=' + project.property('groupFacings')
     }
     // -PfailGrowth pretends the card is out of memory the next time the chunk
     // geometry buffer tries to grow. A failure path that has never run is a
     // guess; this is how it gets run on a machine with memory to spare.
     if (project.hasProperty('failGrowth')) {
-        jvmArgs '-Dvulkanmod112.failGrowth=true'
+        jvmArgs '-Dvulkanmodnext.failGrowth=true'
     }
     if (project.hasProperty('countFacings')) {
-        jvmArgs '-Dvulkanmod112.countFacings=true'
+        jvmArgs '-Dvulkanmodnext.countFacings=true'
     }
     if (project.hasProperty('flight')) {
-        jvmArgs '-Dvulkanmod112.flight=' + project.property('flight')
+        jvmArgs '-Dvulkanmodnext.flight=' + project.property('flight')
         ['flightTag', 'flightSeed', 'flightDistance', 'flightSeconds',
          'flightSettle', 'flightShots', 'flightPatience', 'flightPos',
          'flightProfiler', 'flightPreset', 'flightHour', 'flightWeather',
          'flightPairs', 'flightClouds', 'flightPitch', 'flightWindow',
          'flightYaw', 'flightThreads'].each { name ->
             if (project.hasProperty(name)) {
-                jvmArgs '-Dvulkanmod112.' + name + '=' + project.property(name)
+                jvmArgs '-Dvulkanmodnext.' + name + '=' + project.property(name)
             }
         }
     }
@@ -645,67 +645,67 @@ tasks.matching { it.name in ['runClient', 'runObfClient'] }.configureEach {
     // taken to compare. Without it a blade of grass has moved between them and
     // every pixel of foliage and water is a difference.
     if (project.hasProperty('frozenSeconds')) {
-        jvmArgs '-Dvulkanmod112.frozenSeconds=' + project.property('frozenSeconds')
+        jvmArgs '-Dvulkanmodnext.frozenSeconds=' + project.property('frozenSeconds')
     }
     // -PcheckOrder counts how far the visibility list departs from a
     // front-to-back order. It answers whether sorting that list is worth any
     // code at all, and costs a comparison per chunk while it runs.
     if (project.hasProperty('checkOrder')) {
-        jvmArgs '-Dvulkanmod112.checkOrder=true'
+        jvmArgs '-Dvulkanmodnext.checkOrder=true'
     }
     // -PforceFallback makes the Vulkan side refuse to start, which is what a
     // player on an unsupported driver gets. It is the only way to see that
     // state on a machine where the renderer works.
     if (project.hasProperty('forceFallback')) {
-        jvmArgs '-Dvulkanmod112.forceFallback=true'
+        jvmArgs '-Dvulkanmodnext.forceFallback=true'
     }
     // -PstackSizeKb=N sets the scratch space LWJGL gets per thread. A small
     // value reproduces the startup failure of a machine whose drivers list more
     // extensions than the budget allows; a large one is what a player on such a
     // machine is asked to try.
     if (project.hasProperty('stackSizeKb')) {
-        jvmArgs "-Dvulkanmod112.stackSizeKb=${project.property('stackSizeKb')}"
+        jvmArgs "-Dvulkanmodnext.stackSizeKb=${project.property('stackSizeKb')}"
     }
     // -PnoDepthBlit forces the depth path a driver without sampleable D24 gets:
     // D32F targets, depth handed back to GL by the gl_FragDepth composite, and
     // the translucent pass declining every frame. That is what every AMD card
     // runs, so it is not an edge case — it is the other half of the users.
     if (project.hasProperty('noDepthBlit')) {
-        jvmArgs '-Dvulkanmod112.depthBlit=false'
+        jvmArgs '-Dvulkanmodnext.depthBlit=false'
     }
     // -PnoInteropSemaphores hands the shared images between the two APIs by
     // making both sides go idle instead of by semaphore. Slow on purpose: it is
     // for drivers that accept an imported semaphore and never signal it, where
     // the alternative is a card the operating system has to reset.
     if (project.hasProperty('noInteropSemaphores')) {
-        jvmArgs '-Dvulkanmod112.interopSemaphores=false'
+        jvmArgs '-Dvulkanmodnext.interopSemaphores=false'
     }
     // -PqueueTransfer=true|false forces the ownership handover of the shared
     // images on or off. It defaults to on for Windows only, so this is how the
     // barriers get exercised on a driver that can report what it thinks of them.
     if (project.hasProperty('queueTransfer')) {
-        jvmArgs "-Dvulkanmod112.externalQueueTransfer=${project.property('queueTransfer')}"
+        jvmArgs "-Dvulkanmodnext.externalQueueTransfer=${project.property('queueTransfer')}"
     }
     // -PnoReadProbe skips the three reads of the shared memory done at startup
     // before anything depends on them. They are there to name the step that
     // kills a driver that cannot really use the import, so turning them off is
     // for when the probe itself is the thing under suspicion.
     if (project.hasProperty('noReadProbe')) {
-        jvmArgs '-Dvulkanmod112.probeImportedRead=false'
+        jvmArgs '-Dvulkanmodnext.probeImportedRead=false'
     }
     // -PcloseHandlesEarly restores closing each exported Win32 handle the moment
     // the import returns, instead of holding it until the device goes. The pair
     // is how the difference gets measured on a driver that might be storing the
     // handle rather than duplicating what it keeps.
     if (project.hasProperty('closeHandlesEarly')) {
-        jvmArgs '-Dvulkanmod112.closeHandlesEarly=true'
+        jvmArgs '-Dvulkanmodnext.closeHandlesEarly=true'
     }
     // -Pvalidation turns on the Vulkan validation layer and routes what it
     // finds into the mod's own log. It is how a lost device gets a cause: the
     // call that reports one is never the call that caused it, and the layer is
     // the only thing that sees the illegal command as it is recorded.
     if (project.hasProperty('validation')) {
-        jvmArgs '-Dvulkanmod112.validation=true'
+        jvmArgs '-Dvulkanmodnext.validation=true'
     }
     // -PultraLog forces the diagnostics file on whatever the config says. Every
     // measurement run wants it, it is off by default, and a run that produces no
@@ -715,10 +715,10 @@ tasks.matching { it.name in ['runClient', 'runObfClient'] }.configureEach {
     // no clicking, and because a property given on the command line is pinned
     // and the settings file cannot move it.
     if (project.hasProperty('rayTracing')) {
-        jvmArgs '-Dvulkanmod112.rayTracing=true'
+        jvmArgs '-Dvulkanmodnext.rayTracing=true'
     }
     if (project.hasProperty('ultraLog')) {
-        jvmArgs '-Dvulkanmod112.ultraLog=true'
+        jvmArgs '-Dvulkanmodnext.ultraLog=true'
     }
 }
 
