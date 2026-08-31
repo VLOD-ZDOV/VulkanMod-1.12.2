@@ -609,6 +609,12 @@ tasks.matching { it.name in ['runClient', 'runObfClient'] }.configureEach {
     if (project.hasProperty('groupFacings')) {
         jvmArgs '-Dvulkanmod112.groupFacings=' + project.property('groupFacings')
     }
+    // -PfailGrowth pretends the card is out of memory the next time the chunk
+    // geometry buffer tries to grow. A failure path that has never run is a
+    // guess; this is how it gets run on a machine with memory to spare.
+    if (project.hasProperty('failGrowth')) {
+        jvmArgs '-Dvulkanmod112.failGrowth=true'
+    }
     if (project.hasProperty('countFacings')) {
         jvmArgs '-Dvulkanmod112.countFacings=true'
     }

@@ -1053,6 +1053,13 @@ final class VkChunkMirror {
             // reserve is not divisible by 28; without this alignment the VBO
             // following an empty/small one reads shifted UV/color attributes.
             entry = createEntry(alignVertexCapacity(Math.max(size, 4096)));
+            if (entry == null) {
+                // No room on the card for this chunk. It is not mirrored, so
+                // the draw never hears about it and simply does not draw it —
+                // a world with a hole in the distance rather than a crash or a
+                // buffer written past its end. The count is in the diagnostics.
+                return;
+            }
             entries.put(slot, entry);
             freshRange = true;
         }
@@ -1203,6 +1210,9 @@ final class VkChunkMirror {
             offThread = workerStaged;
             onThread = workerRejected;
         }
+        String refused = refusedRanges == 0 ? "" : String.format(
+                "; CARD FULL: %d chunks turned away, the geometry buffer could not grow",
+                refusedRanges);
         String line = String.format("mirrored VBOs: %d (%.1f MiB VRAM of %.1f MiB buffer, %d uploads, "
                         + "staging ring %d MiB, %d wraps, %d copies off the render thread, "
                         + "%d refused)",
@@ -1218,7 +1228,7 @@ final class VkChunkMirror {
                     allocationsDuringGrowth);
         }
         if (materialsStaged == 0 && materialBuffer == 0) {
-            return line;
+            return line + refused;
         }
         long applied;
         long missing;
@@ -1237,7 +1247,7 @@ final class VkChunkMirror {
             materials += String.format("; materials reordered %d, none to reorder %d",
                     runsPermuted, runsAbsent);
         }
-        return line + materials;
+        return line + materials + refused;
     }
 
     /**
@@ -1271,12 +1281,20 @@ final class VkChunkMirror {
         return dropped;
     }
 
+    /** Null when the card has no room left for this chunk; see {@link #geometryFull}. */
     private Entry createEntry(int capacity) {
+        long offset = allocateGeometryRange(capacity);
+        if (offset < 0L) {
+            return null;
+        }
         Entry entry = new Entry();
         entry.capacity = capacity;
-        entry.offset = allocateGeometryRange(capacity);
+        entry.offset = offset;
         return entry;
     }
+
+    /** Chunks turned away because the geometry buffer could not grow. */
+    private long refusedRanges;
 
     /** Grows the staging ring if a single upload would not fit in it. */
     private void ensureStagingRing(int needed) {
@@ -1648,6 +1666,15 @@ final class VkChunkMirror {
             checked = offset + capacity;
             ensureGeometryCapacity(checked);
         }
+        if (checked > geometryCapacity) {
+            // Growth was asked for and refused, so there is nowhere to put this
+            // chunk. Handing back a range that does not exist would be a write
+            // past the end of a buffer on the card, which is the shape of fault
+            // that ends a session rather than a frame — so nothing is handed
+            // back and the mark is left exactly where it was.
+            refusedRanges++;
+            return -1L;
+        }
         nextGeometryOffset = checked;
         // Checked where the mark is moved, not only where growth trips over it.
         //
@@ -1777,6 +1804,9 @@ final class VkChunkMirror {
         if (geometryBuffer != 0 && required <= geometryCapacity) {
             return;
         }
+        if (geometryFull) {
+            return;
+        }
         expandInFlight = true;
         try {
             growGeometryBuffer(required);
@@ -1784,6 +1814,35 @@ final class VkChunkMirror {
             expandInFlight = false;
         }
     }
+
+    /**
+     * Whether the card has refused to give this renderer more geometry room.
+     *
+     * Once it has, growth is not tried again: a refusal repeated every time a
+     * chunk arrives is a stall on every chunk, and the answer would be the same
+     * one. It is cleared when the buffer is thrown away and rebuilt.
+     */
+    private boolean geometryFull;
+    private boolean geometryFullSaid;
+
+    /**
+     * Pretend the card is out of memory, with {@code -Dvulkanmod112.failGrowth=true}.
+     *
+     * A failure path that has never run is a guess. This is how the one above
+     * gets run without needing a machine actually short of video memory, and it
+     * is why the line it prints and the world it leaves behind are things that
+     * have been seen rather than things that were intended.
+     *
+     * It refuses from the very first allocation, so the world comes up empty
+     * rather than partly drawn. That is the blunt version on purpose: a variant
+     * that spared the first allocation and refused the second never fired at
+     * all, because the buffer reaches thirty-two chunks of render distance in
+     * one growth and never asks again. An empty world proves the path; it does
+     * not pretend to be a realistic shortage.
+     */
+    private static final boolean GROWTH_ALWAYS_FAILS =
+            Boolean.getBoolean("vulkanmod112.failGrowth");
+
 
     private void growGeometryBuffer(long required) {
         if (uploadsRecording) {
@@ -1824,9 +1883,18 @@ final class VkChunkMirror {
                     .sharingMode(VK_SHARING_MODE_EXCLUSIVE);
             LongBuffer pBuffer = stack.mallocLong(1);
             check(vkCreateBuffer(device(), info, null, pBuffer), "vkCreateBuffer(chunk geometry)");
-            geometryBuffer = pBuffer.get(0);
+            // Into a local, and nothing this object owns is touched until both
+            // the buffer and its memory are in hand.
+            //
+            // It used to be assigned here. When the card had no memory left the
+            // allocation below threw, and what it left behind was a mirror
+            // whose geometry buffer had no memory bound to it and whose only
+            // reference to the working one was a local variable in a method
+            // that was unwinding. A machine short of video memory would not get
+            // a slower world, it would get a broken one.
+            long grown = pBuffer.get(0);
             VkMemoryRequirements req = VkMemoryRequirements.malloc(stack);
-            vkGetBufferMemoryRequirements(device(), geometryBuffer, req);
+            vkGetBufferMemoryRequirements(device(), grown, req);
             VkMemoryAllocateInfo alloc = VkMemoryAllocateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO)
                     .allocationSize(req.size())
@@ -1838,10 +1906,34 @@ final class VkChunkMirror {
                         .address());
             }
             LongBuffer pMemory = stack.mallocLong(1);
-            check(vkAllocateMemory(device(), alloc, null, pMemory), "vkAllocateMemory(chunk geometry)");
+            int allocated = GROWTH_ALWAYS_FAILS
+                    ? VK_ERROR_OUT_OF_DEVICE_MEMORY
+                    : vkAllocateMemory(device(), alloc, null, pMemory);
+            if (allocated == VK_ERROR_OUT_OF_DEVICE_MEMORY
+                    || allocated == VK_ERROR_OUT_OF_HOST_MEMORY) {
+                // The card said no. That is a thing a card is allowed to say,
+                // and the answer to it is a smaller world rather than a broken
+                // one: the buffer that could not be paid for is destroyed, the
+                // one already working is kept exactly as it was, and every
+                // chunk that will not fit in it is skipped by the draw the same
+                // way a chunk that grew mid-frame already is.
+                vkDestroyBuffer(device(), grown, null);
+                geometryFull = true;
+                if (!geometryFullSaid) {
+                    geometryFullSaid = true;
+                    LOGGER.warn("The card would not give this renderer another {} MiB for chunk"
+                            + " geometry, so it is staying at {} MiB and chunks that do not fit"
+                            + " will not be drawn. Lower the render distance, or set a smaller"
+                            + " geometry budget so growth stops before the card does.",
+                            capacity / (1024L * 1024L), geometryCapacity / (1024L * 1024L));
+                }
+                return;
+            }
+            check(allocated, "vkAllocateMemory(chunk geometry)");
             geometryMemory = pMemory.get(0);
-            check(vkBindBufferMemory(device(), geometryBuffer, geometryMemory, 0),
+            check(vkBindBufferMemory(device(), grown, geometryMemory, 0),
                     "vkBindBufferMemory(chunk geometry)");
+            geometryBuffer = grown;
         }
         geometryCapacity = capacity;
         if (oldBuffer != 0) {

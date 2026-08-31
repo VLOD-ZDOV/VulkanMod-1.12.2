@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+- **A card with no memory left now costs you distance, not the session.** When
+  the chunk geometry buffer grew, the new buffer was put in place before the
+  memory behind it had been paid for — so a card that refused the allocation
+  left this renderer holding a buffer with no memory bound to it, and its only
+  reference to the working one in a local variable of a method that was
+  unwinding. A machine short of video memory did not get a smaller world, it
+  got a broken one. The buffer is now built to one side and swapped in only
+  once its memory is in hand; a refusal destroys it, keeps what was already
+  working, and turns away the chunks that will not fit — a hole in the distance
+  rather than a crash or a write past the end of a buffer on the card. It says
+  so once in the log, with both sizes, and counts the turned-away chunks in the
+  diagnostics. Verified rather than intended: `-PfailGrowth` makes the driver
+  appear to refuse, and under it the game runs to the end and reports 1250
+  chunks turned away instead of throwing.
+
 - **The three passes over the finished frame are now timed on the card.** The
   Vulkan half of this renderer has been timed since the translucent pass was
   split out, and the hand-over has had a timer of its own for as long; the
