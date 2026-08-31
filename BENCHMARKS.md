@@ -126,6 +126,28 @@ so.
 
 ---
 
+## What the passes over the finished frame cost
+
+Timed on the card rather than inferred from a frame rate, which is a distinction this table has
+had to make before: on a machine where the card is the ceiling, switching an effect off and
+watching the frame rate answers a different question than the one being asked.
+
+At 1920 × 1080 with every effect on:
+
+| Pass | On the card |
+|---|---|
+| Occlusion, and the light shafts inside it | 0.10 ms |
+| Glow | 0.10 ms |
+| Grading — tone, exposure, gamma, colour vision | 0.03 ms |
+| Handing the frame to OpenGL | 0.05 ms |
+
+Some 0.28 ms in total, against a frame of about 0.95 ms at that size. The instrument was then
+measured against itself over four interleaved runs and costs at most half a per cent, which is
+the noise floor of a stationary measurement — so the numbers above are the passes and not the
+timing of them.
+
+---
+
 ## What changed while this was being measured
 
 Measuring produced a fix rather than only a table.
