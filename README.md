@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <b>1.12.2</b> is the finished build and the one to install.<br>
+  <b>1.12.2</b> is the build that works, and the one to install. Still being worked on.<br>
   <b>1.16.5</b> lives in <code>1.16.5/</code> and is early: it draws the world, and little else yet.
 </p>
 
@@ -36,8 +36,9 @@
 | **[CurseForge](https://www.curseforge.com/minecraft/mc-mods/vulkanmod-next)** | the published build |
 | **[Releases](https://github.com/VLOD-ZDOV/VulkanMod-Next/releases)** | the same jars, and the alphas that go out ahead of them |
 
-Everything below describes the **1.12.2** build. It is the one that is finished, measured
-and worth installing.
+Everything below describes the **1.12.2** build — the one that works today and the one worth
+installing. Work on it carries on; it is not a final version, and the alphas are where it
+goes first.
 
 **You also need [MixinBooter](https://www.curseforge.com/minecraft/mc-mods/mixinbooter) 10.7
 or newer in your mods folder.** No launcher installs it for you, and without it the game

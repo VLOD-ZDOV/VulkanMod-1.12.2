@@ -2,10 +2,10 @@
 
 ## [Unreleased]
 
-- **The mod is called VulkanMod Next.** It was VulkanMod112, and the name had
-  stopped being true: the same renderer is now being brought to newer versions
-  of the game, and they live in the same repository. The mod id, the settings
-  file and everything else that carried `vulkanmod112` moved with it.
+- **The mod is called VulkanMod Next.** The old name had stopped being true:
+  the same renderer is now being brought to newer versions of the game, and
+  they live in the same repository. The mod id, the settings file and
+  everything else that carried `vulkanmod112` moved with it.
 
   **Your settings are kept.** The first time this version starts it renames
   `vulkanmod112.cfg` to `vulkanmodnext.cfg` and carries on with it. Renamed
