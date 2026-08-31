@@ -51,10 +51,15 @@ final class VulkanOptions {
         return new VOptionPage("Rendering",
                 new VOptionBlock("Presets",
                         new VActionOption("Stable",
-                                "Everything back to the values this mod ships with. This is the safe "
-                                        + "starting point: nothing is traded away for speed, and it "
-                                        + "behaves the same on every driver. Minecraft's own settings "
-                                        + "are left alone.",
+                                "**This is also the reset button.** Everything this mod owns goes "
+                                        + "back to the values it ships with: every effect off, and "
+                                        + "the three optimisations that are on by default — packed "
+                                        + "chunk vertices, the short layer filter list and quad "
+                                        + "facing groups — back on. Minecraft's own settings are "
+                                        + "not touched at all, which is the whole difference "
+                                        + "between this and Balanced below.\n\nThe safe starting "
+                                        + "point: nothing is traded away for speed and it behaves "
+                                        + "the same on every driver.",
                                 Cost.FREE, "Apply",
                                 new VActionOption.Action() {
                                     @Override
@@ -81,8 +86,13 @@ final class VulkanOptions {
                                     }
                                 }),
                         new VActionOption("Balanced",
-                                "Caps the draw distances vanilla leaves far wider than anyone can "
-                                        + "actually see, and thins out particles. Costs almost nothing "
+                                "Stable, and then it also reaches into Minecraft's own settings — "
+                                        + "which Stable deliberately does not. It caps the draw "
+                                        + "distances vanilla leaves far wider than anyone can "
+                                        + "actually see, holds the render distance at 32, drops to "
+                                        + "two frames in flight, sets mipmapping to 4 and the "
+                                        + "frame limit to 260, and thins out particles. Effects "
+                                        + "stay off, same as Stable.\n\nCosts almost nothing "
                                         + "visually and is the biggest easy win on busy worlds.",
                                 Cost.FREE, "Apply",
                                 new VActionOption.Action() {
