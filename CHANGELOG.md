@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+- **The atlas mirror stopped asking the driver what is bound.** Every animation
+  frame the game uploads is checked against the block atlas before it is copied
+  to Vulkan, because the method it is caught in uploads everything — entity
+  skins, the map item, whatever a mod puts through it. That check asked OpenGL
+  which texture was bound, once per sprite per tick, and a question to the
+  driver is a wait for everything already queued behind it. The answer is known
+  without asking whenever the upload comes from the atlas stepping its own
+  animations, which is a place this mod already hooks at both ends. The driver
+  question is kept as the fallback rather than removed: a mod that animates a
+  sprite of its own outside that method would otherwise freeze in the terrain
+  and nowhere else, which is the exact bug this mirror was written to fix.
+
 - **Colour vision correction** — Effects → Colour Vision, off by default, with
   a setting each for protanopia, deuteranopia and tritanopia. Not a filter laid
   over the picture and not a simulation of what somebody else sees: the colour

@@ -45,6 +45,33 @@ public final class AtlasAnimations {
     }
 
     /**
+     * Whether the game is inside the block atlas's own animation step.
+     *
+     * The check below has to answer "is this upload going into the block
+     * atlas", because the method it hangs off uploads everything — entity
+     * skins, the map item, whatever a mod puts through it. It answered by
+     * asking the driver which texture was bound, once per sprite per tick, and
+     * a question to the driver is a wait for everything already queued.
+     *
+     * The answer is known without asking whenever the upload comes from the
+     * atlas stepping its own animations, because that is the one place this
+     * renderer already hooks at both ends. So the flag is the fast path and the
+     * driver is the fallback — kept rather than removed, because a mod that
+     * animates a sprite of its own outside that method would otherwise freeze
+     * in the terrain and nowhere else, which is exactly the bug this class was
+     * written to fix.
+     */
+    private static boolean insideAtlasStep;
+
+    public static void beginAtlasStep() {
+        insideAtlasStep = true;
+    }
+
+    public static void endAtlasStep() {
+        insideAtlasStep = false;
+    }
+
+    /**
      * One upload the game just made. Kept only when it is the block atlas.
      *
      * The same method uploads plenty that is not: entity textures, the map
@@ -60,7 +87,9 @@ public final class AtlasAnimations {
         if (mc == null || mc.getTextureMapBlocks() == null) {
             return;
         }
-        if (GL11.glGetInteger(GL11.GL_TEXTURE_BINDING_2D) != mc.getTextureMapBlocks().getGlTextureId()) {
+        if (!insideAtlasStep
+                && GL11.glGetInteger(GL11.GL_TEXTURE_BINDING_2D)
+                        != mc.getTextureMapBlocks().getGlTextureId()) {
             return;
         }
         for (int level = 0; level < data.length; level++) {

@@ -2,8 +2,10 @@ package net.vulkanmod112.mixin;
 
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import net.minecraft.client.renderer.texture.TextureMap;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.GlStateManager;
 import net.vulkanmod112.client.AnimatedSprites;
+import net.vulkanmod112.client.AtlasAnimations;
 import net.vulkanmod112.client.TerrainHooks;
 import net.vulkanmod112.client.VulkanConfig;
 import org.spongepowered.asm.mixin.Mixin;
@@ -35,6 +37,13 @@ public abstract class TextureMapAnimationMixin {
             ci.cancel();
             return;
         }
+        // From here to the return, every frame the game uploads is going into
+        // this atlas — so the mirror does not have to ask the driver which
+        // texture is bound, once per sprite. Only for the block atlas: the
+        // other sheets that come through here are not the one being mirrored.
+        if (((TextureMap) (Object) this) == Minecraft.getMinecraft().getTextureMapBlocks()) {
+            AtlasAnimations.beginAtlasStep();
+        }
         if (!VulkanConfig.isSmartAnimations()) {
             return;
         }
@@ -50,6 +59,7 @@ public abstract class TextureMapAnimationMixin {
         // in Vulkan, which is the shape of a bug nobody would connect to a
         // setting called Smart Animations.
         TerrainHooks.flushAtlasAnimations();
+        AtlasAnimations.endAtlasStep();
         ci.cancel();
     }
 
@@ -64,5 +74,6 @@ public abstract class TextureMapAnimationMixin {
     @Inject(method = "updateAnimations", at = @At("RETURN"))
     private void vulkanmod112$sendFrames(CallbackInfo ci) {
         TerrainHooks.flushAtlasAnimations();
+        AtlasAnimations.endAtlasStep();
     }
 }
