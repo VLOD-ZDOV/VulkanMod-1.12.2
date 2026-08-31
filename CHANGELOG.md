@@ -17,6 +17,12 @@
   not notice the first release under the new name. From this version on both
   names are recognised, so the next rename will not do it again.
 
+- **The jar says which Minecraft it is for.** `vulkanmodnext-1.12.2-0.11.0.jar`
+  rather than `vulkanmodnext-0.11.0.jar`. With two builds of one mod there was
+  nothing in the old name to tell them apart, and a downloads folder full of
+  them said nothing at all. `build/libs` is also cleared of earlier versions
+  before a build now, instead of keeping every jar ever made.
+
 - **A 1.16.5 build has started, in `1.16.5/`.** It draws the world through
   Vulkan and produces the same picture vanilla does, and it does nothing else
   yet — none of the effects are ported, and the terrain switch ships off. It is

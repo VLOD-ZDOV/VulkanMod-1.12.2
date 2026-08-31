@@ -7,7 +7,8 @@ plugins {
 
 version = mod_version
 group = mod_group_id
-base { archivesName = mod_id }
+// modid-gameversion-modversion, the same shape as the 1.12.2 build's.
+base { archivesName = "${mod_id}-${minecraft_version}" }
 
 // 1.16.5 runs on Java 8. Gradle itself needs a newer one to run ForgeGradle 6,
 // which is why the two numbers in this file disagree and are both right.

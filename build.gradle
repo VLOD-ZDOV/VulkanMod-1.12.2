@@ -47,8 +47,32 @@ version = propertyString('mod_version')
 group = propertyString('root_package')
 
 base {
-    archivesName.set(propertyString('mod_id'))
+    // modid-gameversion-modversion, which is what the rest of the ecosystem
+    // uses and what makes a downloads folder readable.
+    archivesName.set(propertyString('mod_id') + '-' + propertyString('minecraft_target'))
 }
+
+// Removes jars of earlier versions from build/libs before writing this one.
+//
+// Gradle never cleans that folder, so every version ever built stays in it —
+// seventy-two files, by the time anybody noticed. The one you want is in there
+// and so is every one you do not, which is the same as not having it.
+tasks.register('clearStaleJars') {
+    description 'Deletes jars in build/libs that are not this version.'
+    doLast {
+        def keep = propertyString('mod_version')
+        def libs = layout.buildDirectory.dir('libs').get().asFile
+        if (!libs.isDirectory()) {
+            return
+        }
+        libs.listFiles()?.each { file ->
+            if (file.name.endsWith('.jar') && !file.name.contains(keep)) {
+                file.delete()
+            }
+        }
+    }
+}
+tasks.named('jar').configure { dependsOn 'clearStaleJars' }
 
 tasks.decompressDecompiledSources.enabled !propertyBool('change_minecraft_sources') || !layout.buildDirectory.dir('rfg/minecraft-src').get().asFile.exists()
 

@@ -80,7 +80,15 @@ public final class UpdateCheck {
      * ever changed what the file is called, so this survives a redesign at the
      * other end that a field name would not.
      *
-     * <p>Both names are accepted. The mod shipped as {@code vulkanmod112-} up
+     * <p>The game's version sits between the two from 0.11.0 on, and is listed
+     * here by name rather than matched as "something that looks like a version".
+     * A pattern loose enough to skip any version-shaped token would read
+     * {@code vulkanmodnext-1.12.2-0.11.0} as version 1.12.2 the day the mod's
+     * own number reaches 1 — which is a wrong answer that looks right, and the
+     * kind that gets noticed a year later. Adding a line here is the price of
+     * shipping for a new version of the game, and it is a small one.
+     *
+     * <p>Both mod names are accepted. The mod shipped as {@code vulkanmod112-} up
      * to 0.10.0 and as {@code vulkanmodnext-} after it, and a page carrying
      * files under both should not look empty from either side. It does not
      * repair the break in the other direction — a copy of 0.10.0 already
@@ -88,8 +96,9 @@ public final class UpdateCheck {
      * the first release under the new one. Nothing here can reach that copy;
      * what this can do is make sure the next rename does not do it again.
      */
-    private static final Pattern FILE = Pattern.compile(
-            "vulkanmod(?:next|112)-(\\d+(?:\\.\\d+)*(?:-[0-9A-Za-z]+(?:\\.\\d+)*)?)");
+    static final Pattern FILE = Pattern.compile(
+            "vulkanmod(?:next|112)-(?:1\\.12\\.2-|1\\.16\\.5-)?"
+                    + "(\\d+(?:\\.\\d+)*(?:-[0-9A-Za-z]+(?:\\.\\d+)*)?)");
     /** GitHub names the release rather than the file, so it is asked its way. */
     private static final Pattern TAG = Pattern.compile(
             "\"tag_name\"\\s*:\\s*\"v?(\\d+(?:\\.\\d+)*(?:-[0-9A-Za-z]+(?:\\.\\d+)*)?)");
