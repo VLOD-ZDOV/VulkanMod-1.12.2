@@ -475,6 +475,16 @@ tasks.register('verifyPatchGroups') {
 
 tasks.named('check').configure { dependsOn 'verifyPatchGroups' }
 
+// Writes docs/FILE-MAP.md out of the sources. Generated rather than kept by
+// hand on purpose: a list of what each file does, maintained beside the files,
+// is wrong within a week and nothing says so.
+tasks.register('fileMap', Exec) {
+    group 'documentation'
+    description 'Regenerates docs/FILE-MAP.md from the class comments in src/main/java.'
+    inputs.dir 'src/main/java'
+    commandLine 'python3', file('tools/file-map.py').absolutePath
+}
+
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
     if (propertyBool('use_modern_java_syntax')) {

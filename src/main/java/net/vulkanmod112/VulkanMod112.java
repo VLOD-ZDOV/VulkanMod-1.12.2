@@ -5,6 +5,24 @@ import net.minecraftforge.fml.common.event.FMLPreInitializationEvent;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+/**
+ * Where the mod starts, and the only class in it Forge knows the name of.
+ *
+ * <p>Almost nothing happens here. What does happen is ordered, and the order is
+ * the point: the settings are read first because everything after them asks
+ * what they say; the diagnostics capture is started second so that every line
+ * from here on is kept, including the lines of whatever fails next; and the
+ * three things that must work even when Vulkan does not — the zoom, the
+ * settings screen, the update check — are registered before anything that can
+ * fail is touched.
+ *
+ * <p>The renderer itself is not started from here at all. It lives on a class
+ * loader of its own with a different LWJGL, and it is brought up later, from
+ * the game's own client side, once there is a window to draw into.
+ *
+ * @see net.vulkanmod112.client.VulkanLoader for how the other half is reached
+ * @see net.vulkanmod112.VulkanBridge for the whole of what the two halves share
+ */
 @Mod(
         modid = Tags.MOD_ID,
         name = Tags.MOD_NAME,

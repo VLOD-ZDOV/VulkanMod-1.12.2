@@ -29,3 +29,7 @@ run
 
 # internal working docs, not for the repo
 docs
+
+# Python leaves these behind next to tools/*.py
+__pycache__/
+*.pyc
