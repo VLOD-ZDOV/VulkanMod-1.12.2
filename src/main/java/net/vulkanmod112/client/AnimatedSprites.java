@@ -98,8 +98,28 @@ public final class AnimatedSprites {
     /** Sprites of a baked item model, worked out once per model. */
     private static final Map<Object, long[]> BY_ITEM_MODEL = new IdentityHashMap<>();
 
-    /** The mask being built, on whichever thread is building a chunk. */
-    private static final ThreadLocal<long[]> BUILDING = new ThreadLocal<>();
+    /** What is being recorded on this thread while a chunk builds. */
+    private static final ThreadLocal<Build> BUILDING = new ThreadLocal<>();
+
+    /**
+     * Blocks handed to {@link #recordBlock} and how many of them were a state
+     * not seen before in the same chunk.
+     *
+     * The counter sits inside the change it justifies. Every block used to
+     * take a lock on the shared state table and or a mask word by word; now
+     * only the first block of each distinct state does either. The ratio
+     * between these two numbers is exactly the work that stopped happening,
+     * and it is a property of the world rather than of the machine, so it can
+     * be read off a tester's report without a stopwatch.
+     *
+     * They are added to once per chunk, from the thread that built it — a
+     * shared counter touched per block is the thing being removed here, and
+     * this project has already paid for that lesson once.
+     */
+    private static final java.util.concurrent.atomic.AtomicLong blocksRecorded =
+            new java.util.concurrent.atomic.AtomicLong();
+    private static final java.util.concurrent.atomic.AtomicLong statesResolved =
+            new java.util.concurrent.atomic.AtomicLong();
 
     /**
      * The sprites of a block state, worked out once.
@@ -198,35 +218,71 @@ public final class AnimatedSprites {
         if (!ready) {
             return;
         }
-        long[] mask = BUILDING.get();
-        if (mask == null || mask.length != words) {
-            mask = new long[words];
-            BUILDING.set(mask);
-        } else {
-            java.util.Arrays.fill(mask, 0L);
+        Build build = BUILDING.get();
+        if (build == null) {
+            build = new Build();
+            BUILDING.set(build);
         }
+        // A fresh array every time. The one from the previous build was handed
+        // to that chunk at the end of it and belongs to the chunk now.
+        build.mask = new long[words];
+        build.reset();
     }
 
-    /** One block of the chunk being built on this thread. */
+    /**
+     * One block of the chunk being built on this thread.
+     *
+     * <p>Called for every block of every chunk — a few million times over a
+     * minute of flying — so what it does per call is the whole question. It
+     * used to take a lock on the shared state table and or a mask word by
+     * word, both of them per block. A chunk is thousands of blocks made of a
+     * few dozen distinct states, so almost every one of those was the same
+     * answer fetched again, and the lock was shared between all the chunk
+     * building threads at once.
+     *
+     * <p>Now the states already seen in this chunk are remembered on the
+     * thread that is building it, in a table with no lock and no allocation,
+     * and the shared map is asked once per distinct state. What the common
+     * case costs is one identity probe.
+     */
     public static void recordBlock(IBlockState state) {
-        long[] mask = BUILDING.get();
+        Build build = BUILDING.get();
+        if (build == null || state == null) {
+            return;
+        }
+        long[] mask = build.mask;
         if (mask == null) {
             return;
         }
+        build.blocks++;
+        if (!build.remember(state)) {
+            return;
+        }
+        build.distinct++;
         long[] ofState = maskOf(state);
-        for (int i = 0; i < words; i++) {
+        // Bounded by both, not by the words field: a resource reload replaces
+        // the atlas and the word count with it, and a chunk that began before
+        // it would otherwise run off the end of one array or the other.
+        int shared = Math.min(mask.length, ofState.length);
+        for (int i = 0; i < shared; i++) {
             mask[i] |= ofState[i];
         }
     }
 
     /** The chunk is finished; keep what it uses. */
     public static void finishChunk(RenderChunk chunk) {
-        long[] mask = BUILDING.get();
-        if (mask == null || !(chunk instanceof SpriteMarked)) {
+        Build build = BUILDING.get();
+        if (build == null || build.mask == null) {
             return;
         }
-        BUILDING.set(null);
-        ((SpriteMarked) chunk).vulkanmod112$animatedSprites(mask);
+        long[] mask = build.mask;
+        build.mask = null;
+        blocksRecorded.addAndGet(build.blocks);
+        statesResolved.addAndGet(build.distinct);
+        build.reset();
+        if (chunk instanceof SpriteMarked) {
+            ((SpriteMarked) chunk).vulkanmod112$animatedSprites(mask);
+        }
     }
 
     /**
@@ -300,9 +356,15 @@ public final class AnimatedSprites {
             return null;
         }
         boolean fresh = System.currentTimeMillis() - gatheredAt < 1000L;
+        long blocks = blocksRecorded.get();
+        long states = statesResolved.get();
         return "  smart animations: " + lastUpdated + " of " + sprites.length
                 + " animated sprites updated per tick"
                 + (fresh ? "" : " (no visible set gathered, everything updated)")
+                + (blocks == 0 ? ""
+                        : ", recorded " + blocks + " blocks as " + states + " distinct states ("
+                                + String.format("%.1f", 100.0 * states / blocks)
+                                + "% reached the shared table)")
                 + ", item models seen " + itemModelCalls
                 + (itemModelCalls == 0
                         ? " — WARNING: the item hook never ran, held and inventory textures "
@@ -415,6 +477,110 @@ public final class AnimatedSprites {
 
     private static boolean get(long[] bits, int index) {
         return (bits[index >> 6] & (1L << (index & 63))) != 0L;
+    }
+
+    /**
+     * One chunk build, on one thread.
+     *
+     * <h2>Why a table of its own and not a set</h2>
+     *
+     * What is wanted is "have I already dealt with this state in this chunk",
+     * asked once per block. A {@code HashSet} would answer it by calling
+     * {@code hashCode} on the state, and in this version a state's hash is the
+     * hash of its property map — a walk over every property of the block,
+     * every time. That is more work than the lookup saves. Identity is both
+     * the correct comparison here (states are singletons) and the cheap one,
+     * and open addressing over a plain array asks nothing of the key beyond
+     * its identity hash.
+     *
+     * <p>Nothing here is shared with another thread, so nothing here needs a
+     * lock, and the table is kept between chunks so a build allocates only the
+     * mask it is going to hand over.
+     */
+    static final class Build {
+
+        /** What this chunk's blocks use; handed to the chunk when it finishes. */
+        long[] mask;
+
+        /**
+         * The distinct states seen so far, open-addressed by identity.
+         *
+         * A vanilla chunk is a few dozen states; a modded one can be several
+         * hundred. It starts big enough for the first and grows for the
+         * second, and never shrinks — a build thread that has met a busy chunk
+         * once will meet another.
+         */
+        private Object[] seen = new Object[128];
+        private int seenCount;
+
+        /** Counted per thread and handed over once, at the end of the chunk. */
+        long blocks;
+        long distinct;
+
+        void reset() {
+            if (seenCount != 0) {
+                java.util.Arrays.fill(seen, null);
+                seenCount = 0;
+            }
+            blocks = 0L;
+            distinct = 0L;
+        }
+
+        /** How many distinct things it holds, for the test that proves it holds them. */
+        int size() {
+            return seenCount;
+        }
+
+        /** @return true when this state has not been seen in this chunk before */
+        boolean remember(Object state) {
+            Object[] table = seen;
+            int wrap = table.length - 1;
+            int at = spread(System.identityHashCode(state)) & wrap;
+            while (true) {
+                Object there = table[at];
+                if (there == null) {
+                    table[at] = state;
+                    seenCount++;
+                    // Kept at most half full: past that, open addressing spends
+                    // its time walking runs of occupied slots.
+                    if (seenCount * 2 > table.length) {
+                        grow();
+                    }
+                    return true;
+                }
+                if (there == state) {
+                    return false;
+                }
+                at = (at + 1) & wrap;
+            }
+        }
+
+        private void grow() {
+            Object[] older = seen;
+            Object[] bigger = new Object[older.length * 2];
+            int wrap = bigger.length - 1;
+            for (Object state : older) {
+                if (state == null) {
+                    continue;
+                }
+                int at = spread(System.identityHashCode(state)) & wrap;
+                while (bigger[at] != null) {
+                    at = (at + 1) & wrap;
+                }
+                bigger[at] = state;
+            }
+            seen = bigger;
+        }
+
+        /**
+         * Identity hashes are addresses on some machines, and addresses of
+         * objects allocated together share their low bits — exactly the bits
+         * the table indexes with. Folding the high half down first is what
+         * keeps two states born in the same batch out of the same run.
+         */
+        private static int spread(int hash) {
+            return hash ^ (hash >>> 16);
+        }
     }
 
     /** A chunk that remembers which animated sprites its blocks use. */
