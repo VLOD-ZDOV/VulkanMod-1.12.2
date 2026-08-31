@@ -1014,6 +1014,7 @@ public final class VulkanContextImpl implements VulkanBridge {
                 .append(" (0 = auto), frames in flight setting ")
                 .append(System.getProperty("vulkanmod112.framesInFlight", "2")).append('\n');
         appendMemoryBudget(sb);
+        appendCapabilities(sb);
         sb.append("  interop: ").append(interopCapable ? "external memory/semaphores enabled" : "UNAVAILABLE")
                 .append(", handles: ").append(Interop.WINDOWS ? "win32" : "fd")
                 .append(", ").append(Interop.handleSummary()).append('\n');
@@ -1024,6 +1025,51 @@ public final class VulkanContextImpl implements VulkanBridge {
             sb.append("  terrain: renderer not created\n");
         }
         return sb.toString();
+    }
+
+    /**
+     * What was asked of this driver, what it gave, and what was done instead.
+     *
+     * Every one of these is already decided somewhere in this class, and every
+     * one of them has at some point been the answer to a report from a machine
+     * that is not this one — half of the people running this mod are on the
+     * fallback depth format, and finding that out took a session. A report that
+     * says which side of each of these a machine is on turns "the world is
+     * black on AMD" from an investigation into a line.
+     *
+     * Asked rather than assumed, and asked before anything is created: a
+     * refusal caught at creation is a session already half set up.
+     */
+    private void appendCapabilities(StringBuilder sb) {
+        sb.append("  asked of the driver:\n");
+        cap(sb, "Vulkan 1.2", pickApiVersion() >= org.lwjgl.vulkan.VK12.VK_API_VERSION_1_2,
+                "1.1 or 1.0 — no ray query, no buffer device address");
+        cap(sb, "external memory and semaphores", interopCapable,
+                "nothing: without these the Vulkan world cannot reach the game's frame at all");
+        cap(sb, "memory budget", memoryBudgetSupported,
+                "no per-heap usage; the eviction question cannot be answered from here");
+        // Not a cap() row, and that is the point. These two are the only ones
+        // here that can be missing because nobody asked for them, and a table
+        // that printed "NO" against a driver which was never given the chance
+        // would be blaming it for our own setting. The renderer already keeps
+        // the reason in words; this prints those words.
+        sb.append("    ").append(rayTracingEnabled ? "got  " : "none ")
+                .append("acceleration structures and ray query");
+        if (!rayTracingEnabled) {
+            sb.append(" — ").append(rayTracingStatus == null ? "not resolved" : rayTracingStatus);
+        }
+        sb.append('\n');
+        cap(sb, "multi-draw indirect", multiDrawIndirect,
+                "one call per chunk instead of one per layer");
+    }
+
+    /** One line of the table above: what it is, whether it was granted, and what happens if not. */
+    private static void cap(StringBuilder sb, String what, boolean granted, String otherwise) {
+        sb.append("    ").append(granted ? "got  " : "NO   ").append(what);
+        if (!granted) {
+            sb.append(" — ").append(otherwise);
+        }
+        sb.append('\n');
     }
 
     /**
