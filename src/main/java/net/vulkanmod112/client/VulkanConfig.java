@@ -485,6 +485,18 @@ public final class VulkanConfig {
     static final int DEF_LEAF_SHADOWS = 0;
     /** How brightly a leaf passes the sun through to the eye behind it. */
     static final int DEF_LEAF_GLOW = 0;
+    /** The display gamma, where fifty is the frame untouched. */
+    static final int DEF_SCENE_GAMMA = 50;
+    /**
+     * Which kind of colour vision to correct for; 0 is off.
+     *
+     * Not reset by any preset, and that is the one deliberate hole in the rule
+     * that every preset states every setting. The presets describe a look, and
+     * this is not one: it is a property of the person reading the screen, and a
+     * preset that helpfully switched it off would take somebody's ability to
+     * tell a redstone torch from an unlit one and call it a change of mood.
+     */
+    static final int DEF_COLOUR_VISION = 0;
     /** How dark a short shadow towards the sun, over the finished picture. */
     static final int DEF_CONTACT_SHADOWS = 0;
     /** How much a creature's own faces shade themselves against the sun. */
@@ -727,6 +739,8 @@ public final class VulkanConfig {
     private static volatile boolean sceneOcclusion = DEF_SCENE_OCCLUSION;
     private static volatile int leafShadows = DEF_LEAF_SHADOWS;
     private static volatile int leafGlow = DEF_LEAF_GLOW;
+    private static volatile int sceneGamma = DEF_SCENE_GAMMA;
+    private static volatile int colourVision = DEF_COLOUR_VISION;
     private static volatile int contactShadows = DEF_CONTACT_SHADOWS;
     private static volatile int creatureLight = DEF_CREATURE_LIGHT;
     private static boolean showCreatureLight = DEF_SHOW_CREATURE_LIGHT;
@@ -1211,6 +1225,22 @@ public final class VulkanConfig {
                         + "is behind this leaf from where you are standing, and brightens it in "
                         + "its own colour when it is. Costs a dot product on leaves and plants "
                         + "and nothing anywhere else; no rays, so it works with tracing off.");
+        sceneGamma = config.getInt("sceneGamma", CATEGORY_GENERAL, DEF_SCENE_GAMMA, 0, 100,
+                "How the finished frame is bent before it reaches the screen. Fifty is the frame "
+                        + "untouched, to the bit — above it lifts the picture and below it deepens "
+                        + "it. The range is deliberately narrow: past its ends a picture stops "
+                        + "being graded and starts being broken, and a control that can break the "
+                        + "picture is one somebody will reach for to fix something else. Applies "
+                        + "at once and costs nothing measurable.");
+        colourVision = config.getInt("colourVision", CATEGORY_GENERAL, DEF_COLOUR_VISION, 0, 3,
+                "Move the colours one kind of eye cannot separate into the channels it still can. "
+                        + "0 off, 1 protanopia (red), 2 deuteranopia (green), 3 tritanopia (blue). "
+                        + "This is not a filter over the picture and not a simulation of what "
+                        + "somebody sees: the missing cone's response is rebuilt from the other "
+                        + "two, and the difference — which is the information being lost — is "
+                        + "pushed into the channels that survive. Redstone against stone and a lit "
+                        + "torch against an unlit one are what it is for. No preset touches this "
+                        + "one: it describes the person, not the look.");
         hdrFrame = config.getBoolean("hdrFrame", CATEGORY_GENERAL, DEF_HDR_FRAME,
                 "Ask the game for a frame with room above white in it. Minecraft draws the world into eight bits a channel, so anything brighter than white is cut off before any effect here ever sees it - which is why the glow has no light to add, a highlight on water arrives already flattened into a white patch, and the tone curve can only tilt colours "
                         + "rather than shape the light. With this on the frame holds sixteen bits a channel and the tone pass closes the range back down along a film curve at the end. Applies at once, costs video memory, and is asked of the driver first - if it will not have it, the log says so and nothing changes. Goes back to eight bits by itself if the Vulkan renderer stops drawing, because the pass that closes the range back down lives there.");
@@ -1663,6 +1693,9 @@ public final class VulkanConfig {
         setCelestialGlint(DEF_CELESTIAL_GLINT);
         setIceShine(DEF_ICE_SHINE);
         setLeafGlow(DEF_LEAF_GLOW);
+        // Gamma is a look and goes back with the rest of them. Colour vision is
+        // not, and is left exactly where the player put it — see DEF_COLOUR_VISION.
+        setSceneGamma(DEF_SCENE_GAMMA);
         setWaterCaustics(DEF_WATER_CAUSTICS);
         setWetSurfaces(DEF_WET_SURFACES);
         setSunHaze(DEF_SUN_HAZE);
@@ -1980,6 +2013,26 @@ public final class VulkanConfig {
     public static void setCelestialGlint(int value) {
         celestialGlint = clamp(value, 0, 100);
         store(CATEGORY_GENERAL, "celestialGlint", celestialGlint);
+        applySystemProperties();
+    }
+
+    public static int getSceneGamma() {
+        return sceneGamma;
+    }
+
+    public static void setSceneGamma(int value) {
+        sceneGamma = clamp(value, 0, 100);
+        store(CATEGORY_GENERAL, "sceneGamma", sceneGamma);
+        applySystemProperties();
+    }
+
+    public static int getColourVision() {
+        return colourVision;
+    }
+
+    public static void setColourVision(int value) {
+        colourVision = clamp(value, 0, 3);
+        store(CATEGORY_GENERAL, "colourVision", colourVision);
         applySystemProperties();
     }
 
@@ -2855,6 +2908,8 @@ public final class VulkanConfig {
         publish("vulkanmod112.sceneOcclusion", Boolean.toString(sceneOcclusion));
         publish("vulkanmod112.leafShadows", Integer.toString(leafShadows));
         publish("vulkanmod112.leafGlow", Integer.toString(leafGlow));
+        publish("vulkanmod112.sceneGamma", Integer.toString(sceneGamma));
+        publish("vulkanmod112.colourVision", Integer.toString(colourVision));
         publish("vulkanmod112.contactShadows", Integer.toString(contactShadows));
         publish("vulkanmod112.creatureLight", Integer.toString(creatureLight));
         publish("vulkanmod112.showCreatureLight", Boolean.toString(showCreatureLight));

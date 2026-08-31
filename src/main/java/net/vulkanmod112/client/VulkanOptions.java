@@ -2534,6 +2534,59 @@ final class VulkanOptions {
                                         VulkanConfig.setHdrFrame(value);
                                     }
                                 }),
+                        new VRangeOption("Gamma",
+                                "How the finished frame is bent on its way to the screen. Fifty is "
+                                        + "the frame untouched, to the bit; above it lifts the "
+                                        + "picture and below it deepens it.\n\nThe range is "
+                                        + "deliberately narrow. Past its ends a picture stops "
+                                        + "being graded and starts being broken, and a control "
+                                        + "that can break the picture is one somebody will reach "
+                                        + "for to fix something else — a dark cave is a dark cave, "
+                                        + "not a gamma problem.",
+                                Cost.of(Level.NONE, Level.NONE, Level.NONE), null,
+                                0, 100, 5, "%", null,
+                                new VRangeOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getSceneGamma();
+                                    }
+
+                                    @Override
+                                    public void set(int value) {
+                                        VulkanConfig.setSceneGamma(value);
+                                    }
+                                }),
+                        new VCyclingOption("Colour Vision",
+                                "Move the colours one kind of eye cannot separate into the "
+                                        + "channels it still can. Redstone against stone, a lit "
+                                        + "torch against an unlit one, and a wither rose in grass "
+                                        + "are what this is for.\n\nNot a filter over the "
+                                        + "picture and not a simulation of what somebody else "
+                                        + "sees. The colour is taken into the space the three cone "
+                                        + "types respond in, the missing cone's response is "
+                                        + "rebuilt from the other two — which is what that eye "
+                                        + "does — and the difference between that and the original "
+                                        + "is the information being lost. That difference is then "
+                                        + "pushed into the channels that do survive, so two things "
+                                        + "that arrived identical leave separated.\n\nNo preset "
+                                        + "touches this row, including the reset. It describes the "
+                                        + "person rather than the look, and a preset that "
+                                        + "helpfully switched it off would be taking something "
+                                        + "away and calling it a change of mood.",
+                                Cost.of(Level.NONE, Level.NONE, Level.NONE), null,
+                                VCyclingOption.Choices.of("Off", "Protanopia", "Deuteranopia",
+                                        "Tritanopia"),
+                                new VCyclingOption.Access() {
+                                    @Override
+                                    public int get() {
+                                        return VulkanConfig.getColourVision();
+                                    }
+
+                                    @Override
+                                    public void set(int index) {
+                                        VulkanConfig.setColourVision(index);
+                                    }
+                                }),
                         new VRangeOption("Exposure",
                                 "How much light is let in before the film curve closes the range "
                                         + "back down. The middle of the slider is no change, and "

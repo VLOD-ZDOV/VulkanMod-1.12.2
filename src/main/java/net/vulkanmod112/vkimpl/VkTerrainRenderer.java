@@ -6335,7 +6335,7 @@ final class VkTerrainRenderer {
         // anything is being graded or not: this is the last place that
         // sees it before the hand and the interface are drawn over it, and
         // the screen shows eight bits whatever the buffer holds.
-        if (toneFailed || (toneStrength <= 0.0f && !hdrFrameActive()) || sceneTexture == 0
+        if (toneFailed || (!toneHasWork() && !hdrFrameActive()) || sceneTexture == 0
                 || width <= 0 || height <= 0) {
             return;
         }
@@ -6446,6 +6446,8 @@ final class VkTerrainRenderer {
         GL20C.glUniform1f(toneWarmthUniform, toneWarmth);
         GL20C.glUniform1f(toneHdrUniform, hdrFrameActive() ? 1.0f : 0.0f);
         GL20C.glUniform1f(toneExposureUniform, exposureStops());
+        GL20C.glUniform1f(toneGammaUniform, gammaExponent());
+        GL20C.glUniform1f(toneCvdUniform, colourVision);
         GL13C.glActiveTexture(GL13C.GL_TEXTURE0);
         GL11C.glBindTexture(GL11C.GL_TEXTURE_2D, toneTexture);
         fullscreenQuad();
@@ -6524,6 +6526,34 @@ final class VkTerrainRenderer {
     private int toneWarmthUniform;
     private int toneHdrUniform = -1;
     private int toneExposureUniform = -1;
+    private int toneGammaUniform = -1;
+    private int toneCvdUniform = -1;
+
+    /** 0 off, 1 protanopia, 2 deuteranopia, 3 tritanopia. */
+    private float colourVision;
+
+    /** The slider, where fifty is the frame untouched. */
+    private float sceneGamma = 50.0f;
+
+    /**
+     * The slider as the power the frame is raised to.
+     *
+     * Above the middle lifts the picture and below it deepens it, which is the
+     * way round people expect a brightness control to work — and the reason the
+     * exponent falls as the number rises. The range is deliberately narrow:
+     * past these ends the picture stops being graded and starts being broken,
+     * and a control that can break the picture is one somebody will use to try
+     * to fix something else.
+     */
+    private float gammaExponent() {
+        return 1.0f + (50.0f - sceneGamma) / 50.0f * 0.45f;
+    }
+
+    /** Whether anything in the grading pass has something to do. */
+    private boolean toneHasWork() {
+        return toneStrength > 0.0f || colourVision > 0.5f
+                || sceneGamma < 49.5f || sceneGamma > 50.5f;
+    }
     private int toneWidth;
     private int toneHeight;
     private boolean toneFailed;
@@ -6563,6 +6593,8 @@ final class VkTerrainRenderer {
                 toneWarmthUniform = GL20C.glGetUniformLocation(toneProgram, "uWarmth");
                 toneHdrUniform = GL20C.glGetUniformLocation(toneProgram, "uHdr");
                 toneExposureUniform = GL20C.glGetUniformLocation(toneProgram, "uExposure");
+                toneGammaUniform = GL20C.glGetUniformLocation(toneProgram, "uGamma");
+                toneCvdUniform = GL20C.glGetUniformLocation(toneProgram, "uCvd");
             }
             toneWidth = width;
             toneHeight = height;
@@ -6603,6 +6635,13 @@ final class VkTerrainRenderer {
                         // eight bits, which is the default.
                         + "uniform float uHdr;\n"
                         + "uniform float uExposure;\n"
+                        // The display transform, and the accessibility pass.
+                        // Both belong at the very end and in this order: gamma
+                        // is what the screen does to the numbers, and the
+                        // colour correction has to work on what the eye is
+                        // actually going to receive.
+                        + "uniform float uGamma;\n"
+                        + "uniform float uCvd;\n"
                         // The film curve proper — the one thing an eight bit
                         // frame cannot have. It closes an open-ended range down
                         // into nought to one along a shoulder, so a highlight
@@ -6613,6 +6652,53 @@ final class VkTerrainRenderer {
                         + "vec3 filmic(vec3 x) {\n"
                         + "    return clamp((x * (2.51 * x + 0.03))\n"
                         + "               / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);\n"
+                        + "}\n"
+                        // Moving what one kind of eye cannot separate into the
+                        // channels it still can.
+                        //
+                        // This is not a filter laid over the picture and it is
+                        // not a simulation of what somebody sees: it is the
+                        // standard daltonisation, and the difference matters.
+                        // The colour is taken into the space the three cone
+                        // types respond in, the missing cone's response is
+                        // rebuilt from the other two — which is exactly what
+                        // that eye does — and the difference between that and
+                        // the original is the information being lost. That
+                        // difference is then pushed into the channels that do
+                        // survive, so red and green that arrived identical
+                        // leave separated by brightness and by blue.
+                        //
+                        // Done on the frame as it will be shown rather than in
+                        // linear light. That is the usual practice and it is a
+                        // compromise: strictly the cone response is linear, but
+                        // the pass has no headroom left by this point and the
+                        // error is small next to the thing being corrected.
+                        + "vec3 daltonise(vec3 c, float kind) {\n"
+                        + "    vec3 lms = vec3(\n"
+                        + "        dot(c, vec3(17.8824, 43.5161, 4.11935)),\n"
+                        + "        dot(c, vec3(3.45565, 27.1554, 3.86714)),\n"
+                        + "        dot(c, vec3(0.0299566, 0.184309, 1.46709)));\n"
+                        + "    vec3 seen = lms;\n"
+                        + "    if (kind < 1.5) {\n"
+                        + "        seen.x = 2.02344 * lms.y - 2.52581 * lms.z;\n"
+                        + "    } else if (kind < 2.5) {\n"
+                        + "        seen.y = 0.494207 * lms.x + 1.24827 * lms.z;\n"
+                        + "    } else {\n"
+                        + "        seen.z = -0.395913 * lms.x + 0.801109 * lms.y;\n"
+                        + "    }\n"
+                        + "    vec3 back = vec3(\n"
+                        + "        dot(seen, vec3(0.0809444479, -0.130504409, 0.116721066)),\n"
+                        + "        dot(seen, vec3(-0.0102485335, 0.0540193266, -0.113614708)),\n"
+                        + "        dot(seen, vec3(-0.000365296938, -0.00412161469, 0.693511405)));\n"
+                        + "    vec3 lost = c - back;\n"
+                        // What is lost in red goes into green and blue, where
+                        // it can still be told apart. Nothing is put back into
+                        // red itself: that is the channel that could not carry
+                        // it in the first place.
+                        + "    vec3 shifted = vec3(0.0,\n"
+                        + "                        0.7 * lost.r + lost.g,\n"
+                        + "                        0.7 * lost.r + lost.b);\n"
+                        + "    return clamp(c + shifted, 0.0, 1.0);\n"
                         + "}\n"
                         + "void main() {\n"
                         + "    vec3 c = texture2D(uSource, gl_FragCoord.xy * uInvSize).rgb;\n"
@@ -6641,7 +6727,17 @@ final class VkTerrainRenderer {
                         + "                  s.b * (1.0 - 0.10 * uWarmth));\n"
                         // Mixed rather than replaced, so the slider is a real
                         // amount and zero is the untouched frame to the bit.
-                        + "    gl_FragColor = vec4(clamp(mix(c, w, uStrength), 0.0, 1.0), 1.0);\n"
+                        + "    vec3 out3 = clamp(mix(c, w, uStrength), 0.0, 1.0);\n"
+                        + "    if (uCvd > 0.5) {\n"
+                        + "        out3 = daltonise(out3, uCvd);\n"
+                        + "    }\n"
+                        // Last of all, and skipped outright at the middle of
+                        // the slider so the untouched frame stays untouched to
+                        // the bit rather than going through a power of one.
+                        + "    if (uGamma < 0.999 || uGamma > 1.001) {\n"
+                        + "        out3 = pow(out3, vec3(uGamma));\n"
+                        + "    }\n"
+                        + "    gl_FragColor = vec4(out3, 1.0);\n"
                         + "}\n");
     }
 
@@ -8022,6 +8118,8 @@ final class VkTerrainRenderer {
         hdrFrame = Boolean.parseBoolean(
                 System.getProperty("vulkanmod112.hdrFrameActive", "false"));
         exposure = clampPercent(intProperty("vulkanmod112.exposure", 50));
+        sceneGamma = intProperty("vulkanmod112.sceneGamma", 50);
+        colourVision = Math.max(0, Math.min(3, intProperty("vulkanmod112.colourVision", 0)));
         skyGradient = clampPercent(intProperty("vulkanmod112.skyGradient", 0));
         sceneOcclusion = Boolean.parseBoolean(
                 System.getProperty("vulkanmod112.sceneOcclusion", "false"));

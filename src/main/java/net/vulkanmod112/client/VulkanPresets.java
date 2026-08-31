@@ -131,6 +131,15 @@ public final class VulkanPresets {
         int godRays;
         boolean hdrFrame;
         int exposure = 50;
+        /**
+         * The display gamma, fifty being untouched.
+         *
+         * Stated by every preset for the reason the fog distance is: it can
+         * ruin the picture on its own, and a preset is what somebody reaches
+         * for when the picture is wrong. Colour vision correction is not here
+         * and deliberately so — that one describes the person, not the look.
+         */
+        int sceneGamma = 50;
         int waterRefraction;
         boolean roundSun;
         boolean roundMoon;
@@ -596,6 +605,7 @@ public final class VulkanPresets {
         VulkanConfig.setSceneOcclusion(look.sceneOcclusion);
         VulkanConfig.setLeafShadows(look.leafShadows);
         VulkanConfig.setLeafGlow(look.leafGlow);
+        VulkanConfig.setSceneGamma(look.sceneGamma);
         VulkanConfig.setContactShadows(look.contactShadows);
         VulkanConfig.setCreatureLight(look.creatureLight);
         VulkanConfig.setCloudShadows(look.cloudShadows);

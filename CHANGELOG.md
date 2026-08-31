@@ -2,6 +2,30 @@
 
 ## [Unreleased]
 
+- **Colour vision correction** — Effects → Colour Vision, off by default, with
+  a setting each for protanopia, deuteranopia and tritanopia. Not a filter laid
+  over the picture and not a simulation of what somebody else sees: the colour
+  is taken into the space the three cone types respond in, the missing cone's
+  response is rebuilt from the other two — which is what that eye does — and the
+  difference between that and the original, which is the information being
+  lost, is pushed into the channels that survive. Measured on the red pixels of
+  a frame with the green correction on: red unchanged, green up six, blue up
+  fifteen, which is the whole of what it claims to do. Redstone against stone
+  and a lit torch against an unlit one are what it is for, and it is aimed at
+  people who cannot simply install a resource pack. **No preset touches this
+  row, including the reset** — it describes the person rather than the look, and
+  a preset that helpfully switched it off would be taking something away and
+  calling it a change of mood.
+
+- **Gamma** — Effects → Gamma, fifty being the frame untouched to the bit,
+  above it lifting the picture and below it deepening it. The range is
+  deliberately narrow: past its ends a picture stops being graded and starts
+  being broken, and a control that can break the picture is one somebody will
+  reach for to fix something else. It rides in the pass that was already
+  grading the frame, so it costs nothing measurable, and that pass now runs for
+  it alone — before this it only woke up for the tone slider or a floating
+  frame.
+
 - **Three more looks beside Beautiful** — Golden Hour, Cold Front and Soft
   Film. They are the same effects at different settings, which is what a shader
   pack is: none of them adds a pass, and none costs more than the preset it
